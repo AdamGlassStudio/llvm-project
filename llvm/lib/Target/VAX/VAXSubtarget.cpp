@@ -20,7 +20,7 @@ using namespace llvm;
 
 VAXSubtarget::VAXSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
                            const VAXTargetMachine &TM)
-    : VAXGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS), InstrInfo(),
+    : VAXGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS), InstrInfo(*this),
       FrameLowering(), TLInfo(TM, *this) {
   ParseSubtargetFeatures(CPU, /*TuneCPU=*/CPU, FS);
 }

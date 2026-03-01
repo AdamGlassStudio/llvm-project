@@ -9,4 +9,13 @@
 include "VAXInstrFormats.td"
 
 // Instruction definitions are added incrementally by phase.
-// Phase 1: empty — only the InstrInfo def is required for TableGen to compile.
+
+// Pseudo-instruction base class.
+class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
+    : InstVAX<0, outs, ins, asmstr, pattern> {
+  let isPseudo = 1;
+}
+
+// Placeholder to satisfy TableGen's requirement that at least one instruction
+// exist. Replaced by real RET (HALT/RET) in Phase 3.
+def NOP : InstVAX<0x01, (outs), (ins), "nop", []>;

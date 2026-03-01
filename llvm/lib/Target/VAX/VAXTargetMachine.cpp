@@ -38,7 +38,7 @@ static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
 }
 
 static CodeModel::Model
-getEffectiveCodeModel(std::optional<CodeModel::Model> CM) {
+getVAXEffectiveCodeModel(std::optional<CodeModel::Model> CM) {
   if (CM && *CM != CodeModel::Small && *CM != CodeModel::Large)
     report_fatal_error("VAX only supports Small and Large code models");
   return CM.value_or(CodeModel::Small);
@@ -52,7 +52,7 @@ VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
                                    CodeGenOptLevel OL, bool JIT)
     : CodeGenTargetMachineImpl(T, VAXDataLayout, TT, CPU, FS, Options,
                                getEffectiveRelocModel(RM),
-                               getEffectiveCodeModel(CM), OL),
+                               getVAXEffectiveCodeModel(CM), OL),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
       Subtarget(TT, std::string(CPU), std::string(FS), *this) {
   initAsmInfo();
