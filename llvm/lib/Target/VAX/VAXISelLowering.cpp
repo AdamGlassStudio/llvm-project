@@ -31,8 +31,8 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
   // Register classes by value type.
-  // i8 and i16 are deferred until Phase 7 (extend/truncate instructions).
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
+  addRegisterClass(MVT::f32, &VAX::GPRIRegClass);
 
   // Finalize register class / type legalization info.
   computeRegisterProperties(STI.getRegisterInfo());
@@ -67,6 +67,9 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // SELECT expands to SELECT_CC.
   setOperationAction(ISD::SELECT,    MVT::i32, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+
+  // Extend SELECT_CC_Pseudo to also handle f32 results.
+  setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
 
   // VAX DIVL is signed only; unsigned div/rem expand to libcalls.
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
@@ -108,6 +111,26 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
+
+  // F_float (f32) support: VAX has native F_float arithmetic.
+  setOperationAction(ISD::BR_CC,      MVT::f32, Custom);
+  setOperationAction(ISD::SELECT,     MVT::f32, Expand);
+  // FP conversions.
+  setOperationAction(ISD::FP_TO_SINT, MVT::i32, Legal);  // CVTFL
+  setOperationAction(ISD::SINT_TO_FP, MVT::i32, Legal);  // CVTLF
+  setOperationAction(ISD::FP_TO_UINT, MVT::i32, Expand);
+  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  // FP operations VAX doesn't have natively.
+  setOperationAction(ISD::FNEG,       MVT::f32, Legal);   // MNEGF
+  setOperationAction(ISD::FABS,       MVT::f32, Expand);
+  setOperationAction(ISD::FSQRT,      MVT::f32, Expand);
+  setOperationAction(ISD::FREM,       MVT::f32, Expand);
+  setOperationAction(ISD::FCOPYSIGN,  MVT::f32, Expand);
+  setOperationAction(ISD::FSIN,       MVT::f32, Expand);
+  setOperationAction(ISD::FCOS,       MVT::f32, Expand);
+  setOperationAction(ISD::FPOW,       MVT::f32, Expand);
+  setOperationAction(ISD::FMINNUM,    MVT::f32, Expand);
+  setOperationAction(ISD::FMAXNUM,    MVT::f32, Expand);
 }
 
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
@@ -121,6 +144,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::ASHL:         return "VAXISD::ASHL";
   case VAXISD::SELECT_CC:    return "VAXISD::SELECT_CC";
   case VAXISD::PUSHL:        return "VAXISD::PUSHL";
+  case VAXISD::FCMP:         return "VAXISD::FCMP";
   default:                   return nullptr;
   }
 }
@@ -156,19 +180,22 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   unsigned VAXCC;
   switch (CC) {
   default: llvm_unreachable("unsupported condition code for VAX BR_CC");
-  case ISD::SETEQ:  VAXCC = 0; break; // BEQL
-  case ISD::SETNE:  VAXCC = 1; break; // BNEQ
-  case ISD::SETGT:  VAXCC = 2; break; // BGTR  (signed)
-  case ISD::SETGE:  VAXCC = 3; break; // BGEQ  (signed)
-  case ISD::SETLT:  VAXCC = 4; break; // BLSS  (signed)
-  case ISD::SETLE:  VAXCC = 5; break; // BLEQ  (signed)
+  case ISD::SETEQ:  case ISD::SETOEQ: VAXCC = 0; break; // BEQL
+  case ISD::SETNE:  case ISD::SETONE: VAXCC = 1; break; // BNEQ
+  case ISD::SETGT:  case ISD::SETOGT: VAXCC = 2; break; // BGTR  (signed)
+  case ISD::SETGE:  case ISD::SETOGE: VAXCC = 3; break; // BGEQ  (signed)
+  case ISD::SETLT:  case ISD::SETOLT: VAXCC = 4; break; // BLSS  (signed)
+  case ISD::SETLE:  case ISD::SETOLE: VAXCC = 5; break; // BLEQ  (signed)
   case ISD::SETUGT: VAXCC = 6; break; // BGTRU (unsigned)
   case ISD::SETUGE: VAXCC = 7; break; // BGEQU (unsigned)
   case ISD::SETULT: VAXCC = 8; break; // BLSSU (unsigned)
   case ISD::SETULE: VAXCC = 9; break; // BLEQU (unsigned)
   }
 
-  SDValue Cmp = DAG.getNode(VAXISD::CMP, DL, MVT::Glue, LHS, RHS);
+  // Use FCMP for floating-point, CMP for integer.
+  bool IsFP = LHS.getValueType().isFloatingPoint();
+  unsigned CmpOpc = IsFP ? VAXISD::FCMP : VAXISD::CMP;
+  SDValue Cmp = DAG.getNode(CmpOpc, DL, MVT::Glue, LHS, RHS);
   return DAG.getNode(VAXISD::BRCC, DL, MVT::Other,
                      Chain, Dest,
                      DAG.getConstant(VAXCC, DL, MVT::i32),
@@ -178,12 +205,12 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 static unsigned mapISDCCToVAXCC(ISD::CondCode CC) {
   switch (CC) {
   default: llvm_unreachable("unsupported condition code for VAX SELECT_CC");
-  case ISD::SETEQ:  return 0;
-  case ISD::SETNE:  return 1;
-  case ISD::SETGT:  return 2;
-  case ISD::SETGE:  return 3;
-  case ISD::SETLT:  return 4;
-  case ISD::SETLE:  return 5;
+  case ISD::SETEQ:  case ISD::SETOEQ: return 0;
+  case ISD::SETNE:  case ISD::SETONE: return 1;
+  case ISD::SETGT:  case ISD::SETOGT: return 2;
+  case ISD::SETGE:  case ISD::SETOGE: return 3;
+  case ISD::SETLT:  case ISD::SETOLT: return 4;
+  case ISD::SETLE:  case ISD::SETOLE: return 5;
   case ISD::SETUGT: return 6;
   case ISD::SETUGE: return 7;
   case ISD::SETULT: return 8;
@@ -201,7 +228,9 @@ SDValue VAXTargetLowering::LowerSELECT_CC(SDValue Op,
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
 
   unsigned VAXCC = mapISDCCToVAXCC(CC);
-  SDValue Cmp = DAG.getNode(VAXISD::CMP, DL, MVT::Glue, LHS, RHS);
+  bool IsFP = LHS.getValueType().isFloatingPoint();
+  unsigned CmpOpc = IsFP ? VAXISD::FCMP : VAXISD::CMP;
+  SDValue Cmp = DAG.getNode(CmpOpc, DL, MVT::Glue, LHS, RHS);
   return DAG.getNode(VAXISD::SELECT_CC, DL, Op.getValueType(),
                      TrueV, FalseV,
                      DAG.getConstant(VAXCC, DL, MVT::i32),
@@ -451,7 +480,8 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
-  assert(MI.getOpcode() == VAX::SELECT_CC_Pseudo &&
+  assert((MI.getOpcode() == VAX::SELECT_CC_Pseudo ||
+          MI.getOpcode() == VAX::SELECT_CC_F_Pseudo) &&
          "Unexpected custom inserter opcode");
 
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
