@@ -17,11 +17,13 @@
 
 namespace llvm {
 
+class VAXSubtarget;
+
 class VAXInstrInfo : public VAXGenInstrInfo {
   const VAXRegisterInfo RI;
 
 public:
-  VAXInstrInfo();
+  explicit VAXInstrInfo(const VAXSubtarget &STI);
 
   const VAXRegisterInfo &getRegisterInfo() const { return RI; }
 };

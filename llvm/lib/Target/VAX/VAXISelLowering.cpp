@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXISelLowering.h"
+#include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -26,7 +27,7 @@ using namespace llvm;
 
 VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
-    : TargetLowering(TM) {
+    : TargetLowering(TM, STI) {
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
   computeRegisterProperties(STI.getRegisterInfo());
   setStackPointerRegisterToSaveRestore(VAX::SP);
