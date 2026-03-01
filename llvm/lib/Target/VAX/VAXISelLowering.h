@@ -22,6 +22,8 @@ enum NodeType : unsigned {
   RET_FLAG,
   // Wrap a TargetGlobalAddress for PC-relative data access
   PCRelWrapper,
+  // Bit clear: BICL(mask, src) = src & ~mask  (lowered from ISD::AND)
+  BICL,
 };
 } // namespace VAXISD
 
@@ -50,6 +52,7 @@ public:
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // namespace llvm
