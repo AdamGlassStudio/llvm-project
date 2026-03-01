@@ -14,13 +14,13 @@ class VAXReg<bits<4> Enc, string n> : Register<n> {
 // General-purpose registers R0-R11
 // Calling convention: R0-R1 return values; R0-R5 caller-saved; R6-R11 callee-saved
 foreach i = 0-11 in
-  def R#i : VAXReg<!cast<bits<4>>(i), "r"#i>, DwarfRegNum<[i]>;
+  def R#i : VAXReg<!cast<bits<4>>(i), "%r"#i>, DwarfRegNum<[i]>;
 
-// Special-purpose registers
-def AP  : VAXReg<12, "ap">,  DwarfRegNum<[12]>; // Argument Pointer  (R12)
-def FP  : VAXReg<13, "fp">,  DwarfRegNum<[13]>; // Frame Pointer     (R13)
-def SP  : VAXReg<14, "sp">,  DwarfRegNum<[14]>; // Stack Pointer     (R14)
-def PC  : VAXReg<15, "pc">,  DwarfRegNum<[15]>; // Program Counter   (R15)
+// Special-purpose registers (ELF GAS requires % prefix)
+def AP  : VAXReg<12, "%ap">,  DwarfRegNum<[12]>; // Argument Pointer  (R12)
+def FP  : VAXReg<13, "%fp">,  DwarfRegNum<[13]>; // Frame Pointer     (R13)
+def SP  : VAXReg<14, "%sp">,  DwarfRegNum<[14]>; // Stack Pointer     (R14)
+def PC  : VAXReg<15, "%pc">,  DwarfRegNum<[15]>; // Program Counter   (R15)
 
 // Processor Status Longword — not directly addressable as a GP register
 // but needed for condition-code modeling
