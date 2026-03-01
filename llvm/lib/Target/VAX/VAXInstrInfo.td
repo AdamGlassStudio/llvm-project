@@ -94,6 +94,11 @@ def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
     [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
 
+// reg <- constant pool entry (PC-relative load)
+def MOVL_rcp : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "movl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tconstpool:$sym)))]>;
+
 // global <- reg  (PC-relative store to global/extern data)
 def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movl\t$src, $sym",
@@ -104,6 +109,16 @@ def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
 def MOVAL_jt : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$jt),
     "moval\t$jt, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tjumptable:$jt))]>;
+
+// Address-of-global: moval global_sym, $dst
+def MOVAL_ga : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "moval\t$sym, $dst",
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+
+// Address-of-constant-pool entry: moval .LCPI_n, $dst
+def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "moval\t$sym, $dst",
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
 
 //===----------------------------------------------------------------------===//
 // Phase 5 — Integer Arithmetic (longword i32)
@@ -543,6 +558,10 @@ def VAXFMemOp : Operand<iPTR> {
 def MOVF_rm : InstVAX<0xD0, (outs GPRI:$dst), (ins VAXFMemOp:$src),
     "movl\t$src, $dst",
     [(set GPRI:$dst, (f32 (load VAXMem:$src)))]>;
+// f32 load from constant pool
+def MOVF_rcp : InstVAX<0xD0, (outs GPRI:$dst), (ins i32imm:$sym),
+    "movl\t$sym, $dst",
+    [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
 def MOVF_mr : InstVAX<0xD0, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
     "movl\t$src, $dst",
     [(store (f32 GPRI:$src), VAXMem:$dst)]>;
@@ -613,6 +632,10 @@ def VAXDMemOp : Operand<iPTR> {
 def MOVD_rm : InstVAX<0x70, (outs QPR:$dst), (ins VAXDMemOp:$src),
     "movd\t$src, $dst",
     [(set QPR:$dst, (f64 (load VAXMem:$src)))]>;
+// f64 load from constant pool
+def MOVD_rcp : InstVAX<0x70, (outs QPR:$dst), (ins i32imm:$sym),
+    "movd\t$sym, $dst",
+    [(set QPR:$dst, (f64 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
 def MOVD_mr : InstVAX<0x70, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     "movd\t$src, $dst",
     [(store (f64 QPR:$src), VAXMem:$dst)]>;
