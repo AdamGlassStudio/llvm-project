@@ -24,7 +24,7 @@ void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 const DebugLoc &DL, Register DstReg,
                                 Register SrcReg, bool KillSrc,
                                 bool RenamableDst, bool RenamableSrc) const {
-  // All GPR registers are i32; MOVL covers all GPR→GPR copies.
+  // MOVL covers all 32-bit register copies (both i32 and f32 — same hardware).
   BuildMI(MBB, MI, DL, get(VAX::MOVL_rr), DstReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
 }

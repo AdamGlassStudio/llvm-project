@@ -37,6 +37,8 @@ enum NodeType : unsigned {
   SELECT_CC,
   // Push longword onto stack (SP autodecrement): (chain, val) → (chain, glue)
   PUSHL,
+  // FP compare (CMPF): sets PSW from FP operands.
+  FCMP,
 };
 } // namespace VAXISD
 
