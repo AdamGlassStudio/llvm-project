@@ -41,12 +41,26 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
 
 void VAXFrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  // TODO: implement in Phase 3 — emit RET
+  // RET restores SP from the call frame — no explicit epilogue needed.
 }
 
 bool VAXFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
-  // Always emit explicit SP adjustments so emitCallFramePseudoInstr fires.
   return false;
+}
+
+bool VAXFrameLowering::spillCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
+  // VAX CALLS reads the entry mask and saves registers in hardware.
+  // No explicit spill instructions needed — return true to suppress default.
+  return true;
+}
+
+bool VAXFrameLowering::restoreCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
+  // VAX RET restores registers from the call frame in hardware.
+  return true;
 }
 
 MachineBasicBlock::iterator VAXFrameLowering::eliminateCallFramePseudoInstr(

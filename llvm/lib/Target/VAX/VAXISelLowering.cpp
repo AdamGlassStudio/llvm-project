@@ -54,6 +54,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::SELECT,    MVT::i32, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 
+  // VAX DIVL is signed only; unsigned div/rem expand to libcalls.
+  setOperationAction(ISD::UDIV, MVT::i32, Expand);
+  setOperationAction(ISD::UREM, MVT::i32, Expand);
+  // Signed remainder also needs expansion (no REML instruction).
+  setOperationAction(ISD::SREM, MVT::i32, Expand);
+
   // Extending loads: all byte/word variants now legal via CVT/MOVZ instructions.
   // i8 zero-extend: MOVZBL (Phase 5); i8 sign-extend: CVTBL (Phase 7).
   // i16 zero-extend: MOVZWL (Phase 7); i16 sign-extend: CVTWL (Phase 7).

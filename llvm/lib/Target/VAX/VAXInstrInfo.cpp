@@ -28,3 +28,29 @@ void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   BuildMI(MBB, MI, DL, get(VAX::MOVL_rr), DstReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
+
+void VAXInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator MI,
+                                        Register SrcReg, bool isKill,
+                                        int FrameIndex,
+                                        const TargetRegisterClass *RC,
+                                        Register VReg,
+                                        MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
+  BuildMI(MBB, MI, DL, get(VAX::MOVL_mr))
+      .addReg(SrcReg, getKillRegState(isKill))
+      .addFrameIndex(FrameIndex)
+      .addImm(0);
+}
+
+void VAXInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
+                                         MachineBasicBlock::iterator MI,
+                                         Register DstReg, int FrameIndex,
+                                         const TargetRegisterClass *RC,
+                                         Register VReg, unsigned SubReg,
+                                         MachineInstr::MIFlag Flags) const {
+  DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
+  BuildMI(MBB, MI, DL, get(VAX::MOVL_rm), DstReg)
+      .addFrameIndex(FrameIndex)
+      .addImm(0);
+}

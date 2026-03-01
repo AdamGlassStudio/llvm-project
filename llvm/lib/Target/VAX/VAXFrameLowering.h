@@ -30,6 +30,17 @@ public:
   MachineBasicBlock::iterator
   eliminateCallFramePseudoInstr(MachineFunction &MF, MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I) const override;
+
+  // VAX CALLS/RET saves and restores callee-saved registers via the entry mask
+  // (hardware mechanism). No explicit spill/reload instructions needed.
+  bool spillCalleeSavedRegisters(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MI,
+                                 ArrayRef<CalleeSavedInfo> CSI,
+                                 const TargetRegisterInfo *TRI) const override;
+  bool restoreCalleeSavedRegisters(MachineBasicBlock &MBB,
+                                   MachineBasicBlock::iterator MI,
+                                   MutableArrayRef<CalleeSavedInfo> CSI,
+                                   const TargetRegisterInfo *TRI) const override;
 };
 
 } // namespace llvm
