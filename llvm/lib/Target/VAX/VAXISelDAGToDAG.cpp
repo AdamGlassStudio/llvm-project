@@ -45,6 +45,25 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  if (N->getOpcode() == ISD::FrameIndex) {
+    // Materialize a frame slot address as a register value (e.g., sret pointer).
+    // Emit: MOVL_rm Rdst, 0(FI) — but this would be a load, not LEA.
+    // Instead, use SUBL3_ir: subl3 FI, $0, Rdst → after eliminateFrameIndex
+    // becomes subl3 %fp, $-offset, Rdst = FP + offset.
+    // Simplest: emit ADDL3_ri $0, FI, Rdst with the FrameIndex in an
+    // operand position that eliminateFrameIndex can resolve.
+    //
+    // We use the LEA_FI pseudo: dst = FI + 0, which eliminateFrameIndex
+    // converts to ADDL3_ri $offset, %fp, $dst.
+    FrameIndexSDNode *FIN = cast<FrameIndexSDNode>(N);
+    SDValue FI = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
+    SDValue Zero = CurDAG->getTargetConstant(0, SDLoc(N), MVT::i32);
+    SDNode *Lea = CurDAG->getMachineNode(
+        VAX::LEA_FI, SDLoc(N), MVT::i32, FI, Zero);
+    ReplaceNode(N, Lea);
+    return;
+  }
+
   if (N->getOpcode() == VAXISD::CALL) {
     SDValue Chain   = N->getOperand(0);
     SDValue NumArgs = N->getOperand(1);

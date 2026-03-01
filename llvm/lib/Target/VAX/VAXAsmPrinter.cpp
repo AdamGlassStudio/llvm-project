@@ -59,6 +59,19 @@ void VAXAsmPrinter::emitFunctionBodyStart() {
 }
 
 void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
+  // Expand LEA_FI pseudo: addl3 $offset, %fp, $dst
+  if (MI->getOpcode() == VAX::LEA_FI) {
+    MCInst Inst;
+    Inst.setOpcode(VAX::ADDL3_ri);
+    // Operand layout: ADDL3_ri (outs $dst), (ins i32imm:$a, GPRnoPC:$b)
+    // LEA_FI: op0=$dst, op1=base(FP), op2=disp
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg())); // dst
+    Inst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm())); // offset
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg())); // FP
+    EmitToStreamer(*OutStreamer, Inst);
+    return;
+  }
+
   MCInst Inst;
   Inst.setOpcode(MI->getOpcode());
   for (const MachineOperand &MO : MI->explicit_operands()) {
