@@ -176,3 +176,97 @@ def MOVZBL_rg : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 def MOVZBL_rg_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movzbl\t$sym, $dst",
     [(set GPRnoPC:$dst, (extloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+
+//===----------------------------------------------------------------------===//
+// Phase 6 — Comparisons + Branches
+//===----------------------------------------------------------------------===//
+
+// Branch target operand — holds a BasicBlock/label reference.
+def brtarget : Operand<OtherVT>;
+
+// SDNode for VAXISD::CMP: compare two i32 values, produce a glue (PSW).
+def SDT_VAXCMP : SDTypeProfile<0, 2, [SDTCisSameAs<0,1>, SDTCisInt<0>]>;
+def vax_cmp : SDNode<"VAXISD::CMP", SDT_VAXCMP, [SDNPOutGlue]>;
+
+// SDNode for VAXISD::BRCC: conditional branch consuming CC glue.
+// Explicit operands: dest:OtherVT, cc:i32.  Chain + Glue are implicit.
+def SDT_VAXBRCC : SDTypeProfile<0, 2,
+    [SDTCisVT<0, OtherVT>, SDTCisVT<1, i32>]>;
+def vax_brcc : SDNode<"VAXISD::BRCC", SDT_VAXBRCC,
+    [SDNPHasChain, SDNPInGlue]>;
+
+// Condition-code integer constants used as pattern leaves in branch defs.
+// Must match the VAXCC values assigned in LowerBR_CC().
+def VAXCC_EQL  : PatLeaf<(i32 0)>;   // equal
+def VAXCC_NEQ  : PatLeaf<(i32 1)>;   // not equal
+def VAXCC_GTR  : PatLeaf<(i32 2)>;   // greater than (signed)
+def VAXCC_GEQ  : PatLeaf<(i32 3)>;   // greater or equal (signed)
+def VAXCC_LSS  : PatLeaf<(i32 4)>;   // less than (signed)
+def VAXCC_LEQ  : PatLeaf<(i32 5)>;   // less or equal (signed)
+def VAXCC_GTRU : PatLeaf<(i32 6)>;   // greater than (unsigned)
+def VAXCC_GEQU : PatLeaf<(i32 7)>;   // greater or equal (unsigned)
+def VAXCC_LSSU : PatLeaf<(i32 8)>;   // less than (unsigned)
+def VAXCC_LEQU : PatLeaf<(i32 9)>;   // less or equal (unsigned)
+
+// CMPL — Compare Longword: sets PSW condition codes based on op1 - op2.
+let Defs = [PSW] in {
+def CMPL_rr : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, GPRnoPC:$b),
+    "cmpl\t$a, $b",
+    [(vax_cmp GPRnoPC:$a, GPRnoPC:$b)]>;
+def CMPL_ri : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, i32imm:$b),
+    "cmpl\t$a, $b",
+    [(vax_cmp GPRnoPC:$a, (i32 imm:$b))]>;
+// TSTL — Test Longword: equivalent to cmpl reg, $0 but one byte shorter.
+def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
+    "tstl\t$a",
+    [(vax_cmp GPRnoPC:$a, (i32 0))]>;
+}
+
+// Unconditional branch — use BRW (16-bit displacement, ±32 KB) as the
+// default form; the assembler will shorten to BRB when possible.
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def BRW : InstVAX<0x31, (outs), (ins brtarget:$dst), "brw\t$dst",
+    [(br bb:$dst)]>;
+
+// 8-bit unconditional branch (used when assembler / relaxation pass shortens).
+let isBranch = 1, isTerminator = 1, isBarrier = 1 in
+def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>;
+
+// Conditional branches (8-bit signed displacement ±127 B; all use PSW).
+// Each is a separate def so the opcode byte is fixed at instruction level.
+let Uses = [PSW], isBranch = 1, isTerminator = 1 in {
+def BEQL  : InstVAX<0x13, (outs), (ins brtarget:$dst), "beql\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_EQL)]>;
+def BNEQ  : InstVAX<0x12, (outs), (ins brtarget:$dst), "bneq\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_NEQ)]>;
+def BGTR  : InstVAX<0x14, (outs), (ins brtarget:$dst), "bgtr\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_GTR)]>;
+def BGEQ  : InstVAX<0x16, (outs), (ins brtarget:$dst), "bgeq\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_GEQ)]>;
+def BLSS  : InstVAX<0x17, (outs), (ins brtarget:$dst), "blss\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_LSS)]>;
+def BLEQ  : InstVAX<0x15, (outs), (ins brtarget:$dst), "bleq\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_LEQ)]>;
+def BGTRU : InstVAX<0x18, (outs), (ins brtarget:$dst), "bgtru\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_GTRU)]>;
+def BGEQU : InstVAX<0x1C, (outs), (ins brtarget:$dst), "bgequ\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_GEQU)]>;
+def BLSSU : InstVAX<0x1D, (outs), (ins brtarget:$dst), "blssu\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_LSSU)]>;
+def BLEQU : InstVAX<0x19, (outs), (ins brtarget:$dst), "blequ\t$dst",
+    [(vax_brcc bb:$dst, VAXCC_LEQU)]>;
+}
+
+// INCL / DECL — increment / decrement longword (sets PSW).
+let Defs = [PSW] in {
+def INCL : InstVAX<0xD6, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "incl\t$dst",
+    [(set GPRnoPC:$dst, (add GPRnoPC:$src, (i32 1)))]> {
+  let Constraints = "$src = $dst";
+}
+def DECL : InstVAX<0xD7, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "decl\t$dst",
+    [(set GPRnoPC:$dst, (add GPRnoPC:$src, (i32 -1)))]> {
+  let Constraints = "$src = $dst";
+}
+}

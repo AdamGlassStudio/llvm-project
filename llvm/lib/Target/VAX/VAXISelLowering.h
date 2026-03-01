@@ -24,6 +24,11 @@ enum NodeType : unsigned {
   PCRelWrapper,
   // Bit clear: BICL(mask, src) = src & ~mask  (lowered from ISD::AND)
   BICL,
+  // Compare two values and set condition codes (produces a glue output).
+  CMP,
+  // Conditional branch using condition codes from a preceding CMP.
+  // Operands: (chain, dest:BB, cc:i32, glue)
+  BRCC,
 };
 } // namespace VAXISD
 
@@ -53,6 +58,7 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // namespace llvm
