@@ -1,0 +1,54 @@
+//===-- VAXRegisterInfo.cpp - VAX Register Information ----------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#include "VAXRegisterInfo.h"
+#include "VAXSubtarget.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Support/ErrorHandling.h"
+
+using namespace llvm;
+
+#define GET_REGINFO_TARGET_DESC
+#include "VAXGenRegisterInfo.inc"
+
+VAXRegisterInfo::VAXRegisterInfo() : VAXGenRegisterInfo(VAX::PC) {}
+
+const MCPhysReg *
+VAXRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  return CSR_VAX_SaveList;
+}
+
+const uint32_t *
+VAXRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
+                                      CallingConv::ID CC) const {
+  return CSR_VAX_RegMask;
+}
+
+BitVector VAXRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
+  BitVector Reserved(getNumRegs());
+  markSuperRegs(Reserved, VAX::AP); // Argument Pointer
+  markSuperRegs(Reserved, VAX::FP); // Frame Pointer
+  markSuperRegs(Reserved, VAX::SP); // Stack Pointer
+  markSuperRegs(Reserved, VAX::PC); // Program Counter
+  return Reserved;
+}
+
+bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
+                                          int SPAdj, unsigned FIOperandNum,
+                                          RegScavenger *RS) const {
+  // TODO: implement frame index elimination in Phase 3
+  report_fatal_error("VAXRegisterInfo::eliminateFrameIndex not yet implemented");
+}
+
+Register VAXRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
+  return VAX::FP;
+}
