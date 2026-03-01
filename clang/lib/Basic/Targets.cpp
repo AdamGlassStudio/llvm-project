@@ -36,6 +36,7 @@
 #include "Targets/SystemZ.h"
 #include "Targets/TCE.h"
 #include "Targets/VE.h"
+#include "Targets/VAX.h"
 #include "Targets/WebAssembly.h"
 #include "Targets/X86.h"
 #include "Targets/XCore.h"
@@ -760,6 +761,14 @@ std::unique_ptr<TargetInfo> AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::ve:
     return std::make_unique<LinuxTargetInfo<VETargetInfo>>(Triple, Opts);
+
+  case llvm::Triple::vax:
+    switch (os) {
+    case llvm::Triple::NetBSD:
+      return std::make_unique<NetBSDTargetInfo<VAXTargetInfo>>(Triple, Opts);
+    default:
+      return std::make_unique<VAXTargetInfo>(Triple, Opts);
+    }
 
   case llvm::Triple::csky:
     switch (os) {
