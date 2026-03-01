@@ -33,6 +33,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Register classes by value type.
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
   addRegisterClass(MVT::f32, &VAX::GPRIRegClass);
+  addRegisterClass(MVT::f64, &VAX::QPRRegClass);
 
   // Finalize register class / type legalization info.
   computeRegisterProperties(STI.getRegisterInfo());
@@ -114,7 +115,9 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // F_float (f32) support: VAX has native F_float arithmetic.
   setOperationAction(ISD::BR_CC,      MVT::f32, Custom);
+  setOperationAction(ISD::SELECT_CC,  MVT::f32, Custom);
   setOperationAction(ISD::SELECT,     MVT::f32, Expand);
+  setOperationAction(ISD::SETCC,      MVT::f32, Expand);
   // FP conversions.
   setOperationAction(ISD::FP_TO_SINT, MVT::i32, Legal);  // CVTFL
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Legal);  // CVTLF
@@ -131,6 +134,31 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FPOW,       MVT::f32, Expand);
   setOperationAction(ISD::FMINNUM,    MVT::f32, Expand);
   setOperationAction(ISD::FMAXNUM,    MVT::f32, Expand);
+
+  // D_float (f64) support: VAX has native D_float arithmetic using QPR pairs.
+  setOperationAction(ISD::BR_CC,      MVT::f64, Custom);
+  setOperationAction(ISD::SELECT_CC,  MVT::f64, Custom);
+  setOperationAction(ISD::SELECT,     MVT::f64, Expand);
+  setOperationAction(ISD::SETCC,      MVT::f64, Expand);
+  setOperationAction(ISD::FP_ROUND,   MVT::f32, Legal);   // CVTDF
+  setOperationAction(ISD::FP_EXTEND,  MVT::f64, Legal);   // CVTFD
+  setOperationAction(ISD::FNEG,       MVT::f64, Legal);   // MNEGD
+  setOperationAction(ISD::FABS,       MVT::f64, Expand);
+  setOperationAction(ISD::FSQRT,      MVT::f64, Expand);
+  setOperationAction(ISD::FREM,       MVT::f64, Expand);
+  setOperationAction(ISD::FCOPYSIGN,  MVT::f64, Expand);
+  setOperationAction(ISD::FSIN,       MVT::f64, Expand);
+  setOperationAction(ISD::FCOS,       MVT::f64, Expand);
+  setOperationAction(ISD::FPOW,       MVT::f64, Expand);
+  setOperationAction(ISD::FMINNUM,    MVT::f64, Expand);
+  setOperationAction(ISD::FMAXNUM,    MVT::f64, Expand);
+  // D_float ↔ int conversions.
+  setOperationAction(ISD::FP_TO_SINT, MVT::i32, Legal);
+  setOperationAction(ISD::SINT_TO_FP, MVT::i32, Legal);
+
+  // Extending FP loads: there's no hardware "load f32, extend to f64" —
+  // require separate load + CVTFD.
+  setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
 }
 
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
@@ -481,7 +509,8 @@ MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
   assert((MI.getOpcode() == VAX::SELECT_CC_Pseudo ||
-          MI.getOpcode() == VAX::SELECT_CC_F_Pseudo) &&
+          MI.getOpcode() == VAX::SELECT_CC_F_Pseudo ||
+          MI.getOpcode() == VAX::SELECT_CC_D_Pseudo) &&
          "Unexpected custom inserter opcode");
 
   const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
