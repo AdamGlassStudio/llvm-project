@@ -10,6 +10,7 @@
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "VAX.h"
+#include "VAXMachineFunctionInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -59,6 +60,13 @@ VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
 }
 
 VAXTargetMachine::~VAXTargetMachine() = default;
+
+MachineFunctionInfo *VAXTargetMachine::createMachineFunctionInfo(
+    BumpPtrAllocator &Allocator, const Function &F,
+    const TargetSubtargetInfo *STI) const {
+  return VAXMachineFunctionInfo::create<VAXMachineFunctionInfo>(Allocator, F,
+                                                                STI);
+}
 
 namespace {
 
