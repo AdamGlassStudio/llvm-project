@@ -24,7 +24,19 @@ bool VAXFrameLowering::hasFPImpl(const MachineFunction &MF) const {
 
 void VAXFrameLowering::emitPrologue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  // TODO: implement in Phase 3 — emit entry mask word and local allocation
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  uint64_t StackSize = MFI.getStackSize();
+  if (StackSize == 0)
+    return;
+
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+
+  // Allocate local frame: subl2 $stacksize, %sp
+  BuildMI(MBB, MBBI, DL, TII.get(VAX::SUBL2_ri), VAX::SP)
+      .addImm(StackSize)
+      .addReg(VAX::SP);
 }
 
 void VAXFrameLowering::emitEpilogue(MachineFunction &MF,
@@ -45,19 +57,20 @@ MachineBasicBlock::iterator VAXFrameLowering::eliminateCallFramePseudoInstr(
   unsigned Opc = Old.getOpcode();
   int64_t Amount = Old.getOperand(0).getImm();
 
-  if (Amount == 0)
-    return MBB.erase(I);
-
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   if (Opc == TII.getCallFrameSetupOpcode()) {
     // CALLSEQ_START: decrement SP to reserve space for call arguments.
-    BuildMI(MBB, I, DL, TII.get(VAX::SUBL2_ri), VAX::SP)
-        .addImm(Amount).addReg(VAX::SP);
+    if (Amount != 0)
+      BuildMI(MBB, I, DL, TII.get(VAX::SUBL2_ri), VAX::SP)
+          .addImm(Amount).addReg(VAX::SP);
   } else {
-    // CALLSEQ_END: add back the arg area (CALLS/RET only restores SP to
-    // after the args were allocated, not to before CALLSEQ_START).
-    BuildMI(MBB, I, DL, TII.get(VAX::ADDL2_ri), VAX::SP)
-        .addImm(Amount).addReg(VAX::SP);
+    // CALLSEQ_END: subtract callee-pop amount. On VAX, CALLS/RET pops
+    // all args, so Amount - CalleePop is typically 0 (no-op).
+    int64_t CalleePop = Old.getOperand(1).getImm();
+    Amount -= CalleePop;
+    if (Amount != 0)
+      BuildMI(MBB, I, DL, TII.get(VAX::ADDL2_ri), VAX::SP)
+          .addImm(Amount).addReg(VAX::SP);
   }
   return MBB.erase(I);
 }
