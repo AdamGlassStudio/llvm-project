@@ -31,6 +31,8 @@ enum NodeType : unsigned {
   BRCC,
   // CALLS instruction node (chain, count, callee, regmask) → (chain, glue)
   CALL,
+  // Arithmetic shift with pre-negated count (for SRA lowering).
+  ASHL,
 };
 } // namespace VAXISD
 
@@ -60,6 +62,8 @@ public:
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
 };
 
