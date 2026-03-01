@@ -18,10 +18,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-// Return value convention: i32/ptr in R0, upper half of i64 in R1
+// Return value convention: i32/ptr in R0; i64 splits into two i32 → R0, R1
 def RetCC_VAX : CallingConv<[
-  CCIfType<[i32, f32], CCAssignToReg<[R0]>>,
-  CCIfType<[i64, f64], CCAssignToRegWithShadow<[R0], [R1]>>
+  CCIfType<[i32], CCAssignToReg<[R0, R1]>>
 ]>;
 
 // Argument convention: all on stack (CALLS pushes args right-to-left)

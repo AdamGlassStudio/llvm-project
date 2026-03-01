@@ -2907,6 +2907,15 @@ def HexagonSystemLibrary
     DefaultSafeStackGlobals)>;
 
 //===----------------------------------------------------------------------===//
+// VAX Runtime Libcalls
+//===----------------------------------------------------------------------===//
+
+def isVAX : RuntimeLibcallPredicate<"TT.getArch() == Triple::vax">;
+
+def VAXSystemLibrary
+    : SystemRuntimeLibrary<isVAX, (add DefaultRuntimeLibcallImpls)>;
+
+//===----------------------------------------------------------------------===//
 // Lanai Runtime Libcalls
 //===----------------------------------------------------------------------===//
 

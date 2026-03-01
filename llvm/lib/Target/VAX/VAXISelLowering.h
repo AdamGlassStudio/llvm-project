@@ -33,6 +33,8 @@ enum NodeType : unsigned {
   CALL,
   // Arithmetic shift with pre-negated count (for SRA lowering).
   ASHL,
+  // Conditional select: (trueval, falseval, cc, cmp_glue) → result
+  SELECT_CC,
 };
 } // namespace VAXISD
 
@@ -65,6 +67,11 @@ private:
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
+
+  MachineBasicBlock *
+  EmitInstrWithCustomInserter(MachineInstr &MI,
+                              MachineBasicBlock *BB) const override;
 };
 
 } // namespace llvm
