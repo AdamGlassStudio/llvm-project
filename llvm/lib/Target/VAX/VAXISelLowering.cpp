@@ -28,10 +28,19 @@ using namespace llvm;
 VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
+  // Register classes by value type.
+  addRegisterClass(MVT::i8,  &VAX::GPRBRegClass);
+  addRegisterClass(MVT::i16, &VAX::GPRWRegClass);
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
+
+  // Finalize register class / type legalization info.
   computeRegisterProperties(STI.getRegisterInfo());
+
   setStackPointerRegisterToSaveRestore(VAX::SP);
   setSchedulingPreference(Sched::RegPressure);
+
+  // Scalar integer types are all legal at i32; narrower types will be
+  // promoted/expanded in later phases as instructions are added.
 }
 
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
