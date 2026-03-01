@@ -10,6 +10,7 @@
 #include "VAXTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/SelectionDAGNodes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -26,6 +27,11 @@ public:
 
   void Select(SDNode *N) override;
 
+  // ComplexPattern selector for base+displacement memory operands.
+  // Returns true and sets Base/Offset when Addr matches a known form:
+  //   FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
+  bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
+
 // Include the pieces auto-generated from the target description.
 #include "VAXGenDAGISel.inc"
 };
@@ -39,6 +45,43 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
   }
   // Fall through to TableGen-generated pattern matching.
   SelectCode(N);
+}
+
+bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
+                                     SDValue &Offset) {
+  SDLoc DL(Addr);
+  MVT PtrTy = MVT::i32;
+
+  // FrameIndex — stack slot, zero displacement.
+  if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
+    Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
+    Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+    return true;
+  }
+
+  if (Addr.getOpcode() == ISD::ADD) {
+    // ADD(FrameIndex, Constant) — stack slot with displacement.
+    if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr.getOperand(0)))
+      if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
+        Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+        return true;
+      }
+    // ADD(Reg, Constant) — register + displacement.
+    if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
+      Base = Addr.getOperand(0);
+      Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+      return true;
+    }
+  }
+
+  // Bare register — zero displacement.
+  // Exclude nodes that have their own dedicated patterns (PCRelWrapper, etc.)
+  if (Addr.getOpcode() == VAXISD::PCRelWrapper)
+    return false;
+  Base = Addr;
+  Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+  return true;
 }
 
 namespace {

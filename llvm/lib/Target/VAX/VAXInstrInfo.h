@@ -26,6 +26,11 @@ public:
   explicit VAXInstrInfo(const VAXSubtarget &STI);
 
   const VAXRegisterInfo &getRegisterInfo() const { return RI; }
+
+  void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+                   const DebugLoc &DL, Register DstReg, Register SrcReg,
+                   bool KillSrc, bool RenamableDst = false,
+                   bool RenamableSrc = false) const override;
 };
 
 } // namespace llvm
