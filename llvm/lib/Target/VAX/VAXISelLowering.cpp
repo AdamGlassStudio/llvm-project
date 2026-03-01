@@ -572,6 +572,9 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   MachineFunction &MF = DAG.getMachineFunction();
   bool isVarArg        = CLI.IsVarArg;
 
+  // VAX CALLS/RET builds a frame linkage that prevents tail call optimization.
+  CLI.IsTailCall = false;
+
   // Assign outgoing args: all go to stack via CC_VAX.
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CLI.CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
