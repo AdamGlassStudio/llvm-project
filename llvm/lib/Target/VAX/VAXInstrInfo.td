@@ -342,6 +342,48 @@ def LEA_FI : Pseudo<(outs GPRnoPC:$dst), (ins VAXMemOp:$addr),
     "#LEA_FI $addr, $dst", []>;
 
 //===----------------------------------------------------------------------===//
+// Phase 10 — Shift + Rotate
+//===----------------------------------------------------------------------===//
+
+// ASHL (0x78) — Arithmetic Shift Longword: dst = src << cnt (positive cnt),
+// or dst = src >> |cnt| (arithmetic, negative cnt).
+// VAX encoding: ashl cnt, src, dst.
+// shl: positive shift count.
+def ASHL_rr : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$cnt, GPRnoPC:$src),
+    "ashl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, GPRnoPC:$cnt))]>;
+def ASHL_ir : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins i32imm:$cnt, GPRnoPC:$src),
+    "ashl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>;
+
+// Custom node for VAX arithmetic shift (handles negative cnt for right shift).
+def SDT_VAXASHL : SDTypeProfile<1, 2, [SDTCisSameAs<0, 2>, SDTCisInt<0>,
+                                        SDTCisInt<1>]>;
+def vax_ashl : SDNode<"VAXISD::ASHL", SDT_VAXASHL>;
+
+// ASHL for custom SRA lowering (cnt is already negated by LowerSRA).
+def ASHL_rr_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$cnt, GPRnoPC:$src),
+    "ashl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (vax_ashl GPRnoPC:$cnt, GPRnoPC:$src))]>;
+def ASHL_ir_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins i32imm:$cnt, GPRnoPC:$src),
+    "ashl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (vax_ashl (i32 imm:$cnt), GPRnoPC:$src))]>;
+
+// ROTL (0x9C) — Rotate Longword: dst = rotl(src, cnt).
+def ROTL_rr : InstVAX<0x9C, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$cnt, GPRnoPC:$src),
+    "rotl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, GPRnoPC:$cnt))]>;
+def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
+    (ins i32imm:$cnt, GPRnoPC:$src),
+    "rotl\t$cnt, $src, $dst",
+    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>;
+
+//===----------------------------------------------------------------------===//
 // Phase 8 — Function calls
 //===----------------------------------------------------------------------===//
 

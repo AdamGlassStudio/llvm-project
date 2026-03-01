@@ -60,6 +60,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Signed remainder also needs expansion (no REML instruction).
   setOperationAction(ISD::SREM, MVT::i32, Expand);
 
+  // Shifts: SHL is handled directly by ASHL. SRA and SRL need custom lowering
+  // because VAX ASHL uses negative count for right shift (arithmetic), and
+  // logical right shift has no dedicated instruction.
+  setOperationAction(ISD::SRA, MVT::i32, Custom);
+  setOperationAction(ISD::SRL, MVT::i32, Custom);
+
   // Extending loads: all byte/word variants now legal via CVT/MOVZ instructions.
   // i8 zero-extend: MOVZBL (Phase 5); i8 sign-extend: CVTBL (Phase 7).
   // i16 zero-extend: MOVZWL (Phase 7); i16 sign-extend: CVTWL (Phase 7).
@@ -86,6 +92,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::CMP:          return "VAXISD::CMP";
   case VAXISD::BRCC:         return "VAXISD::BRCC";
   case VAXISD::CALL:         return "VAXISD::CALL";
+  case VAXISD::ASHL:         return "VAXISD::ASHL";
   default:                   return nullptr;
   }
 }
@@ -95,6 +102,8 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
+  case ISD::SRA:           return LowerSRA(Op, DAG);
+  case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   default:
     report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
@@ -151,6 +160,60 @@ SDValue VAXTargetLowering::LowerAND(SDValue Op, SelectionDAG &DAG) const {
   SDValue NotB = DAG.getNode(ISD::XOR, DL, VT, B,
                              DAG.getAllOnesConstant(DL, VT));
   return DAG.getNode(VAXISD::BICL, DL, VT, NotB, A);
+}
+
+SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
+  // VAX ASHL with negative count does arithmetic right shift.
+  // Lower sra(x, n) → VAXISD::ASHL(-n, x).
+  SDLoc DL(Op);
+  SDValue Src = Op.getOperand(0);
+  SDValue Cnt = Op.getOperand(1);
+
+  if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
+    // Constant shift: negate at compile time.
+    int64_t NegAmt = -CN->getSExtValue();
+    return DAG.getNode(VAXISD::ASHL, DL, MVT::i32,
+                       DAG.getSignedConstant(NegAmt, DL, MVT::i32), Src);
+  }
+  // Variable shift: emit MNEGL + ASHL.
+  SDValue NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                               DAG.getConstant(0, DL, MVT::i32), Cnt);
+  return DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Src);
+}
+
+SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
+  // VAX has no logical right shift. Use: srl(x, n) = rotl(x, 32-n) & mask.
+  // For constant n, mask = (1 << (32-n)) - 1 = ~0u >> n.
+  // For variable n, compute mask dynamically via ASHL.
+  SDLoc DL(Op);
+  SDValue Src = Op.getOperand(0);
+  SDValue Cnt = Op.getOperand(1);
+
+  if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
+    unsigned N = CN->getZExtValue() & 31;
+    if (N == 0) return Src;
+    // rotl(src, 32-N) then AND with mask
+    SDValue Rot = DAG.getNode(ISD::ROTL, DL, MVT::i32, Src,
+                              DAG.getConstant(32 - N, DL, MVT::i32));
+    uint32_t Mask = 0xFFFFFFFFu >> N;
+    return DAG.getNode(ISD::AND, DL, MVT::i32, Rot,
+                       DAG.getConstant(Mask, DL, MVT::i32));
+  }
+  // Variable logical right shift: rotl(src, 32-cnt) & ((1 << (32-cnt)) - 1)
+  // mask = ASHL(1, 32-cnt) - 1 = ~0 srl cnt, but that's circular.
+  // Alternative: ASHL(-cnt, src) gives arithmetic right shift, then
+  // clear sign-extended bits: srl(x, n) = ashl(-n, x) & ((1u << (32-n)) - 1).
+  // Mask = ~((-1) << (32 - n)) = ~ashl(32-n, -1).
+  // Emit: neg_cnt = -cnt; shifted = ASHL(neg_cnt, src); 
+  //       mask_bits = ASHL(neg_cnt, -1); mask = NOT(mask_bits);
+  //       result = AND(shifted, mask)
+  SDValue NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                               DAG.getConstant(0, DL, MVT::i32), Cnt);
+  SDValue Shifted = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Src);
+  SDValue SignBits = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt,
+                                 DAG.getAllOnesConstant(DL, MVT::i32));
+  SDValue Mask = DAG.getNOT(DL, SignBits, MVT::i32);
+  return DAG.getNode(ISD::AND, DL, MVT::i32, Shifted, Mask);
 }
 
 SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
