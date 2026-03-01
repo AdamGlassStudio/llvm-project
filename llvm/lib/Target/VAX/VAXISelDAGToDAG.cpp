@@ -24,8 +24,10 @@ public:
   explicit VAXDAGToDAGISel(VAXTargetMachine &TM, CodeGenOptLevel OptLevel)
       : SelectionDAGISel(TM, OptLevel) {}
 
-  // SelectionDAGISel::Select is pure virtual — stub until Phase 4.
   void Select(SDNode *N) override;
+
+// Include the pieces auto-generated from the target description.
+#include "VAXGenDAGISel.inc"
 };
 
 } // end anonymous namespace
@@ -35,8 +37,8 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     N->setNodeId(-1);
     return;
   }
-  // TODO: implement instruction selection in Phase 4.
-  report_fatal_error("VAXDAGToDAGISel: instruction selection not yet implemented");
+  // Fall through to TableGen-generated pattern matching.
+  SelectCode(N);
 }
 
 namespace {
