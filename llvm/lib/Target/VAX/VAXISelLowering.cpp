@@ -79,6 +79,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::BICL:         return "VAXISD::BICL";
   case VAXISD::CMP:          return "VAXISD::CMP";
   case VAXISD::BRCC:         return "VAXISD::BRCC";
+  case VAXISD::CALL:         return "VAXISD::CALL";
   default:                   return nullptr;
   }
 }
@@ -187,14 +188,95 @@ SDValue VAXTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
-  // Phase 3: no argument lowering yet — will be implemented in Phase 8.
-  if (!Ins.empty())
-    report_fatal_error("VAX: function arguments not yet supported (Phase 8)");
+  MachineFunction &MF = DAG.getMachineFunction();
+
+  // Mark AP as live-in: CALLS establishes AP pointing to the argument area.
+  MF.getRegInfo().addLiveIn(VAX::AP);
+  MF.front().addLiveIn(VAX::AP);
+
+  SmallVector<CCValAssign, 8> ArgLocs;
+  CCState CCInfo(CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeFormalArguments(Ins, CC_VAX);
+
+  SDValue AP = DAG.getRegister(VAX::AP, MVT::i32);
+  for (auto &VA : ArgLocs) {
+    // AP+0 is the argument count word written by CALLS.
+    // AP+4 is the first argument, AP+8 the second, etc.
+    SDValue Off = DAG.getConstant(VA.getLocMemOffset() + 4, DL, MVT::i32);
+    SDValue Ptr = DAG.getNode(ISD::ADD, DL, MVT::i32, AP, Off);
+    SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, Ptr,
+                               MachinePointerInfo());
+    InVals.push_back(Load);
+  }
   return Chain;
 }
 
 SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                       SmallVectorImpl<SDValue> &InVals) const {
-  // TODO: implement in Phase 8
-  report_fatal_error("VAXTargetLowering::LowerCall not yet implemented");
+  SelectionDAG &DAG   = CLI.DAG;
+  SDLoc         DL    = CLI.DL;
+  SDValue       Chain = CLI.Chain;
+  SDValue       Callee = CLI.Callee;
+  MachineFunction &MF = DAG.getMachineFunction();
+  bool isVarArg        = CLI.IsVarArg;
+
+  // Assign outgoing args: all go to stack via CC_VAX.
+  SmallVector<CCValAssign, 8> ArgLocs;
+  CCState CCInfo(CLI.CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
+  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_VAX);
+  unsigned NumArgs   = ArgLocs.size();
+  unsigned StackBytes = CCInfo.getStackSize();
+
+  // Reserve stack space for arguments.
+  Chain = DAG.getCALLSEQ_START(Chain, StackBytes, 0, DL);
+
+  // Read SP after the CALLSEQ_START; store each arg at [SP + offset].
+  SDValue SPVal = DAG.getCopyFromReg(Chain, DL, VAX::SP, MVT::i32);
+  SmallVector<SDValue, 8> MemOps;
+  for (unsigned i = 0; i < NumArgs; i++) {
+    CCValAssign &VA = ArgLocs[i];
+    assert(VA.isMemLoc() && "VAX: all args must be on stack");
+    SDValue Addr = DAG.getNode(ISD::ADD, DL, MVT::i32, SPVal,
+                               DAG.getConstant(VA.getLocMemOffset(), DL, MVT::i32));
+    MemOps.push_back(DAG.getStore(Chain, DL, CLI.OutVals[i], Addr,
+                                  MachinePointerInfo::getStack(MF, VA.getLocMemOffset())));
+  }
+  if (!MemOps.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
+
+  // Wrap callee for direct calls.
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32);
+  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
+    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32);
+
+  // Build VAXISD::CALL node.
+  const uint32_t *Mask =
+      MF.getSubtarget().getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv);
+  SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
+  SmallVector<SDValue, 6> Ops = {
+      Chain,
+      DAG.getConstant(NumArgs, DL, MVT::i32),
+      Callee,
+      DAG.getRegisterMask(Mask),
+  };
+  Chain = DAG.getNode(VAXISD::CALL, DL, NodeTys, Ops);
+  SDValue InFlag = Chain.getValue(1);
+
+  // Deallocate arg space.
+  Chain = DAG.getCALLSEQ_END(Chain, StackBytes, 0, InFlag, DL);
+  InFlag = Chain.getValue(1);
+
+  // Copy return value(s) from registers.
+  SmallVector<CCValAssign, 4> RVLocs;
+  CCState RetInfo(CLI.CallConv, isVarArg, MF, RVLocs, *DAG.getContext());
+  RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_VAX);
+  for (auto &VA : RVLocs) {
+    SDValue RV = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(),
+                                    InFlag);
+    Chain  = RV.getValue(1);
+    InFlag = RV.getValue(2);
+    InVals.push_back(RV.getValue(0));
+  }
+  return Chain;
 }
