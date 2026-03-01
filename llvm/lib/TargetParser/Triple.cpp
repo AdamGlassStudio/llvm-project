@@ -2402,10 +2402,11 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
   case Triple::m68k:
   case Triple::msp430:
   case Triple::systemz:
-  case Triple::vax:
   case Triple::xcore:
   case Triple::xtensa:
     return ExceptionHandling::DwarfCFI;
+  case Triple::vax:
+    return ExceptionHandling::None;
   default:
     break;
   }
