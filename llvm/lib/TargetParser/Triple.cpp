@@ -2406,7 +2406,7 @@ ExceptionHandling Triple::getDefaultExceptionHandling() const {
   case Triple::xtensa:
     return ExceptionHandling::DwarfCFI;
   case Triple::vax:
-    return ExceptionHandling::None;
+    return ExceptionHandling::DwarfCFI;
   default:
     break;
   }
