@@ -598,3 +598,77 @@ let usesCustomInserter = 1 in
 def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
     (ins GPRI:$truev, GPRI:$falsev, i32imm:$cc),
     "#SELECT_CC_F $truev, $falsev, $cc", []>;
+
+//===----------------------------------------------------------------------===//
+// Phase 14C — D_float (64-bit floating point)
+//===----------------------------------------------------------------------===//
+
+// D_float memory operand (same layout as integer, but 8-byte load).
+def VAXDMemOp : Operand<iPTR> {
+  let PrintMethod   = "printMemOperand";
+  let MIOperandInfo = (ops GPR, i32imm);
+}
+
+// MOVD (0x70) — Move D_float (64-bit) using register pairs.
+def MOVD_rm : InstVAX<0x70, (outs QPR:$dst), (ins VAXDMemOp:$src),
+    "movd\t$src, $dst",
+    [(set QPR:$dst, (f64 (load VAXMem:$src)))]>;
+def MOVD_mr : InstVAX<0x70, (outs), (ins QPR:$src, VAXDMemOp:$dst),
+    "movd\t$src, $dst",
+    [(store (f64 QPR:$src), VAXMem:$dst)]>;
+def MOVD_rr : InstVAX<0x70, (outs QPR:$dst), (ins QPR:$src),
+    "movd\t$src, $dst", []>;
+
+// ADDD3 (0x61) — Add D_float: dst = src1 + src2.
+def ADDD3_rr : InstVAX<0x61, (outs QPR:$dst), (ins QPR:$a, QPR:$b),
+    "addd3\t$a, $b, $dst",
+    [(set QPR:$dst, (fadd QPR:$a, QPR:$b))]>;
+// SUBD3 (0x63) — Subtract D_float: dst = src2 - src1.
+def SUBD3_rr : InstVAX<0x63, (outs QPR:$dst), (ins QPR:$s, QPR:$m),
+    "subd3\t$s, $m, $dst",
+    [(set QPR:$dst, (fsub QPR:$m, QPR:$s))]>;
+// MULD3 (0x65) — Multiply D_float: dst = src1 * src2.
+def MULD3_rr : InstVAX<0x65, (outs QPR:$dst), (ins QPR:$a, QPR:$b),
+    "muld3\t$a, $b, $dst",
+    [(set QPR:$dst, (fmul QPR:$a, QPR:$b))]>;
+// DIVD3 (0x67) — Divide D_float: dst = src2 / src1.
+def DIVD3_rr : InstVAX<0x67, (outs QPR:$dst), (ins QPR:$dv, QPR:$dd),
+    "divd3\t$dv, $dd, $dst",
+    [(set QPR:$dst, (fdiv QPR:$dd, QPR:$dv))]>;
+
+// MNEGD (0x72) — Negate D_float: dst = -src.
+def MNEGD : InstVAX<0x72, (outs QPR:$dst), (ins QPR:$src),
+    "mnegd\t$src, $dst",
+    [(set QPR:$dst, (fneg QPR:$src))]>;
+
+// CVTDL (0x6A) — Convert D_float to Longword (double→int).
+def CVTDL : InstVAX<0x6A, (outs GPRnoPC:$dst), (ins QPR:$src),
+    "cvtdl\t$src, $dst",
+    [(set GPRnoPC:$dst, (fp_to_sint QPR:$src))]>;
+// CVTLD (0x6E) — Convert Longword to D_float (int→double).
+def CVTLD : InstVAX<0x6E, (outs QPR:$dst), (ins GPRnoPC:$src),
+    "cvtld\t$src, $dst",
+    [(set QPR:$dst, (sint_to_fp GPRnoPC:$src))]>;
+// CVTDF (0x76) — Convert D_float to F_float (double→float, FP_ROUND).
+def CVTDF : InstVAX<0x76, (outs GPRI:$dst), (ins QPR:$src),
+    "cvtdf\t$src, $dst",
+    [(set GPRI:$dst, (fpround QPR:$src))]>;
+// CVTFD (0x56) — Convert F_float to D_float (float→double, FP_EXTEND).
+def CVTFD : InstVAX<0x56, (outs QPR:$dst), (ins GPRI:$src),
+    "cvtfd\t$src, $dst",
+    [(set QPR:$dst, (fpextend GPRI:$src))]>;
+
+// D_float compare: CMPD sets PSW.
+let Defs = [PSW] in {
+def CMPD : InstVAX<0x71, (outs), (ins QPR:$a, QPR:$b),
+    "cmpd\t$a, $b",
+    [(vax_fcmp QPR:$a, QPR:$b)]>;
+def TSTD : InstVAX<0x73, (outs), (ins QPR:$a),
+    "tstd\t$a", []>;
+}
+
+// SELECT_CC for f64 results.
+let usesCustomInserter = 1 in
+def SELECT_CC_D_Pseudo : Pseudo<(outs QPR:$dst),
+    (ins QPR:$truev, QPR:$falsev, i32imm:$cc),
+    "#SELECT_CC_D $truev, $falsev, $cc", []>;

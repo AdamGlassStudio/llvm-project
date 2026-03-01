@@ -20,13 +20,16 @@
 
 // Return value convention: i32/ptr in R0; i64 splits into two i32 → R0, R1.
 // f32 returns in R0 (same register as i32).
+// f64 (D_float) returns in R0_R1 (quadword register pair).
 def RetCC_VAX : CallingConv<[
   CCIfType<[f32], CCAssignToReg<[R0]>>,
+  CCIfType<[f64], CCAssignToReg<[R0_R1]>>,
   CCIfType<[i32], CCAssignToReg<[R0, R1]>>
 ]>;
 
 // Argument convention: all on stack (CALLS pushes args right-to-left)
 def CC_VAX : CallingConv<[
+  CCIfType<[f64], CCAssignToStack<8, 4>>,
   CCIfType<[f32], CCAssignToStack<4, 4>>,
   CCAssignToStack<4, 4>
 ]>;
