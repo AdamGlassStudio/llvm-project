@@ -469,3 +469,62 @@ def CALLS_indir : InstVAX<0xFB, (outs),
     (ins i32imm:$count, GPRnoPC:$callee),
     "calls\t$count, ($callee)", []>;
 }
+
+//===----------------------------------------------------------------------===//
+// Phase 14A — Add/Subtract with Carry (i64 support)
+//===----------------------------------------------------------------------===//
+
+// ADWC (0xD8) — Add With Carry: dst = src + dst + C
+// Used by ISD::ADDE for high half of i64 add.
+def SDT_VAXADWC : SDTypeProfile<1, 2, [SDTCisSameAs<0,1>, SDTCisSameAs<1,2>,
+                                        SDTCisInt<0>]>;
+
+// ADWC — add with carry: dst = src + dst + PSW.C
+let Defs = [PSW], Uses = [PSW] in {
+def ADWC_rr : InstVAX<0xD8, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$src, GPRnoPC:$dstin),
+    "adwc\t$src, $dst",
+    [(set GPRnoPC:$dst, (adde GPRnoPC:$src, GPRnoPC:$dstin))]> {
+  let Constraints = "$dstin = $dst";
+}
+def ADWC_ir : InstVAX<0xD8, (outs GPRnoPC:$dst),
+    (ins i32imm:$src, GPRnoPC:$dstin),
+    "adwc\t$src, $dst",
+    [(set GPRnoPC:$dst, (adde (i32 imm:$src), GPRnoPC:$dstin))]> {
+  let Constraints = "$dstin = $dst";
+}
+// SBWC — subtract with carry: dst = dst - src - PSW.C
+def SBWC_rr : InstVAX<0xD9, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$src, GPRnoPC:$dstin),
+    "sbwc\t$src, $dst",
+    [(set GPRnoPC:$dst, (sube GPRnoPC:$dstin, GPRnoPC:$src))]> {
+  let Constraints = "$dstin = $dst";
+}
+def SBWC_ir : InstVAX<0xD9, (outs GPRnoPC:$dst),
+    (ins i32imm:$src, GPRnoPC:$dstin),
+    "sbwc\t$src, $dst",
+    [(set GPRnoPC:$dst, (sube GPRnoPC:$dstin, (i32 imm:$src)))]> {
+  let Constraints = "$dstin = $dst";
+}
+}
+
+// ADDL3 variant that defines carry (for low half of i64 add).
+// ISD::ADDC produces (result, glue) — glue carries the carry flag.
+let Defs = [PSW] in {
+def ADDL3_rr_cc : InstVAX<0xC1, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$a, GPRnoPC:$b),
+    "addl3\t$a, $b, $dst",
+    [(set GPRnoPC:$dst, (addc GPRnoPC:$a, GPRnoPC:$b))]>;
+def ADDL3_ri_cc : InstVAX<0xC1, (outs GPRnoPC:$dst),
+    (ins i32imm:$a, GPRnoPC:$b),
+    "addl3\t$a, $b, $dst",
+    [(set GPRnoPC:$dst, (addc GPRnoPC:$b, (i32 imm:$a)))]>;
+def SUBL3_rr_cc : InstVAX<0xC3, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$s, GPRnoPC:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (subc GPRnoPC:$m, GPRnoPC:$s))]>;
+def SUBL3_ri_cc : InstVAX<0xC3, (outs GPRnoPC:$dst),
+    (ins i32imm:$s, GPRnoPC:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (subc GPRnoPC:$m, (i32 imm:$s)))]>;
+}
