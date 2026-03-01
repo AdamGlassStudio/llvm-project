@@ -80,6 +80,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::MULHU, MVT::i32, Expand);
   setOperationAction(ISD::MULHS, MVT::i32, Expand);
 
+  // Carry-chained add/sub for i64 support: ADDL3 sets PSW.C, ADWC uses it.
+  setOperationAction(ISD::ADDC, MVT::i32, Legal);
+  setOperationAction(ISD::ADDE, MVT::i32, Legal);
+  setOperationAction(ISD::SUBC, MVT::i32, Legal);
+  setOperationAction(ISD::SUBE, MVT::i32, Legal);
+
   // Shifts: SHL is handled directly by ASHL. SRA and SRL need custom lowering
   // because VAX ASHL uses negative count for right shift (arithmetic), and
   // logical right shift has no dedicated instruction.
