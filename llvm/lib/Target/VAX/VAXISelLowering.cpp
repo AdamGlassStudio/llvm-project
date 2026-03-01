@@ -43,6 +43,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+  setOperationAction(ISD::ConstantPool,  MVT::i32, Custom);
 
   // Jump table addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::JumpTable, MVT::i32, Custom);
@@ -118,6 +119,38 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
 
+  // Integer SETCC must be expanded — VAX sets condition codes but has no
+  // instruction that directly produces a 0/1 result from a comparison.
+  setOperationAction(ISD::SETCC,      MVT::i32, Expand);
+
+  // Unsigned division/remainder: expand to libcalls.
+  setOperationAction(ISD::UDIV,       MVT::i32, Expand);
+  setOperationAction(ISD::UREM,       MVT::i32, Expand);
+  setOperationAction(ISD::UDIVREM,    MVT::i32, Expand);
+  setOperationAction(ISD::SDIVREM,    MVT::i32, Expand);
+
+  // Bit manipulation: VAX has no native CLZ, CTZ, bswap, or popcount.
+  // CTZ could use FFS in the future; for now expand all to libcalls.
+  setOperationAction(ISD::CTLZ,       MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ,       MVT::i32, Expand);
+  setOperationAction(ISD::CTPOP,      MVT::i32, Expand);
+  setOperationAction(ISD::BSWAP,      MVT::i32, Expand);
+  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
+  // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
+  setOperationAction(ISD::ROTR,       MVT::i32, Expand);
+
+  // Dynamic stack allocation (VLAs): expand to SP adjustment.
+  setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
+  setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
+  setOperationAction(ISD::STACKRESTORE,       MVT::Other, Expand);
+
+  // Atomic fence: VAX has no explicit memory barrier instruction.
+  // The architecture has strict memory ordering (in-order, no store buffer),
+  // so fences expand to compiler barriers. MP synchronization uses
+  // interlocked instructions (BBSSI, BBCCI, ADAWI) rather than fences.
+  setOperationAction(ISD::ATOMIC_FENCE,       MVT::Other, Expand);
+
   // F_float (f32) support: VAX has native F_float arithmetic.
   setOperationAction(ISD::BR_CC,      MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC,  MVT::f32, Custom);
@@ -186,6 +219,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
@@ -360,6 +394,20 @@ SDValue VAXTargetLowering::LowerJumpTable(SDValue Op,
   SDLoc DL(JT);
   SDValue Table = DAG.getTargetJumpTable(JT->getIndex(), MVT::i32);
   return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Table);
+}
+
+SDValue VAXTargetLowering::LowerConstantPool(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  ConstantPoolSDNode *CP = cast<ConstantPoolSDNode>(Op);
+  SDLoc DL(CP);
+  SDValue Res;
+  if (CP->isMachineConstantPoolEntry())
+    Res = DAG.getTargetConstantPool(CP->getMachineCPVal(), MVT::i32,
+                                    CP->getAlign(), CP->getOffset());
+  else
+    Res = DAG.getTargetConstantPool(CP->getConstVal(), MVT::i32,
+                                    CP->getAlign(), CP->getOffset());
+  return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Res);
 }
 
 SDValue VAXTargetLowering::LowerVASTART(SDValue Op,
@@ -638,4 +686,19 @@ VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
 
   MI.eraseFromParent();
   return SinkMBB;
+}
+
+std::pair<unsigned, const TargetRegisterClass *>
+VAXTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                                                StringRef Constraint,
+                                                MVT VT) const {
+  if (Constraint.size() == 1) {
+    switch (Constraint[0]) {
+    case 'r':
+      return std::make_pair(0U, &VAX::GPRRegClass);
+    default:
+      break;
+    }
+  }
+  return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
 }

@@ -119,6 +119,16 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
           MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
       break;
     }
+    case MachineOperand::MO_ConstantPoolIndex: {
+      const MCSymbol *Sym = GetCPISymbol(MO.getIndex());
+      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+      if (MO.getOffset())
+        Expr = MCBinaryExpr::createAdd(
+            Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
+            OutContext);
+      Inst.addOperand(MCOperand::createExpr(Expr));
+      break;
+    }
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }
