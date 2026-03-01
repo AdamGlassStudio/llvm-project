@@ -335,6 +335,12 @@ def MOVW_mg : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movw\t$src, $sym",
     [(truncstorei16 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 
+// LEA_FI — materialize frame slot address as a register value.
+// Pseudo: expanded by eliminateFrameIndex to addl3 $offset, %fp, $dst.
+// Operand layout matches VAXMemOp (base, disp) for eliminateFrameIndex.
+def LEA_FI : Pseudo<(outs GPRnoPC:$dst), (ins VAXMemOp:$addr),
+    "#LEA_FI $addr, $dst", []>;
+
 //===----------------------------------------------------------------------===//
 // Phase 8 — Function calls
 //===----------------------------------------------------------------------===//
