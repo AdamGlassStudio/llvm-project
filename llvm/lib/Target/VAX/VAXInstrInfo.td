@@ -241,19 +241,19 @@ def BNEQ  : InstVAX<0x12, (outs), (ins brtarget:$dst), "bneq\t$dst",
     [(vax_brcc bb:$dst, VAXCC_NEQ)]>;
 def BGTR  : InstVAX<0x14, (outs), (ins brtarget:$dst), "bgtr\t$dst",
     [(vax_brcc bb:$dst, VAXCC_GTR)]>;
-def BGEQ  : InstVAX<0x16, (outs), (ins brtarget:$dst), "bgeq\t$dst",
+def BGEQ  : InstVAX<0x18, (outs), (ins brtarget:$dst), "bgeq\t$dst",
     [(vax_brcc bb:$dst, VAXCC_GEQ)]>;
-def BLSS  : InstVAX<0x17, (outs), (ins brtarget:$dst), "blss\t$dst",
+def BLSS  : InstVAX<0x19, (outs), (ins brtarget:$dst), "blss\t$dst",
     [(vax_brcc bb:$dst, VAXCC_LSS)]>;
 def BLEQ  : InstVAX<0x15, (outs), (ins brtarget:$dst), "bleq\t$dst",
     [(vax_brcc bb:$dst, VAXCC_LEQ)]>;
-def BGTRU : InstVAX<0x18, (outs), (ins brtarget:$dst), "bgtru\t$dst",
+def BGTRU : InstVAX<0x1A, (outs), (ins brtarget:$dst), "bgtru\t$dst",
     [(vax_brcc bb:$dst, VAXCC_GTRU)]>;
-def BGEQU : InstVAX<0x1C, (outs), (ins brtarget:$dst), "bgequ\t$dst",
+def BGEQU : InstVAX<0x1E, (outs), (ins brtarget:$dst), "bgequ\t$dst",
     [(vax_brcc bb:$dst, VAXCC_GEQU)]>;
-def BLSSU : InstVAX<0x1D, (outs), (ins brtarget:$dst), "blssu\t$dst",
+def BLSSU : InstVAX<0x1F, (outs), (ins brtarget:$dst), "blssu\t$dst",
     [(vax_brcc bb:$dst, VAXCC_LSSU)]>;
-def BLEQU : InstVAX<0x19, (outs), (ins brtarget:$dst), "blequ\t$dst",
+def BLEQU : InstVAX<0x1B, (outs), (ins brtarget:$dst), "blequ\t$dst",
     [(vax_brcc bb:$dst, VAXCC_LEQU)]>;
 }
 
@@ -270,3 +270,62 @@ def DECL : InstVAX<0xD7, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
   let Constraints = "$src = $dst";
 }
 }
+
+//===----------------------------------------------------------------------===//
+// Phase 7 — Sign/Zero-Extend Loads + Truncating Stores
+//===----------------------------------------------------------------------===//
+
+// CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
+// source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
+def CVTBL_rm : InstVAX<0x98, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "cvtbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sextloadi8 VAXMem:$src))]>;
+def CVTBL_rg : InstVAX<0x98, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "cvtbl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (sextloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+// Register source: interprets low byte of $src as signed byte, extends to long.
+def CVTBL_rr : InstVAX<0x98, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "cvtbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, i8))]>;
+
+// MOVZWL (0x3C) — Move Zero-Extended Word to Longword.
+// Covers zextloadi16 and extloadi16 (anyext is fine with zero-extension).
+def MOVZWL_rm : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "movzwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (zextloadi16 VAXMem:$src))]>;
+def MOVZWL_rm_e : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "movzwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (extloadi16 VAXMem:$src))]>;
+def MOVZWL_rg : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "movzwl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (zextloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+def MOVZWL_rg_e : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "movzwl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (extloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+
+// CVTWL (0x32) — Convert Word to Longword: sign-extends low 16 bits.
+def CVTWL_rm : InstVAX<0x32, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "cvtwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sextloadi16 VAXMem:$src))]>;
+def CVTWL_rg : InstVAX<0x32, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "cvtwl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (sextloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+def CVTWL_rr : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "cvtwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, i16))]>;
+
+// MOVB (0x90) — Move Byte: used for truncating stores of i32 to i8 memory.
+def MOVB_mr : InstVAX<0x90, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
+    "movb\t$src, $dst",
+    [(truncstorei8 GPRnoPC:$src, VAXMem:$dst)]>;
+def MOVB_mg : InstVAX<0x90, (outs), (ins GPRnoPC:$src, i32imm:$sym),
+    "movb\t$src, $sym",
+    [(truncstorei8 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+
+// MOVW (0xB0) — Move Word: used for truncating stores of i32 to i16 memory.
+def MOVW_mr : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
+    "movw\t$src, $dst",
+    [(truncstorei16 GPRnoPC:$src, VAXMem:$dst)]>;
+def MOVW_mg : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
+    "movw\t$src, $sym",
+    [(truncstorei16 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;

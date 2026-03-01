@@ -54,12 +54,19 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::SELECT,    MVT::i32, Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
 
-  // Extending loads from sub-i32 types: only i8 zero-extend is supported
-  // (via MOVZBL); sext and word-sized extends deferred to Phase 7.
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8, Legal);
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8, Expand);
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Expand);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Expand);
+  // Extending loads: all byte/word variants now legal via CVT/MOVZ instructions.
+  // i8 zero-extend: MOVZBL (Phase 5); i8 sign-extend: CVTBL (Phase 7).
+  // i16 zero-extend: MOVZWL (Phase 7); i16 sign-extend: CVTWL (Phase 7).
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8,  Legal); // MOVZBL
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i8,  Legal); // MOVZBL (anyext)
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8,  Legal); // CVTBL
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Legal); // MOVZWL
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i16, Legal); // MOVZWL (anyext)
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Legal); // CVTWL
+
+  // Truncating stores: MOVB (i8) and MOVW (i16).
+  setTruncStoreAction(MVT::i32, MVT::i8,  Legal);
+  setTruncStoreAction(MVT::i32, MVT::i16, Legal);
 
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
