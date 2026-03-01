@@ -85,6 +85,13 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
           MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
       break;
     }
+    case MachineOperand::MO_MachineBasicBlock: {
+      // Branch target — emit the basic block label as a symbol reference.
+      const MCSymbol *Sym = MO.getMBB()->getSymbol();
+      Inst.addOperand(
+          MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
+      break;
+    }
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }

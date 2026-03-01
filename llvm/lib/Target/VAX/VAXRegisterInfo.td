@@ -26,6 +26,11 @@ def PC  : VAXReg<15, "pc">,  DwarfRegNum<[15]>; // Program Counter   (R15)
 // but needed for condition-code modeling
 def PSW : Register<"psw"> { let Namespace = "VAX"; }
 
+// Non-allocatable register class used to model implicit CC def/use on
+// compare and branch instructions so the scheduler keeps them together.
+let isAllocatable = 0 in
+def PSWR : RegisterClass<"VAX", [i32], 32, (add PSW)>;
+
 //===----------------------------------------------------------------------===//
 // Register Classes
 //===----------------------------------------------------------------------===//
