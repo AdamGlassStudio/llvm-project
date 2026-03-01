@@ -41,3 +41,12 @@ def GPRnoPC : RegisterClass<"VAX", [i32], 32,
 // Registers valid as index registers (R0-R11 only; no AP/FP/SP/PC)
 def GPRI : RegisterClass<"VAX", [i32], 32,
     (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
+
+// Word (i16) register class — same physical regs as GPRI, low 16 bits used.
+// Allocation order: caller-saved first (R0-R5), then callee-saved (R6-R11).
+def GPRW : RegisterClass<"VAX", [i16], 32,
+    (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
+
+// Byte (i8) register class — same physical regs as GPRI, low 8 bits used.
+def GPRB : RegisterClass<"VAX", [i8], 32,
+    (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
