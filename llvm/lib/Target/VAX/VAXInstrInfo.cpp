@@ -24,6 +24,12 @@ void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 const DebugLoc &DL, Register DstReg,
                                 Register SrcReg, bool KillSrc,
                                 bool RenamableDst, bool RenamableSrc) const {
+  if (VAX::QPRRegClass.contains(DstReg, SrcReg)) {
+    // 64-bit register pair copy via MOVD.
+    BuildMI(MBB, MI, DL, get(VAX::MOVD_rr), DstReg)
+        .addReg(SrcReg, getKillRegState(KillSrc));
+    return;
+  }
   // MOVL covers all 32-bit register copies (both i32 and f32 — same hardware).
   BuildMI(MBB, MI, DL, get(VAX::MOVL_rr), DstReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
@@ -37,7 +43,8 @@ void VAXInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         Register VReg,
                                         MachineInstr::MIFlag Flags) const {
   DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
-  BuildMI(MBB, MI, DL, get(VAX::MOVL_mr))
+  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVD_mr : VAX::MOVL_mr;
+  BuildMI(MBB, MI, DL, get(Opc))
       .addReg(SrcReg, getKillRegState(isKill))
       .addFrameIndex(FrameIndex)
       .addImm(0);
@@ -50,7 +57,8 @@ void VAXInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                          Register VReg, unsigned SubReg,
                                          MachineInstr::MIFlag Flags) const {
   DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
-  BuildMI(MBB, MI, DL, get(VAX::MOVL_rm), DstReg)
+  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVD_rm : VAX::MOVL_rm;
+  BuildMI(MBB, MI, DL, get(Opc), DstReg)
       .addFrameIndex(FrameIndex)
       .addImm(0);
 }
