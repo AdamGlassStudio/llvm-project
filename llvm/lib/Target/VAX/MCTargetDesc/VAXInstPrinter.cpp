@@ -22,7 +22,8 @@ using namespace llvm;
 #include "VAXGenAsmWriter.inc"
 
 void VAXInstPrinter::printRegName(raw_ostream &O, MCRegister Reg) {
-  O << '%' << getRegisterName(Reg);
+  // VAX GAS uses bare register names: r0, r1, ..., ap, fp, sp, pc
+  O << getRegisterName(Reg);
 }
 
 void VAXInstPrinter::printInst(const MCInst *MI, uint64_t Address,
@@ -33,7 +34,7 @@ void VAXInstPrinter::printInst(const MCInst *MI, uint64_t Address,
 }
 
 void VAXInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
-                                  const MCSubtargetInfo &STI, raw_ostream &O) {
+                                  raw_ostream &O) {
   const MCOperand &Op = MI->getOperand(OpNo);
   if (Op.isReg()) {
     printRegName(O, Op.getReg());
