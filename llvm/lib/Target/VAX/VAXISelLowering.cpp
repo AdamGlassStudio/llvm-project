@@ -42,6 +42,9 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
 
+  // Jump table addresses are lowered to PC-relative wrappers.
+  setOperationAction(ISD::JumpTable, MVT::i32, Custom);
+
   // AND is lowered to BICL (bit-clear) since VAX has no direct AND instruction.
   setOperationAction(ISD::AND, MVT::i32, Custom);
 
@@ -49,6 +52,9 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Expanding BRCOND causes the DAG builder to produce BR_CC directly.
   setOperationAction(ISD::BR_CC,   MVT::i32,   Custom);
   setOperationAction(ISD::BRCOND,  MVT::Other,  Expand);
+
+  // Switch/jump tables: expand BR_JT to BRIND (load address from table, JMP).
+  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
 
   // Conditional value selection: SELECT_CC is custom (needed by i64 expansion),
   // SELECT expands to SELECT_CC.
@@ -101,6 +107,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::CALL:         return "VAXISD::CALL";
   case VAXISD::ASHL:         return "VAXISD::ASHL";
   case VAXISD::SELECT_CC:    return "VAXISD::SELECT_CC";
+  case VAXISD::PUSHL:        return "VAXISD::PUSHL";
   default:                   return nullptr;
   }
 }
@@ -109,6 +116,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
@@ -267,6 +275,14 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
 }
 
+SDValue VAXTargetLowering::LowerJumpTable(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  JumpTableSDNode *JT = cast<JumpTableSDNode>(Op);
+  SDLoc DL(JT);
+  SDValue Table = DAG.getTargetJumpTable(JT->getIndex(), MVT::i32);
+  return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Table);
+}
+
 SDValue VAXTargetLowering::LowerReturn(
     SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -338,22 +354,15 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   unsigned NumArgs   = ArgLocs.size();
   unsigned StackBytes = CCInfo.getStackSize();
 
-  // Reserve stack space for arguments.
-  Chain = DAG.getCALLSEQ_START(Chain, StackBytes, 0, DL);
+  // CALLSEQ_START with 0: PUSHLs will adjust SP incrementally.
+  Chain = DAG.getCALLSEQ_START(Chain, 0, 0, DL);
 
-  // Read SP after the CALLSEQ_START; store each arg at [SP + offset].
-  SDValue SPVal = DAG.getCopyFromReg(Chain, DL, VAX::SP, MVT::i32);
-  SmallVector<SDValue, 8> MemOps;
-  for (unsigned i = 0; i < NumArgs; i++) {
-    CCValAssign &VA = ArgLocs[i];
-    assert(VA.isMemLoc() && "VAX: all args must be on stack");
-    SDValue Addr = DAG.getNode(ISD::ADD, DL, MVT::i32, SPVal,
-                               DAG.getConstant(VA.getLocMemOffset(), DL, MVT::i32));
-    MemOps.push_back(DAG.getStore(Chain, DL, CLI.OutVals[i], Addr,
-                                  MachinePointerInfo::getStack(MF, VA.getLocMemOffset())));
+  // Push args in reverse order (right-to-left) using PUSHL.
+  // Each PUSHL decrements SP by 4 and stores the value.
+  for (int i = NumArgs - 1; i >= 0; --i) {
+    SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
+    Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, CLI.OutVals[i]);
   }
-  if (!MemOps.empty())
-    Chain = DAG.getNode(ISD::TokenFactor, DL, MVT::Other, MemOps);
 
   // Wrap callee for direct calls.
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))

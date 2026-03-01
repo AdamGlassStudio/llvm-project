@@ -35,6 +35,8 @@ enum NodeType : unsigned {
   ASHL,
   // Conditional select: (trueval, falseval, cc, cmp_glue) → result
   SELECT_CC,
+  // Push longword onto stack (SP autodecrement): (chain, val) → (chain, glue)
+  PUSHL,
 };
 } // namespace VAXISD
 
@@ -63,6 +65,7 @@ public:
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;

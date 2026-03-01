@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
@@ -108,6 +109,16 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     case MachineOperand::MO_RegisterMask:
       // Register mask is register-allocator metadata; not emitted to assembly.
       break;
+    case MachineOperand::MO_JumpTableIndex: {
+      SmallString<64> Name;
+      raw_svector_ostream(Name) << MAI->getPrivateGlobalPrefix()
+                                << "JTI" << getFunctionNumber()
+                                << '_' << MO.getIndex();
+      const MCSymbol *Sym = OutContext.getOrCreateSymbol(Name);
+      Inst.addOperand(
+          MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
+      break;
+    }
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }
