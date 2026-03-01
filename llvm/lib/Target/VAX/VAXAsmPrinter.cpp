@@ -9,6 +9,7 @@
 #include "VAX.h"
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
+#include "MCTargetDesc/VAXInstPrinter.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -40,6 +41,14 @@ public:
 
   void emitFunctionBodyStart() override;
   void emitInstruction(const MachineInstr *MI) override;
+
+  bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                       const char *ExtraCode, raw_ostream &OS) override;
+  bool PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                             const char *ExtraCode, raw_ostream &OS) override;
+
+private:
+  void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &OS);
 };
 
 } // end anonymous namespace
@@ -134,6 +143,51 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     }
   }
   EmitToStreamer(*OutStreamer, Inst);
+}
+
+void VAXAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
+                                 raw_ostream &OS) {
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  switch (MO.getType()) {
+  case MachineOperand::MO_Register:
+    // getRegisterName already includes the '%' prefix.
+    OS << VAXInstPrinter::getRegisterName(MO.getReg());
+    break;
+  case MachineOperand::MO_Immediate:
+    OS << '$' << MO.getImm();
+    break;
+  case MachineOperand::MO_GlobalAddress:
+    PrintSymbolOperand(MO, OS);
+    break;
+  case MachineOperand::MO_ExternalSymbol:
+    OS << *GetExternalSymbolSymbol(MO.getSymbolName());
+    break;
+  case MachineOperand::MO_MachineBasicBlock:
+    MO.getMBB()->getSymbol()->print(OS, MAI);
+    break;
+  default:
+    llvm_unreachable("VAXAsmPrinter::printOperand: unsupported operand type");
+  }
+}
+
+bool VAXAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
+                                     const char *ExtraCode, raw_ostream &OS) {
+  if (!ExtraCode || !ExtraCode[0]) {
+    printOperand(MI, OpNo, OS);
+    return false;
+  }
+  return AsmPrinter::PrintAsmOperand(MI, OpNo, ExtraCode, OS);
+}
+
+bool VAXAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
+                                           const char *ExtraCode,
+                                           raw_ostream &OS) {
+  const MachineOperand &MO = MI->getOperand(OpNo);
+  if (MO.isReg()) {
+    OS << "(" << VAXInstPrinter::getRegisterName(MO.getReg()) << ")";
+    return false;
+  }
+  return true;
 }
 
 // Force static initialization.
