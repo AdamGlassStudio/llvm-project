@@ -43,8 +43,9 @@ def GPR : RegisterClass<"VAX", [i32], 32,
 def GPRnoPC : RegisterClass<"VAX", [i32], 32,
     (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, AP, FP, SP)>;
 
-// Registers valid as index registers (R0-R11 only; no AP/FP/SP/PC)
-def GPRI : RegisterClass<"VAX", [i32], 32,
+// Registers valid as index registers (R0-R11 only; no AP/FP/SP/PC).
+// Also used for F_float (32-bit FP) values since VAX stores F_float in GPRs.
+def GPRI : RegisterClass<"VAX", [i32, f32], 32,
     (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
 
 // Word (i16) register class — same physical regs as GPRI, low 16 bits used.

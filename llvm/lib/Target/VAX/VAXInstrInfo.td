@@ -528,3 +528,73 @@ def SUBL3_ri_cc : InstVAX<0xC3, (outs GPRnoPC:$dst),
     "subl3\t$s, $m, $dst",
     [(set GPRnoPC:$dst, (subc GPRnoPC:$m, (i32 imm:$s)))]>;
 }
+
+//===----------------------------------------------------------------------===//
+// Phase 14B — F_float (32-bit floating point)
+//===----------------------------------------------------------------------===//
+
+// F_float memory operand (same layout as integer VAXMemOp).
+def VAXFMemOp : Operand<iPTR> {
+  let PrintMethod   = "printMemOperand";
+  let MIOperandInfo = (ops GPR, i32imm);
+}
+
+// MOVL for f32: load/store (reuse i32 move opcode, different type).
+def MOVF_rm : InstVAX<0xD0, (outs GPRI:$dst), (ins VAXFMemOp:$src),
+    "movl\t$src, $dst",
+    [(set GPRI:$dst, (f32 (load VAXMem:$src)))]>;
+def MOVF_mr : InstVAX<0xD0, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
+    "movl\t$src, $dst",
+    [(store (f32 GPRI:$src), VAXMem:$dst)]>;
+def MOVF_rr : InstVAX<0xD0, (outs GPRI:$dst), (ins GPRI:$src),
+    "movl\t$src, $dst", []>;
+
+// ADDF3 (0x41) — Add F_float: dst = src1 + src2.
+def ADDF3_rr : InstVAX<0x41, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
+    "addf3\t$a, $b, $dst",
+    [(set GPRI:$dst, (fadd GPRI:$a, GPRI:$b))]>;
+// SUBF3 (0x43) — Subtract F_float: dst = src2 - src1.
+def SUBF3_rr : InstVAX<0x43, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$m),
+    "subf3\t$s, $m, $dst",
+    [(set GPRI:$dst, (fsub GPRI:$m, GPRI:$s))]>;
+// MULF3 (0x45) — Multiply F_float: dst = src1 * src2.
+def MULF3_rr : InstVAX<0x45, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
+    "mulf3\t$a, $b, $dst",
+    [(set GPRI:$dst, (fmul GPRI:$a, GPRI:$b))]>;
+// DIVF3 (0x47) — Divide F_float: dst = src2 / src1.
+def DIVF3_rr : InstVAX<0x47, (outs GPRI:$dst), (ins GPRI:$dv, GPRI:$dd),
+    "divf3\t$dv, $dd, $dst",
+    [(set GPRI:$dst, (fdiv GPRI:$dd, GPRI:$dv))]>;
+
+// MNEGF (0x52) — Negate F_float: dst = -src.
+def MNEGF : InstVAX<0x52, (outs GPRI:$dst), (ins GPRI:$src),
+    "mnegf\t$src, $dst",
+    [(set GPRI:$dst, (fneg GPRI:$src))]>;
+
+// CVTFL (0x56) — Convert F_float to Longword (float→int truncation).
+def CVTFL : InstVAX<0x56, (outs GPRnoPC:$dst), (ins GPRI:$src),
+    "cvtfl\t$src, $dst",
+    [(set GPRnoPC:$dst, (fp_to_sint GPRI:$src))]>;
+// CVTLF (0x4E) — Convert Longword to F_float (int→float).
+def CVTLF : InstVAX<0x4E, (outs GPRI:$dst), (ins GPRnoPC:$src),
+    "cvtlf\t$src, $dst",
+    [(set GPRI:$dst, (sint_to_fp GPRnoPC:$src))]>;
+
+// FP compare: CMPF sets PSW, used by FP branch/select via VAXISD::FCMP.
+def SDT_VAXFCMP : SDTypeProfile<0, 2, [SDTCisSameAs<0,1>, SDTCisFP<0>]>;
+def vax_fcmp : SDNode<"VAXISD::FCMP", SDT_VAXFCMP, [SDNPOutGlue]>;
+
+let Defs = [PSW] in {
+def CMPF : InstVAX<0x51, (outs), (ins GPRI:$a, GPRI:$b),
+    "cmpf\t$a, $b",
+    [(vax_fcmp GPRI:$a, GPRI:$b)]>;
+def TSTF : InstVAX<0x53, (outs), (ins GPRI:$a),
+    "tstf\t$a", []>;
+}
+
+// SELECT_CC for f32 results (same diamond expansion as i32).
+// No DAG pattern — selected manually in LowerSELECT_CC.
+let usesCustomInserter = 1 in
+def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
+    (ins GPRI:$truev, GPRI:$falsev, i32imm:$cc),
+    "#SELECT_CC_F $truev, $falsev, $cc", []>;
