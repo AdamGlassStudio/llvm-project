@@ -579,6 +579,7 @@ set(LLVM_ALL_TARGETS
   Sparc
   SPIRV
   SystemZ
+  VAX
   VE
   WebAssembly
   X86

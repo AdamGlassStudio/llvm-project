@@ -1,0 +1,92 @@
+//===-- VAXTargetMachine.cpp - Define TargetMachine for VAX -----------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#include "VAXTargetMachine.h"
+#include "MCTargetDesc/VAXMCTargetDesc.h"
+#include "TargetInfo/VAXTargetInfo.h"
+#include "VAX.h"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/CodeGen.h"
+#include <optional>
+
+using namespace llvm;
+
+// VAX data layout (little-endian, ELF, 32-bit pointers):
+//   e        - little-endian
+//   m:e      - ELF name mangling
+//   p:32:32  - 32-bit pointers, 32-bit aligned
+//   i1:8:32  - i1: 8-bit storage, 32-bit preferred align
+//   i8:8:32  - i8: 8-bit storage, 32-bit preferred align
+//   i16:16:32- i16: 16-bit storage, 32-bit preferred align
+//   i64:32   - i64: 32-bit aligned (VAX has no 64-bit alignment requirement)
+//   f64:32   - D_float: 32-bit aligned
+//   a:0:32   - aggregates: 32-bit preferred align
+//   n32      - native integer width: 32 bits
+static const char *VAXDataLayout =
+    "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32";
+
+static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
+  return RM.value_or(Reloc::Static);
+}
+
+static CodeModel::Model
+getEffectiveCodeModel(std::optional<CodeModel::Model> CM) {
+  if (CM && *CM != CodeModel::Small && *CM != CodeModel::Large)
+    report_fatal_error("VAX only supports Small and Large code models");
+  return CM.value_or(CodeModel::Small);
+}
+
+VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
+                                   StringRef CPU, StringRef FS,
+                                   const TargetOptions &Options,
+                                   std::optional<Reloc::Model> RM,
+                                   std::optional<CodeModel::Model> CM,
+                                   CodeGenOptLevel OL, bool JIT)
+    : CodeGenTargetMachineImpl(T, VAXDataLayout, TT, CPU, FS, Options,
+                               getEffectiveRelocModel(RM),
+                               getEffectiveCodeModel(CM), OL),
+      TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
+      Subtarget(TT, std::string(CPU), std::string(FS), *this) {
+  initAsmInfo();
+}
+
+VAXTargetMachine::~VAXTargetMachine() = default;
+
+namespace {
+
+class VAXPassConfig : public TargetPassConfig {
+public:
+  VAXPassConfig(VAXTargetMachine &TM, PassManagerBase &PM)
+      : TargetPassConfig(TM, PM) {}
+
+  VAXTargetMachine &getVAXTargetMachine() const {
+    return getTM<VAXTargetMachine>();
+  }
+
+  bool addInstSelector() override;
+};
+
+} // end anonymous namespace
+
+TargetPassConfig *VAXTargetMachine::createPassConfig(PassManagerBase &PM) {
+  return new VAXPassConfig(*this, PM);
+}
+
+bool VAXPassConfig::addInstSelector() {
+  addPass(createVAXISelDag(getVAXTargetMachine(), getOptLevel()));
+  return false;
+}
+
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
+  RegisterTargetMachine<VAXTargetMachine> X(getTheVAXTarget());
+  PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeVAXDAGToDAGISelLegacyPass(PR);
+}
