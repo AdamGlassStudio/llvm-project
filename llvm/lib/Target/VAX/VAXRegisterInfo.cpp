@@ -54,8 +54,20 @@ VAXRegisterInfo::getPointerRegClass(unsigned Kind) const {
 bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                           int SPAdj, unsigned FIOperandNum,
                                           RegScavenger *RS) const {
-  // TODO: implement frame index elimination in Phase 3
-  report_fatal_error("VAXRegisterInfo::eliminateFrameIndex not yet implemented");
+  MachineInstr &MI = *II;
+  MachineFunction &MF = *MI.getParent()->getParent();
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+
+  int FI = MI.getOperand(FIOperandNum).getIndex();
+
+  // Object offset is negative (locals are below FP on stack-grows-down).
+  // The displacement operand is at FIOperandNum+1 (VAXMemOp = base, disp).
+  int64_t Offset = MFI.getObjectOffset(FI) +
+                   MI.getOperand(FIOperandNum + 1).getImm();
+
+  MI.getOperand(FIOperandNum).ChangeToRegister(VAX::FP, false);
+  MI.getOperand(FIOperandNum + 1).setImm(Offset);
+  return false;
 }
 
 Register VAXRegisterInfo::getFrameRegister(const MachineFunction &MF) const {
