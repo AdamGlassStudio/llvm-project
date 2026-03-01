@@ -8,6 +8,7 @@
 
 #include "VAXISelLowering.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
+#include "VAXMachineFunctionInfo.h"
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -55,6 +56,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // Switch/jump tables: expand BR_JT to BRIND (load address from table, JMP).
   setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+
+  // Variadic function support.
+  setOperationAction(ISD::VASTART, MVT::Other, Custom);
+  setOperationAction(ISD::VAARG,   MVT::Other, Expand);
+  setOperationAction(ISD::VACOPY,  MVT::Other, Expand);
+  setOperationAction(ISD::VAEND,   MVT::Other, Expand);
 
   // Conditional value selection: SELECT_CC is custom (needed by i64 expansion),
   // SELECT expands to SELECT_CC.
@@ -122,6 +129,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
+  case ISD::VASTART:       return LowerVASTART(Op, DAG);
   default:
     report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
                              "opcode ") +
@@ -283,6 +291,22 @@ SDValue VAXTargetLowering::LowerJumpTable(SDValue Op,
   return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Table);
 }
 
+SDValue VAXTargetLowering::LowerVASTART(SDValue Op,
+                                         SelectionDAG &DAG) const {
+  // va_start stores the address of the first variadic arg into the va_list ptr.
+  // On VAX: AP + VarArgsOffset (AP+0 = argcount, AP+4 = first arg, ...).
+  MachineFunction &MF = DAG.getMachineFunction();
+  VAXMachineFunctionInfo *FuncInfo = MF.getInfo<VAXMachineFunctionInfo>();
+  SDLoc DL(Op);
+
+  SDValue AP = DAG.getRegister(VAX::AP, MVT::i32);
+  SDValue Offset = DAG.getConstant(FuncInfo->getVarArgsOffset(), DL, MVT::i32);
+  SDValue VAListAddr = Op.getOperand(1); // pointer to va_list
+  SDValue Src = DAG.getNode(ISD::ADD, DL, MVT::i32, AP, Offset);
+  return DAG.getStore(Op.getOperand(0), DL, Src, VAListAddr,
+                      MachinePointerInfo());
+}
+
 SDValue VAXTargetLowering::LowerReturn(
     SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs,
@@ -335,6 +359,15 @@ SDValue VAXTargetLowering::LowerFormalArguments(
                                MachinePointerInfo());
     InVals.push_back(Load);
   }
+
+  // For variadic functions, record where the first variadic arg starts.
+  // AP+0 = arg count, AP+4 = first arg. Fixed args occupy ArgLocs.size() slots.
+  if (isVarArg) {
+    VAXMachineFunctionInfo *FuncInfo =
+        MF.getInfo<VAXMachineFunctionInfo>();
+    FuncInfo->setVarArgsOffset(4 + ArgLocs.size() * 4);
+  }
+
   return Chain;
 }
 
