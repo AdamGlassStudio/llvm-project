@@ -9,10 +9,12 @@
 #include "VAX.h"
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
+#include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -35,9 +37,8 @@ public:
 } // end anonymous namespace
 
 void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
-  MCInst Inst;
-  getLoweredMCInst(MI, Inst);
-  EmitToStreamer(*OutStreamer, Inst);
+  // TODO: implement MCInstLowering in Phase 3
+  report_fatal_error("VAXAsmPrinter: instruction emission not yet implemented");
 }
 
 // Force static initialization.

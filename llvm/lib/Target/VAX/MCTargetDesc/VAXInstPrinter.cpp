@@ -28,7 +28,7 @@ void VAXInstPrinter::printRegName(raw_ostream &O, MCRegister Reg) {
 void VAXInstPrinter::printInst(const MCInst *MI, uint64_t Address,
                                StringRef Annot, const MCSubtargetInfo &STI,
                                raw_ostream &O) {
-  printInstruction(MI, Address, STI, O);
+  printInstruction(MI, Address, O);
   printAnnotation(O, Annot);
 }
 
@@ -44,5 +44,5 @@ void VAXInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
   assert(Op.isExpr() && "Unknown operand type");
-  Op.getExpr()->print(O, &MAI);
+  MAI.printExpr(O, *Op.getExpr());
 }

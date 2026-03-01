@@ -24,13 +24,8 @@ public:
   explicit VAXDAGToDAGISel(VAXTargetMachine &TM, CodeGenOptLevel OptLevel)
       : SelectionDAGISel(TM, OptLevel) {}
 
-  StringRef getPassName() const override {
-    return "VAX DAG->DAG Pattern Instruction Selection";
-  }
-
+  // SelectionDAGISel::Select is pure virtual — stub until Phase 4.
   void Select(SDNode *N) override;
-
-#include "VAXGenDAGISel.inc"
 };
 
 } // end anonymous namespace
@@ -40,24 +35,20 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     N->setNodeId(-1);
     return;
   }
-  SelectCode(N);
+  // TODO: implement instruction selection in Phase 4.
+  report_fatal_error("VAXDAGToDAGISel: instruction selection not yet implemented");
 }
 
-FunctionPass *llvm::createVAXISelDag(VAXTargetMachine &TM,
-                                      CodeGenOptLevel OptLevel) {
-  return new VAXDAGToDAGISel(TM, OptLevel);
-}
-
-// Legacy pass wrapper
 namespace {
-struct VAXDAGToDAGISelLegacy : public SelectionDAGISelLegacyWrapper<VAXDAGToDAGISel> {
+
+class VAXDAGToDAGISelLegacy : public SelectionDAGISelLegacy {
+public:
   static char ID;
-  VAXDAGToDAGISelLegacy(VAXTargetMachine &TM, CodeGenOptLevel OptLevel)
-      : SelectionDAGISelLegacyWrapper<VAXDAGToDAGISel>(ID, TM, OptLevel) {}
-  StringRef getPassName() const override {
-    return "VAX DAG->DAG Pattern Instruction Selection";
-  }
+  explicit VAXDAGToDAGISelLegacy(VAXTargetMachine &TM, CodeGenOptLevel OptLevel)
+      : SelectionDAGISelLegacy(
+            ID, std::make_unique<VAXDAGToDAGISel>(TM, OptLevel)) {}
 };
+
 } // end anonymous namespace
 
 char VAXDAGToDAGISelLegacy::ID = 0;
@@ -65,7 +56,7 @@ char VAXDAGToDAGISelLegacy::ID = 0;
 INITIALIZE_PASS(VAXDAGToDAGISelLegacy, "vax-isel",
                 "VAX DAG->DAG Pattern Instruction Selection", false, false)
 
-void llvm::initializeVAXDAGToDAGISelLegacyPass(PassRegistry &Registry) {
-  INITIALIZE_PASS_DEPENDENCY(SelectionDAGISel)
-  Registry.registerPass(*PassInfo::NormalCtor_t(nullptr), false);
+FunctionPass *llvm::createVAXISelDag(VAXTargetMachine &TM,
+                                      CodeGenOptLevel OptLevel) {
+  return new VAXDAGToDAGISelLegacy(TM, OptLevel);
 }

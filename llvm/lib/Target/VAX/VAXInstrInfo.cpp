@@ -7,10 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXInstrInfo.h"
+#include "VAXSubtarget.h"
 
 using namespace llvm;
 
 #define GET_INSTRINFO_CTOR_DTOR
 #include "VAXGenInstrInfo.inc"
 
-VAXInstrInfo::VAXInstrInfo() : VAXGenInstrInfo(), RI() {}
+VAXInstrInfo::VAXInstrInfo(const VAXSubtarget &STI)
+    : VAXGenInstrInfo(STI, RI), RI() {}

@@ -12,7 +12,7 @@
 
 using namespace llvm;
 
-bool VAXFrameLowering::hasFP(const MachineFunction &MF) const {
+bool VAXFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   // VAX CALLS always establishes a frame pointer.
   return true;
 }

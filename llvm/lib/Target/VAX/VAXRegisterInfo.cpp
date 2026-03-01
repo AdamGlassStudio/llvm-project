@@ -17,6 +17,10 @@
 
 using namespace llvm;
 
+// Include enum values so GET_REGINFO_TARGET_DESC can reference VAX::GPRRegClassID etc.
+#define GET_REGINFO_ENUM
+#include "VAXGenRegisterInfo.inc"
+
 #define GET_REGINFO_TARGET_DESC
 #include "VAXGenRegisterInfo.inc"
 
@@ -40,6 +44,11 @@ BitVector VAXRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   markSuperRegs(Reserved, VAX::SP); // Stack Pointer
   markSuperRegs(Reserved, VAX::PC); // Program Counter
   return Reserved;
+}
+
+const TargetRegisterClass *
+VAXRegisterInfo::getPointerRegClass(unsigned Kind) const {
+  return &VAX::GPRRegClass;
 }
 
 bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,

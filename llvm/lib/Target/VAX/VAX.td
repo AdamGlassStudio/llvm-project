@@ -12,6 +12,8 @@ include "VAXRegisterInfo.td"
 include "VAXCallingConv.td"
 include "VAXInstrInfo.td"
 
+defm : RemapAllTargetPseudoPointerOperands<GPR>;
+
 def VAXInstrInfo : InstrInfo;
 
 //===----------------------------------------------------------------------===//
