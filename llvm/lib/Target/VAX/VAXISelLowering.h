@@ -29,6 +29,8 @@ enum NodeType : unsigned {
   // Conditional branch using condition codes from a preceding CMP.
   // Operands: (chain, dest:BB, cc:i32, glue)
   BRCC,
+  // CALLS instruction node (chain, count, callee, regmask) → (chain, glue)
+  CALL,
 };
 } // namespace VAXISD
 

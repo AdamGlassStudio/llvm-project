@@ -17,7 +17,7 @@ using namespace llvm;
 #include "VAXGenInstrInfo.inc"
 
 VAXInstrInfo::VAXInstrInfo(const VAXSubtarget &STI)
-    : VAXGenInstrInfo(STI, RI), RI() {}
+    : VAXGenInstrInfo(STI, RI, VAX::ADJCALLSTACKDOWN, VAX::ADJCALLSTACKUP), RI() {}
 
 void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator MI,

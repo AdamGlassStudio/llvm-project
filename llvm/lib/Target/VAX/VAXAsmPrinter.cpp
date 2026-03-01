@@ -92,6 +92,9 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
           MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
       break;
     }
+    case MachineOperand::MO_RegisterMask:
+      // Register mask is register-allocator metadata; not emitted to assembly.
+      break;
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }
