@@ -43,6 +43,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+  setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
   setOperationAction(ISD::ConstantPool,  MVT::i32, Custom);
 
   // Jump table addresses are lowered to PC-relative wrappers.
@@ -235,6 +236,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  case ISD::GlobalTLSAddress: return LowerGlobalTLSAddress(Op, DAG);
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
@@ -402,6 +404,13 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   SDLoc DL(GN);
   SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset());
   return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
+}
+
+SDValue VAXTargetLowering::LowerGlobalTLSAddress(SDValue Op,
+                                                  SelectionDAG &DAG) const {
+  // VAX has no hardware TLS register — lower all TLS models to emulated TLS,
+  // which calls __emutls_get_address() at runtime.
+  return LowerToTLSEmulatedModel(cast<GlobalAddressSDNode>(Op), DAG);
 }
 
 SDValue VAXTargetLowering::LowerJumpTable(SDValue Op,
