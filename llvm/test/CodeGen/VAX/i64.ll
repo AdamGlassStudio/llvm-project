@@ -1,19 +1,19 @@
 ; RUN: llc -march=vax < %s | FileCheck %s
 
-; i64 add with carry propagation
+; i64 add with carry propagation via ADWC
 define i64 @test_add64(i64 %a, i64 %b) {
 ; CHECK-LABEL: test_add64:
 ; CHECK: addl3
-; CHECK: blssu
-; CHECK: addl3
+; CHECK: adwc
   %r = add i64 %a, %b
   ret i64 %r
 }
 
-; i64 sub with borrow
+; i64 sub with borrow via SBWC
 define i64 @test_sub64(i64 %a, i64 %b) {
 ; CHECK-LABEL: test_sub64:
 ; CHECK: subl3
+; CHECK: sbwc
   %r = sub i64 %a, %b
   ret i64 %r
 }
