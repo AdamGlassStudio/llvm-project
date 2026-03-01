@@ -62,17 +62,37 @@ SDValue VAXTargetLowering::LowerReturn(
     const SmallVectorImpl<ISD::OutputArg> &Outs,
     const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
     SelectionDAG &DAG) const {
-  // TODO: implement in Phase 3
-  report_fatal_error("VAXTargetLowering::LowerReturn not yet implemented");
+  MachineFunction &MF = DAG.getMachineFunction();
+  SmallVector<CCValAssign, 4> RVLocs;
+  CCState CCInfo(CallConv, isVarArg, MF, RVLocs, *DAG.getContext());
+  CCInfo.AnalyzeReturn(Outs, RetCC_VAX);
+
+  SDValue Flag;
+  SmallVector<SDValue, 4> RetOps;
+  RetOps.push_back(Chain);
+
+  for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
+    CCValAssign &VA = RVLocs[i];
+    assert(VA.isRegLoc() && "VAX: all return values must be in registers");
+    Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVals[i], Flag);
+    Flag = Chain.getValue(1);
+    RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+  }
+
+  RetOps[0] = Chain;
+  if (Flag.getNode())
+    RetOps.push_back(Flag);
+  return DAG.getNode(VAXISD::RET_FLAG, DL, MVT::Other, RetOps);
 }
 
 SDValue VAXTargetLowering::LowerFormalArguments(
     SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
-  // TODO: implement in Phase 3
-  report_fatal_error(
-      "VAXTargetLowering::LowerFormalArguments not yet implemented");
+  // Phase 3: no argument lowering yet — will be implemented in Phase 8.
+  if (!Ins.empty())
+    report_fatal_error("VAX: function arguments not yet supported (Phase 8)");
+  return Chain;
 }
 
 SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
