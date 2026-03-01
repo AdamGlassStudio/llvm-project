@@ -2801,6 +2801,15 @@ def HexagonSystemLibrary
     exp10f, exp10, exp10l_f128, __stack_chk_fail, __stack_chk_guard)>;
 
 //===----------------------------------------------------------------------===//
+// VAX Runtime Libcalls
+//===----------------------------------------------------------------------===//
+
+def isVAX : RuntimeLibcallPredicate<"TT.getArch() == Triple::vax">;
+
+def VAXSystemLibrary
+    : SystemRuntimeLibrary<isVAX, (add DefaultRuntimeLibcallImpls)>;
+
+//===----------------------------------------------------------------------===//
 // Lanai Runtime Libcalls
 //===----------------------------------------------------------------------===//
 

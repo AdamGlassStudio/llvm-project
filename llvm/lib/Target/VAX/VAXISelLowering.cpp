@@ -50,15 +50,22 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::BR_CC,   MVT::i32,   Custom);
   setOperationAction(ISD::BRCOND,  MVT::Other,  Expand);
 
-  // Conditional value selection: expand to branch sequence (Phase 6 deferred).
+  // Conditional value selection: SELECT_CC is custom (needed by i64 expansion),
+  // SELECT expands to SELECT_CC.
   setOperationAction(ISD::SELECT,    MVT::i32, Expand);
-  setOperationAction(ISD::SELECT_CC, MVT::i32, Expand);
+  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
 
   // VAX DIVL is signed only; unsigned div/rem expand to libcalls.
   setOperationAction(ISD::UDIV, MVT::i32, Expand);
   setOperationAction(ISD::UREM, MVT::i32, Expand);
   // Signed remainder also needs expansion (no REML instruction).
   setOperationAction(ISD::SREM, MVT::i32, Expand);
+
+  // i64 mul expansion needs umul_lohi/smul_lohi → expand to libcalls.
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::MULHU, MVT::i32, Expand);
+  setOperationAction(ISD::MULHS, MVT::i32, Expand);
 
   // Shifts: SHL is handled directly by ASHL. SRA and SRL need custom lowering
   // because VAX ASHL uses negative count for right shift (arithmetic), and
@@ -93,6 +100,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::BRCC:         return "VAXISD::BRCC";
   case VAXISD::CALL:         return "VAXISD::CALL";
   case VAXISD::ASHL:         return "VAXISD::ASHL";
+  case VAXISD::SELECT_CC:    return "VAXISD::SELECT_CC";
   default:                   return nullptr;
   }
 }
@@ -105,6 +113,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
+  case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
   default:
     report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
                              "opcode ") +
@@ -140,6 +149,39 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   SDValue Cmp = DAG.getNode(VAXISD::CMP, DL, MVT::Glue, LHS, RHS);
   return DAG.getNode(VAXISD::BRCC, DL, MVT::Other,
                      Chain, Dest,
+                     DAG.getConstant(VAXCC, DL, MVT::i32),
+                     Cmp);
+}
+
+static unsigned mapISDCCToVAXCC(ISD::CondCode CC) {
+  switch (CC) {
+  default: llvm_unreachable("unsupported condition code for VAX SELECT_CC");
+  case ISD::SETEQ:  return 0;
+  case ISD::SETNE:  return 1;
+  case ISD::SETGT:  return 2;
+  case ISD::SETGE:  return 3;
+  case ISD::SETLT:  return 4;
+  case ISD::SETLE:  return 5;
+  case ISD::SETUGT: return 6;
+  case ISD::SETUGE: return 7;
+  case ISD::SETULT: return 8;
+  case ISD::SETULE: return 9;
+  }
+}
+
+SDValue VAXTargetLowering::LowerSELECT_CC(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue LHS = Op.getOperand(0);
+  SDValue RHS = Op.getOperand(1);
+  SDValue TrueV = Op.getOperand(2);
+  SDValue FalseV = Op.getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
+
+  unsigned VAXCC = mapISDCCToVAXCC(CC);
+  SDValue Cmp = DAG.getNode(VAXISD::CMP, DL, MVT::Glue, LHS, RHS);
+  return DAG.getNode(VAXISD::SELECT_CC, DL, Op.getValueType(),
+                     TrueV, FalseV,
                      DAG.getConstant(VAXCC, DL, MVT::i32),
                      Cmp);
 }
@@ -348,4 +390,64 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     InVals.push_back(RV.getValue(0));
   }
   return Chain;
+}
+
+// Expand SELECT_CC_Pseudo into a branch diamond:
+//   ThisMBB:
+//     (CMP already set flags)
+//     bXX  SinkMBB          (branch on TRUE condition to sink)
+//   FalseMBB:
+//     (fallthrough: false value)
+//   SinkMBB:
+//     %dst = PHI(%truev, ThisMBB, %falsev, FalseMBB)
+MachineBasicBlock *
+VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
+                                                MachineBasicBlock *BB) const {
+  assert(MI.getOpcode() == VAX::SELECT_CC_Pseudo &&
+         "Unexpected custom inserter opcode");
+
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+
+  Register DstReg = MI.getOperand(0).getReg();
+  Register TrueReg = MI.getOperand(1).getReg();
+  Register FalseReg = MI.getOperand(2).getReg();
+  unsigned VAXCC = MI.getOperand(3).getImm();
+
+  // Map VAXCC integer to the branch opcode.
+  static const unsigned BrOpcodes[] = {
+    VAX::BEQL, VAX::BNEQ, VAX::BGTR, VAX::BGEQ,
+    VAX::BLSS, VAX::BLEQ, VAX::BGTRU, VAX::BGEQU,
+    VAX::BLSSU, VAX::BLEQU
+  };
+  assert(VAXCC < std::size(BrOpcodes) && "Invalid VAXCC");
+  unsigned BrOpc = BrOpcodes[VAXCC];
+
+  MachineFunction *MF = BB->getParent();
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator I = ++BB->getIterator();
+
+  MachineBasicBlock *FalseMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  MF->insert(I, FalseMBB);
+  MF->insert(I, SinkMBB);
+
+  SinkMBB->splice(SinkMBB->begin(), BB,
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  BB->addSuccessor(FalseMBB);
+  BB->addSuccessor(SinkMBB);
+  BuildMI(BB, DL, TII.get(BrOpc)).addMBB(SinkMBB);
+
+  FalseMBB->addSuccessor(SinkMBB);
+
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
+      .addReg(TrueReg)
+      .addMBB(BB)
+      .addReg(FalseReg)
+      .addMBB(FalseMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
 }

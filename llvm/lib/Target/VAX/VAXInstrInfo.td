@@ -342,6 +342,23 @@ def LEA_FI : Pseudo<(outs GPRnoPC:$dst), (ins VAXMemOp:$addr),
     "#LEA_FI $addr, $dst", []>;
 
 //===----------------------------------------------------------------------===//
+// SELECT_CC pseudo — expanded to branch diamond by EmitInstrWithCustomInserter
+//===----------------------------------------------------------------------===//
+
+def SDT_VAXSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
+                                            SDTCisSameAs<1, 2>,
+                                            SDTCisVT<3, i32>]>;
+def vax_select_cc : SDNode<"VAXISD::SELECT_CC", SDT_VAXSelectCC,
+    [SDNPInGlue]>;
+
+let usesCustomInserter = 1 in
+def SELECT_CC_Pseudo : Pseudo<(outs GPRnoPC:$dst),
+    (ins GPRnoPC:$truev, GPRnoPC:$falsev, i32imm:$cc),
+    "#SELECT_CC $truev, $falsev, $cc",
+    [(set GPRnoPC:$dst, (vax_select_cc GPRnoPC:$truev, GPRnoPC:$falsev,
+                                        (i32 imm:$cc)))]>;
+
+//===----------------------------------------------------------------------===//
 // Phase 10 — Shift + Rotate
 //===----------------------------------------------------------------------===//
 
