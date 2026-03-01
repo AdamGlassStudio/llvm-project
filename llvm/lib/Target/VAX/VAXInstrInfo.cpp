@@ -6,8 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "VAX.h"
 #include "VAXInstrInfo.h"
 #include "VAXSubtarget.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 
 using namespace llvm;
 
@@ -16,3 +18,13 @@ using namespace llvm;
 
 VAXInstrInfo::VAXInstrInfo(const VAXSubtarget &STI)
     : VAXGenInstrInfo(STI, RI), RI() {}
+
+void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator MI,
+                                const DebugLoc &DL, Register DstReg,
+                                Register SrcReg, bool KillSrc,
+                                bool RenamableDst, bool RenamableSrc) const {
+  // All GPR registers are i32; MOVL covers all GPR→GPR copies.
+  BuildMI(MBB, MI, DL, get(VAX::MOVL_rr), DstReg)
+      .addReg(SrcReg, getKillRegState(KillSrc));
+}

@@ -47,3 +47,22 @@ void VAXInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   assert(Op.isExpr() && "Unknown operand type");
   MAI.printExpr(O, *Op.getExpr());
 }
+
+// Memory operand: OpNo+0 = base register, OpNo+1 = signed displacement.
+// Prints as: disp(base), or (base) when displacement is 0.
+void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
+                                     raw_ostream &O) {
+  const MCOperand &Base = MI->getOperand(OpNo);
+  const MCOperand &Disp = MI->getOperand(OpNo + 1);
+
+  // Displacement: may be immediate or an expression (e.g. frame index fixup).
+  if (Disp.isImm() && Disp.getImm() != 0)
+    O << Disp.getImm();
+  else if (Disp.isExpr())
+    MAI.printExpr(O, *Disp.getExpr());
+
+  O << '(';
+  assert(Base.isReg() && "Memory base must be a register");
+  printRegName(O, Base.getReg());
+  O << ')';
+}
