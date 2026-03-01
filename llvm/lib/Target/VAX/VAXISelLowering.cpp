@@ -111,6 +111,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Legal); // MOVZWL
   setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i16, Legal); // MOVZWL (anyext)
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Legal); // CVTWL
+  // i1 loads: C _Bool is i1 in LLVM IR. Promote to byte load (MOVZBL).
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i1, Promote);
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i1, Promote);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i1, Promote);
 
   // Truncating stores: MOVB (i8) and MOVW (i16).
   setTruncStoreAction(MVT::i32, MVT::i8,  Legal);
@@ -140,6 +144,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
 
+  // 64-bit shift parts: expand SHL_PARTS/SRL_PARTS/SRA_PARTS so the
+  // legalizer handles i64 shifts by splitting into i32 operations.
+  setOperationAction(ISD::SHL_PARTS,  MVT::i32, Expand);
+  setOperationAction(ISD::SRL_PARTS,  MVT::i32, Expand);
+  setOperationAction(ISD::SRA_PARTS,  MVT::i32, Expand);
+
   // Dynamic stack allocation (VLAs): expand to SP adjustment.
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
   setOperationAction(ISD::STACKSAVE,          MVT::Other, Expand);
@@ -150,6 +160,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // so fences expand to compiler barriers. MP synchronization uses
   // interlocked instructions (BBSSI, BBCCI, ADAWI) rather than fences.
   setOperationAction(ISD::ATOMIC_FENCE,       MVT::Other, Expand);
+
+  // FP bitcast: VAX D_float is not IEEE754, so bitcast between FP and int
+  // must go through memory (store as one type, load as another).
+  setOperationAction(ISD::BITCAST,    MVT::f32, Expand);
+  setOperationAction(ISD::BITCAST,    MVT::i32, Expand);
+  setOperationAction(ISD::BITCAST,    MVT::f64, Expand);
 
   // F_float (f32) support: VAX has native F_float arithmetic.
   setOperationAction(ISD::BR_CC,      MVT::f32, Custom);
@@ -587,9 +603,35 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   // Push args in reverse order (right-to-left) using PUSHL.
   // Each PUSHL decrements SP by 4 and stores the value.
+  // f64 args need two PUSHLs (store to stack temp, load as two i32 halves).
   for (int i = NumArgs - 1; i >= 0; --i) {
     SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
-    Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, CLI.OutVals[i]);
+    SDValue Arg = CLI.OutVals[i];
+    if (Arg.getValueType() == MVT::f64) {
+      // f64 (D_float): store to temp stack slot, load as two i32, push both.
+      SDValue StackSlot = DAG.CreateStackTemporary(MVT::f64);
+      Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
+                           MachinePointerInfo());
+      SDValue HiPtr = DAG.getNode(ISD::ADD, DL, MVT::i32, StackSlot,
+                                  DAG.getConstant(4, DL, MVT::i32));
+      SDValue Hi = DAG.getLoad(MVT::i32, DL, Chain, HiPtr,
+                               MachinePointerInfo());
+      SDValue Lo = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
+                               MachinePointerInfo());
+      // Push high word first (higher address on stack), then low word.
+      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Hi.getValue(1), Hi);
+      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Lo);
+    } else if (Arg.getValueType() == MVT::f32) {
+      // f32 (F_float): bitcast to i32 via stack temp, then push.
+      SDValue StackSlot = DAG.CreateStackTemporary(MVT::f32);
+      Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
+                           MachinePointerInfo());
+      SDValue AsInt = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
+                                  MachinePointerInfo());
+      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, AsInt.getValue(1), AsInt);
+    } else {
+      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Arg);
+    }
   }
 
   // Wrap callee for direct calls.
