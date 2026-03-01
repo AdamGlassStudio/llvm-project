@@ -16,9 +16,8 @@ declare i32 @callee_noargs()
 define i32 @caller_two_imm() {
 ; CHECK-LABEL: caller_two_imm:
 ; CHECK: .word 0
-; CHECK: subl2 $8, %sp
-; CHECK: movl $32, 4(%sp)
-; CHECK: movl $10, (%sp)
+; CHECK: pushl $32
+; CHECK: pushl $10
 ; CHECK: calls $2, add_two
 ; CHECK-NOT: addl2
 ; CHECK: ret
@@ -47,7 +46,7 @@ define i32 @multi_call() {
 ; CHECK: .word 0
 ; CHECK: calls $0, get_val
 ; CHECK-NOT: addl2
-; CHECK: subl2 $4, %sp
+; CHECK: pushl %r0
 ; CHECK: calls $1, inc_val
 ; CHECK-NOT: addl2
 ; CHECK: ret

@@ -7,7 +7,7 @@
 define i32 @f() {
 ; CHECK-LABEL: f:
 ; CHECK:       .word 0
-; CHECK:       clrl r0
+; CHECK:       clrl	%r0
 ; CHECK-NEXT:  ret
   ret i32 0
 }

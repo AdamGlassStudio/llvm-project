@@ -5,7 +5,7 @@
 
 ; Signed greater-than: LLVM inverts condition for fall-through, so bleq or bgtr.
 ; CHECK-LABEL: test_bgtr:
-; CHECK:       cmpl {{r[0-9]+}}, {{r[0-9]+}}
+; CHECK:       cmpl {{%r[0-9]+}}, {{%r[0-9]+}}
 ; CHECK:       b{{[a-z]+}}
 ; CHECK:       ret
 define i32 @test_bgtr() {
@@ -21,7 +21,7 @@ else:
 
 ; Signed less-than.
 ; CHECK-LABEL: test_blss:
-; CHECK:       cmpl {{r[0-9]+}}, {{r[0-9]+}}
+; CHECK:       cmpl {{%r[0-9]+}}, {{%r[0-9]+}}
 ; CHECK:       b{{[a-z]+}}
 ; CHECK:       ret
 define i32 @test_blss() {
@@ -69,7 +69,7 @@ else:
 
 ; Compare vs zero: should use tstl (not cmpl with immediate 0).
 ; CHECK-LABEL: test_tstl_eq:
-; CHECK:       tstl {{r[0-9]+}}
+; CHECK:       tstl {{%r[0-9]+}}
 ; CHECK:       b{{[a-z]+}}
 ; CHECK:       ret
 define i32 @test_tstl_eq() {
