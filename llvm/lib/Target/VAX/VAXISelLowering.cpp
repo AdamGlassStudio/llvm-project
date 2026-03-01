@@ -263,8 +263,8 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Chain = DAG.getNode(VAXISD::CALL, DL, NodeTys, Ops);
   SDValue InFlag = Chain.getValue(1);
 
-  // Deallocate arg space.
-  Chain = DAG.getCALLSEQ_END(Chain, StackBytes, 0, InFlag, DL);
+  // VAX RET pops the arg area (CALLS S-bit), so callee pops all bytes.
+  Chain = DAG.getCALLSEQ_END(Chain, StackBytes, StackBytes, InFlag, DL);
   InFlag = Chain.getValue(1);
 
   // Copy return value(s) from registers.
