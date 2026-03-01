@@ -612,11 +612,13 @@ def TSTF : InstVAX<0x53, (outs), (ins GPRI:$a),
 }
 
 // SELECT_CC for f32 results (same diamond expansion as i32).
-// No DAG pattern — selected manually in LowerSELECT_CC.
 let usesCustomInserter = 1 in
 def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
     (ins GPRI:$truev, GPRI:$falsev, i32imm:$cc),
-    "#SELECT_CC_F $truev, $falsev, $cc", []>;
+    "#SELECT_CC_F $truev, $falsev, $cc",
+    [(set (f32 GPRI:$dst), (vax_select_cc (f32 GPRI:$truev),
+                                           (f32 GPRI:$falsev),
+                                           (i32 imm:$cc)))]>;
 
 //===----------------------------------------------------------------------===//
 // Phase 14C — D_float (64-bit floating point)
@@ -694,4 +696,7 @@ def TSTD : InstVAX<0x73, (outs), (ins QPR:$a),
 let usesCustomInserter = 1 in
 def SELECT_CC_D_Pseudo : Pseudo<(outs QPR:$dst),
     (ins QPR:$truev, QPR:$falsev, i32imm:$cc),
-    "#SELECT_CC_D $truev, $falsev, $cc", []>;
+    "#SELECT_CC_D $truev, $falsev, $cc",
+    [(set (f64 QPR:$dst), (vax_select_cc (f64 QPR:$truev),
+                                          (f64 QPR:$falsev),
+                                          (i32 imm:$cc)))]>;
