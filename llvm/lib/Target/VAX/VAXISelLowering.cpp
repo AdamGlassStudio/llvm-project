@@ -96,6 +96,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::SRA, MVT::i32, Custom);
   setOperationAction(ISD::SRL, MVT::i32, Custom);
 
+  // Frame intrinsics for exception handling and debugging.
+  setOperationAction(ISD::FRAMEADDR,  MVT::i32, Custom);
+  setOperationAction(ISD::RETURNADDR, MVT::i32, Custom);
+  setOperationAction(ISD::EH_RETURN,  MVT::Other, Custom);
+
   // Extending loads: all byte/word variants now legal via CVT/MOVZ instructions.
   // i8 zero-extend: MOVZBL (Phase 5); i8 sign-extend: CVTBL (Phase 7).
   // i16 zero-extend: MOVZWL (Phase 7); i16 sign-extend: CVTWL (Phase 7).
@@ -188,6 +193,9 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
   case ISD::VASTART:       return LowerVASTART(Op, DAG);
+  case ISD::FRAMEADDR:     return LowerFRAMEADDR(Op, DAG);
+  case ISD::RETURNADDR:    return LowerRETURNADDR(Op, DAG);
+  case ISD::EH_RETURN:     return LowerEH_RETURN(Op, DAG);
   default:
     report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
                              "opcode ") +
@@ -368,6 +376,79 @@ SDValue VAXTargetLowering::LowerVASTART(SDValue Op,
   SDValue Src = DAG.getNode(ISD::ADD, DL, MVT::i32, AP, Offset);
   return DAG.getStore(Op.getOperand(0), DL, Src, VAListAddr,
                       MachinePointerInfo());
+}
+
+SDValue VAXTargetLowering::LowerFRAMEADDR(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  // VAX CALLS always sets FP. Frame depth > 0 requires chasing FP links.
+  unsigned Depth = Op.getConstantOperandVal(0);
+  SDLoc DL(Op);
+  SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), DL, VAX::FP,
+                                          MVT::i32);
+  // Chase saved FP chain for nested frames. Saved FP is at FP+12 in the
+  // CALLS frame (handler[0], mask[4], AP[8], FP[12], PC[16]).
+  for (unsigned i = 0; i < Depth; ++i)
+    FrameAddr = DAG.getLoad(MVT::i32, DL, DAG.getEntryNode(),
+                            DAG.getNode(ISD::ADD, DL, MVT::i32, FrameAddr,
+                                        DAG.getConstant(12, DL, MVT::i32)),
+                            MachinePointerInfo());
+  return FrameAddr;
+}
+
+SDValue VAXTargetLowering::LowerRETURNADDR(SDValue Op,
+                                             SelectionDAG &DAG) const {
+  unsigned Depth = Op.getConstantOperandVal(0);
+  SDLoc DL(Op);
+
+  if (Depth > 0) {
+    // For depth > 0: get the frame pointer for that depth, then load PC at +16.
+    SDValue FrameAddr = LowerFRAMEADDR(
+        DAG.getNode(ISD::FRAMEADDR, DL, MVT::i32,
+                    DAG.getConstant(Depth - 1, DL, MVT::i32)),
+        DAG);
+    return DAG.getLoad(MVT::i32, DL, DAG.getEntryNode(),
+                       DAG.getNode(ISD::ADD, DL, MVT::i32, FrameAddr,
+                                   DAG.getConstant(16, DL, MVT::i32)),
+                       MachinePointerInfo());
+  }
+  // Depth 0: return address is at FP+16 in the CALLS frame.
+  SDValue FP = DAG.getCopyFromReg(DAG.getEntryNode(), DL, VAX::FP, MVT::i32);
+  return DAG.getLoad(MVT::i32, DL, DAG.getEntryNode(),
+                     DAG.getNode(ISD::ADD, DL, MVT::i32, FP,
+                                 DAG.getConstant(16, DL, MVT::i32)),
+                     MachinePointerInfo());
+}
+
+SDValue VAXTargetLowering::LowerEH_RETURN(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  // EH_RETURN(chain, offset, handler)
+  // Store the handler address at FP+16 (overwrite saved PC in CALLS frame),
+  // then RET will "return" to the handler.
+  SDValue Chain = Op.getOperand(0);
+  SDValue Offset = Op.getOperand(1);
+  SDValue Handler = Op.getOperand(2);
+  SDLoc DL(Op);
+
+  SDValue FP = DAG.getCopyFromReg(Chain, DL, VAX::FP, MVT::i32);
+  SDValue RetAddr = DAG.getNode(ISD::ADD, DL, MVT::i32, FP,
+                                DAG.getConstant(16, DL, MVT::i32));
+  Chain = DAG.getStore(FP.getValue(1), DL, Handler, RetAddr,
+                       MachinePointerInfo());
+  return Chain;
+}
+
+Register
+VAXTargetLowering::getExceptionPointerRegister(
+    const Constant *PersonalityFn) const {
+  // GCC VAX uses R2 (EH_RETURN_DATA_REGNO(0)).
+  return VAX::R2;
+}
+
+Register
+VAXTargetLowering::getExceptionSelectorRegister(
+    const Constant *PersonalityFn) const {
+  // GCC VAX uses R3 (EH_RETURN_DATA_REGNO(1)).
+  return VAX::R3;
 }
 
 SDValue VAXTargetLowering::LowerReturn(

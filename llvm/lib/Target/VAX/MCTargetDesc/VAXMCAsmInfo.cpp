@@ -24,8 +24,8 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   Data64bitsDirective = nullptr; // VAX has no native 64-bit data directive
   ZeroDirective = "\t.space\t";
   AscizDirective = "\t.asciz\t";
-  SupportsDebugInformation = false;
-  ExceptionsType = ExceptionHandling::None;
+  SupportsDebugInformation = true;
+  ExceptionsType = ExceptionHandling::DwarfCFI;
   // Use external GAS assembler — the integrated assembler does not yet
   // support VAX instruction encoding.
   UseIntegratedAssembler = false;
