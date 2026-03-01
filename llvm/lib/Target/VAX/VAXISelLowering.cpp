@@ -30,8 +30,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
   // Register classes by value type.
-  addRegisterClass(MVT::i8,  &VAX::GPRBRegClass);
-  addRegisterClass(MVT::i16, &VAX::GPRWRegClass);
+  // i8 and i16 are deferred until Phase 7 (extend/truncate instructions).
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
 
   // Finalize register class / type legalization info.
@@ -43,6 +42,16 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
 
+  // AND is lowered to BICL (bit-clear) since VAX has no direct AND instruction.
+  setOperationAction(ISD::AND, MVT::i32, Custom);
+
+  // Extending loads from sub-i32 types: only i8 zero-extend is supported
+  // (via MOVZBL); sext and word-sized extends deferred to Phase 7.
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8, Legal);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8, Expand);
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Expand);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Expand);
+
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
 }
@@ -51,6 +60,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case VAXISD::RET_FLAG:     return "VAXISD::RET_FLAG";
   case VAXISD::PCRelWrapper: return "VAXISD::PCRelWrapper";
+  case VAXISD::BICL:         return "VAXISD::BICL";
   default:                   return nullptr;
   }
 }
@@ -59,11 +69,30 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  case ISD::AND:           return LowerAND(Op, DAG);
   default:
     report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
                              "opcode ") +
                        Twine(Op.getOpcode()));
   }
+}
+
+SDValue VAXTargetLowering::LowerAND(SDValue Op, SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+  // VAX has no direct AND; use BICL(mask, src) = src & ~mask.
+  // AND(A, B) = BICL(~B, A) since ~~B = B.
+  if (auto *CN = dyn_cast<ConstantSDNode>(B)) {
+    // Constant operand: fold the NOT at compile time (single instruction).
+    return DAG.getNode(VAXISD::BICL, DL, VT,
+                       DAG.getConstant(~CN->getAPIntValue(), DL, VT), A);
+  }
+  // Register operand: emit BICL(XOR(B, -1), A) → MCOML + BICL3 (two insns).
+  SDValue NotB = DAG.getNode(ISD::XOR, DL, VT, B,
+                             DAG.getAllOnesConstant(DL, VT));
+  return DAG.getNode(VAXISD::BICL, DL, VT, NotB, A);
 }
 
 SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
