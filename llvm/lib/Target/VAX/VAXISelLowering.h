@@ -67,6 +67,7 @@ public:
 
 private:
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
@@ -84,6 +85,10 @@ private:
 
   Register getExceptionPointerRegister(const Constant *PersonalityFn) const override;
   Register getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
+
+  std::pair<unsigned, const TargetRegisterClass *>
+  getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
+                               StringRef Constraint, MVT VT) const override;
 };
 
 } // namespace llvm

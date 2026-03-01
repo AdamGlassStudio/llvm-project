@@ -110,7 +110,8 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
     // ADD(Reg, Constant) — register + displacement.
     if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
       Base = Addr.getOperand(0);
-      Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+      Offset = CurDAG->getTargetConstant(
+          APInt(32, CN->getSExtValue(), /*isSigned=*/true), DL, MVT::i32);
       return true;
     }
   }
