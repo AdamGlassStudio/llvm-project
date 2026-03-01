@@ -93,3 +93,86 @@ def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movl\t$src, $sym",
     [(store GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+
+//===----------------------------------------------------------------------===//
+// Phase 5 — Integer Arithmetic (longword i32)
+//===----------------------------------------------------------------------===//
+
+// Custom node: VAXISD::BICL(mask, src) = src & ~mask.
+// ISD::AND is lowered to this to avoid needing a separate AND instruction.
+def SDT_VAXBICL : SDTypeProfile<1, 2, [SDTCisSameAs<0,1>, SDTCisSameAs<1,2>,
+                                        SDTCisInt<0>]>;
+def vax_bicl : SDNode<"VAXISD::BICL", SDT_VAXBICL>;
+
+// Multiclass for 3-operand commutative ALU operations.
+// LLVM canonicalises commutative ops so constants appear as the RHS operand.
+multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
+  def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$a, GPRnoPC:$b),
+      mn # "\t$a, $b, $dst",
+      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$a, GPRnoPC:$b))]>;
+  // Constant is RHS after LLVM's commutative canonicalisation.
+  def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$a, GPRnoPC:$b),
+      mn # "\t$a, $b, $dst",
+      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>;
+}
+
+defm ADDL3 : VAXAlu3_comm<0xC1, "addl3", add>;
+defm MULL3 : VAXAlu3_comm<0xC5, "mull3", mul>;
+defm BISL3 : VAXAlu3_comm<0xC9, "bisl3", or>;
+defm XORL3 : VAXAlu3_comm<0xCD, "xorl3", xor>;
+
+// SUBL3 — dst = minuend - subtrahend.
+// VAX encoding: subl3 src1, src2, dst  →  dst = src2 - src1.
+//   $s = subtrahend (src1), $m = minuend (src2).
+def SUBL3_rr : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, GPRnoPC:$s))]>;
+// reg - imm  (subtrahend is immediate)
+def SUBL3_ri : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (i32 imm:$s)))]>;
+// imm - reg  (minuend is immediate)
+def SUBL3_ir : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, i32imm:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (sub (i32 imm:$m), GPRnoPC:$s))]>;
+
+// DIVL3 — signed divide: dst = dividend / divisor.
+// VAX encoding: divl3 src1, src2, dst  →  dst = src2 / src1.
+def DIVL3_rr : InstVAX<0xC7, (outs GPRnoPC:$dst), (ins GPRnoPC:$dv, GPRnoPC:$dd),
+    "divl3\t$dv, $dd, $dst",
+    [(set GPRnoPC:$dst, (sdiv GPRnoPC:$dd, GPRnoPC:$dv))]>;
+
+// MNEGL — negate longword: dst = -src  (matches ISD ineg = sub 0, x)
+def MNEGL : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "mnegl\t$src, $dst",
+    [(set GPRnoPC:$dst, (ineg GPRnoPC:$src))]>;
+
+// MCOML — ones complement: dst = ~src  (matches not = xor x, -1)
+def MCOML : InstVAX<0xD2, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "mcoml\t$src, $dst",
+    [(set GPRnoPC:$dst, (not GPRnoPC:$src))]>;
+
+// BICL3 — bit clear: dst = src & ~mask  (selected from VAXISD::BICL)
+def BICL3_rr : InstVAX<0xCB, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$mask, GPRnoPC:$src),
+    "bicl3\t$mask, $src, $dst",
+    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, GPRnoPC:$src))]>;
+def BICL3_ri : InstVAX<0xCB, (outs GPRnoPC:$dst),
+    (ins i32imm:$mask, GPRnoPC:$src),
+    "bicl3\t$mask, $src, $dst",
+    [(set GPRnoPC:$dst, (vax_bicl (i32 imm:$mask), GPRnoPC:$src))]>;
+
+// MOVZBL — zero-extend byte to longword.
+// Handles both zextloadi8 (explicit zero-ext) and extloadi8 (anyext, upper bits defined as 0).
+def MOVZBL_rm : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "movzbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (zextloadi8 VAXMem:$src))]>;
+def MOVZBL_rm_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "movzbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (extloadi8 VAXMem:$src))]>;
+def MOVZBL_rg : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "movzbl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (zextloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+def MOVZBL_rg_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "movzbl\t$sym, $dst",
+    [(set GPRnoPC:$dst, (extloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
