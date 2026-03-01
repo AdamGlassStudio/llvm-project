@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAX.h"
+#include "VAXISelLowering.h"
 #include "VAXTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
@@ -43,7 +44,27 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     N->setNodeId(-1);
     return;
   }
-  // Fall through to TableGen-generated pattern matching.
+
+  if (N->getOpcode() == VAXISD::CALL) {
+    SDValue Chain   = N->getOperand(0);
+    SDValue NumArgs = N->getOperand(1);
+    SDValue Callee  = N->getOperand(2);
+    SDValue RegMask = N->getOperand(3);
+
+    bool isDirect = (Callee.getOpcode() == ISD::TargetGlobalAddress ||
+                     Callee.getOpcode() == ISD::TargetExternalSymbol);
+    unsigned Opc = isDirect ? VAX::CALLS_direct : VAX::CALLS_indir;
+    // Convert arg count to a target immediate for the machine instruction.
+    auto *CN = cast<ConstantSDNode>(NumArgs);
+    SDValue Count = CurDAG->getTargetConstant(
+        CN->getZExtValue(), SDLoc(N), MVT::i32);
+    SmallVector<SDValue, 4> Ops = { Count, Callee, RegMask, Chain };
+
+    SDNode *Call = CurDAG->getMachineNode(Opc, SDLoc(N), N->getVTList(), Ops);
+    ReplaceNode(N, Call);
+    return;
+  }
+
   SelectCode(N);
 }
 

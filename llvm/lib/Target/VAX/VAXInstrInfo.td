@@ -84,6 +84,11 @@ def MOVL_mr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
     "movl\t$src, $dst",
     [(store GPRnoPC:$src, VAXMem:$dst)]>;
 
+// memory <- immediate  (store constant to memory without register)
+def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
+    "movl\t$imm, $dst",
+    [(store (i32 imm:$imm), VAXMem:$dst)]>;
+
 // reg <- global  (PC-relative load from global/extern data)
 def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
@@ -329,3 +334,57 @@ def MOVW_mr : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
 def MOVW_mg : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movw\t$src, $sym",
     [(truncstorei16 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+
+//===----------------------------------------------------------------------===//
+// Phase 8 — Function calls
+//===----------------------------------------------------------------------===//
+
+// CALLSEQ_START / CALLSEQ_END SDNodes (needed by SelectionDAG call lowering).
+def SDT_VAXCallSeqStart : SDCallSeqStart<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+def SDT_VAXCallSeqEnd   : SDCallSeqEnd<[SDTCisVT<0, i32>, SDTCisVT<1, i32>]>;
+def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_VAXCallSeqStart,
+                            [SDNPHasChain, SDNPOutGlue]>;
+def callseq_end   : SDNode<"ISD::CALLSEQ_END",   SDT_VAXCallSeqEnd,
+                            [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue]>;
+
+// Call sequence pseudo-instructions: matched from ISD::CALLSEQ_START/END,
+// then eliminated by VAXFrameLowering::eliminateCallFramePseudoInstr.
+let Defs = [SP], Uses = [SP] in {
+def ADJCALLSTACKDOWN : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
+    "#ADJCALLSTACKDOWN", [(callseq_start timm:$amt1, timm:$amt2)]>;
+def ADJCALLSTACKUP : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
+    "#ADJCALLSTACKUP", [(callseq_end timm:$amt1, timm:$amt2)]>;
+}
+
+// SUBL2_ri — subl2 $imm, $dst  (dst -= imm)  opcode 0xA2
+def SUBL2_ri : InstVAX<0xA2, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
+    "subl2\t$imm, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+
+// ADDL2_ri — addl2 $imm, $dst  (dst += imm)  opcode 0xA0
+def ADDL2_ri : InstVAX<0xA0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
+    "addl2\t$imm, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+
+// PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
+let Defs = [SP], Uses = [SP] in {
+def PUSHL_r : InstVAX<0xDD, (outs), (ins GPRnoPC:$src),
+    "pushl\t$src", []>;
+def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
+    "pushl\t$imm", []>;
+}
+
+// CALLS — call subroutine with stack arguments  opcode 0xFB
+let isCall = 1, Uses = [SP],
+    Defs = [SP, AP, FP, R0, R1, R2, R3, R4, R5] in {
+// Direct call: callee is a global address or external symbol
+def CALLS_direct : InstVAX<0xFB, (outs),
+    (ins i32imm:$count, i32imm:$callee),
+    "calls\t$count, $callee", []>;
+// Indirect call: callee address is in a register (register deferred addressing)
+def CALLS_indir : InstVAX<0xFB, (outs),
+    (ins i32imm:$count, GPRnoPC:$callee),
+    "calls\t$count, ($callee)", []>;
+}
