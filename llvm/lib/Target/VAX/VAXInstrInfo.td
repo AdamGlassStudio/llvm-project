@@ -99,6 +99,12 @@ def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movl\t$src, $sym",
     [(store GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 
+// Materialize a jump table address into a register (PC-relative).
+// Emits: moval JT_sym, $dst
+def MOVAL_jt : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$jt),
+    "moval\t$jt, $dst",
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tjumptable:$jt))]>;
+
 //===----------------------------------------------------------------------===//
 // Phase 5 — Integer Arithmetic (longword i32)
 //===----------------------------------------------------------------------===//
@@ -236,6 +242,12 @@ def BRW : InstVAX<0x31, (outs), (ins brtarget:$dst), "brw\t$dst",
 // 8-bit unconditional branch (used when assembler / relaxation pass shortens).
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>;
+
+// JMP — indirect branch through register (for jump tables / computed goto).
+// VAX JMP opcode 0x17; operand is an address specifier.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
+def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t($target)",
+    [(brind GPRnoPC:$target)]>;
 
 // Conditional branches (8-bit signed displacement ±127 B; all use PSW).
 // Each is a separate def so the opcode byte is fixed at instruction level.
@@ -434,11 +446,15 @@ def ADDL2_ri : InstVAX<0xA0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src
 }
 
 // PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
+def SDT_VAXPushL : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
+def vax_pushl : SDNode<"VAXISD::PUSHL", SDT_VAXPushL,
+    [SDNPHasChain, SDNPOutGlue]>;
+
 let Defs = [SP], Uses = [SP] in {
 def PUSHL_r : InstVAX<0xDD, (outs), (ins GPRnoPC:$src),
-    "pushl\t$src", []>;
+    "pushl\t$src", [(vax_pushl GPRnoPC:$src)]>;
 def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
-    "pushl\t$imm", []>;
+    "pushl\t$imm", [(vax_pushl (i32 imm:$imm))]>;
 }
 
 // CALLS — call subroutine with stack arguments  opcode 0xFB
