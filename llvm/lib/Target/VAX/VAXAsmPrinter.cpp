@@ -14,8 +14,11 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -66,6 +69,22 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     case MachineOperand::MO_Immediate:
       Inst.addOperand(MCOperand::createImm(MO.getImm()));
       break;
+    case MachineOperand::MO_GlobalAddress: {
+      const MCSymbol *Sym = getSymbol(MO.getGlobal());
+      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+      if (MO.getOffset())
+        Expr = MCBinaryExpr::createAdd(
+            Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
+            OutContext);
+      Inst.addOperand(MCOperand::createExpr(Expr));
+      break;
+    }
+    case MachineOperand::MO_ExternalSymbol: {
+      const MCSymbol *Sym = GetExternalSymbolSymbol(MO.getSymbolName());
+      Inst.addOperand(
+          MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
+      break;
+    }
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }

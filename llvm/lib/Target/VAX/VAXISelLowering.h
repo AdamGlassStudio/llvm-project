@@ -20,6 +20,8 @@ enum NodeType : unsigned {
   FIRST_NUMBER = ISD::BUILTIN_OP_END,
   // Return from a VAX function via RET
   RET_FLAG,
+  // Wrap a TargetGlobalAddress for PC-relative data access
+  PCRelWrapper,
 };
 } // namespace VAXISD
 
@@ -45,6 +47,9 @@ public:
 
   SDValue LowerCall(TargetLowering::CallLoweringInfo &CLI,
                     SmallVectorImpl<SDValue> &InVals) const override;
+
+private:
+  SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
 };
 
 } // namespace llvm

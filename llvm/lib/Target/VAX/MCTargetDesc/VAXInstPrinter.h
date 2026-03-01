@@ -23,6 +23,7 @@ public:
                  const MCSubtargetInfo &STI, raw_ostream &O) override;
   void printRegName(raw_ostream &O, MCRegister Reg) override;
   void printOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
+  void printMemOperand(const MCInst *MI, unsigned OpNo, raw_ostream &O);
 
   // TableGen-generated (no MCSubtargetInfo parameter in generated version)
   std::pair<const char *, uint64_t> getMnemonic(const MCInst &MI) const override;

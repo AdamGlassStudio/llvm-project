@@ -18,6 +18,7 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
@@ -39,22 +40,39 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setStackPointerRegisterToSaveRestore(VAX::SP);
   setSchedulingPreference(Sched::RegPressure);
 
+  // Global addresses are lowered to PC-relative wrappers.
+  setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
+
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
 }
 
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
-  case VAXISD::RET_FLAG: return "VAXISD::RET_FLAG";
-  default:               return nullptr;
+  case VAXISD::RET_FLAG:     return "VAXISD::RET_FLAG";
+  case VAXISD::PCRelWrapper: return "VAXISD::PCRelWrapper";
+  default:                   return nullptr;
   }
 }
 
 SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                                            SelectionDAG &DAG) const {
-  report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
-                           "opcode ") +
-                     Twine(Op.getOpcode()));
+  switch (Op.getOpcode()) {
+  case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
+  default:
+    report_fatal_error(Twine("VAXTargetLowering::LowerOperation: unimplemented "
+                             "opcode ") +
+                       Twine(Op.getOpcode()));
+  }
+}
+
+SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
+                                               SelectionDAG &DAG) const {
+  const GlobalAddressSDNode *GN = cast<GlobalAddressSDNode>(Op);
+  const GlobalValue *GV = GN->getGlobal();
+  SDLoc DL(GN);
+  SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset());
+  return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
 }
 
 SDValue VAXTargetLowering::LowerReturn(
