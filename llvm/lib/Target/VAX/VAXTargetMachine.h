@@ -11,6 +11,7 @@
 
 #include "VAXSubtarget.h"
 #include "llvm/CodeGen/CodeGenTargetMachineImpl.h"
+#include "llvm/CodeGen/MachineFunction.h"
 #include <memory>
 #include <optional>
 
@@ -37,6 +38,10 @@ public:
   TargetLoweringObjectFile *getObjFileLowering() const override {
     return TLOF.get();
   }
+
+  MachineFunctionInfo *
+  createMachineFunctionInfo(BumpPtrAllocator &Allocator, const Function &F,
+                            const TargetSubtargetInfo *STI) const override;
 };
 
 } // end namespace llvm
