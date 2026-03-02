@@ -83,20 +83,19 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
   }
 
-  // Expand CASEL pseudo: emit casel instruction + inline word displacement table.
+  // Expand CASEL pseudo: emit CASEL_L MCInst + inline word displacement table.
   if (MI->getOpcode() == VAX::CASEL) {
     Register IndexReg = MI->getOperand(0).getReg();
     int64_t Limit = MI->getOperand(1).getImm();
     unsigned JTI = MI->getOperand(2).getIndex();
 
-    // Emit: casel %rN, $0, $limit
-    // We emit this as raw text since CASEL is not a real MC instruction.
-    SmallString<64> Str;
-    raw_svector_ostream OS(Str);
-    OS << "\tcasel\t"
-       << VAXInstPrinter::getRegisterName(IndexReg)
-       << ", $0, $" << Limit;
-    OutStreamer->emitRawText(Str);
+    // Emit: casel %rN, $0, $limit as a proper MCInst.
+    MCInst CaselInst;
+    CaselInst.setOpcode(VAX::CASEL_L);
+    CaselInst.addOperand(MCOperand::createReg(IndexReg));
+    CaselInst.addOperand(MCOperand::createImm(0));
+    CaselInst.addOperand(MCOperand::createImm(Limit));
+    OutStreamer->emitInstruction(CaselInst, getSubtargetInfo());
 
     // Emit the word displacement table: .word target - tablebase
     // CASEL sets PC to the start of the table, then adds sign-extended
