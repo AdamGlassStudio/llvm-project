@@ -996,6 +996,11 @@ enum {
 #include "ELFRelocs/M68k.def"
 };
 
+// ELF Relocation types for VAX
+enum {
+#include "ELFRelocs/VAX.def"
+};
+
 // MSP430 specific e_flags
 enum : unsigned {
   EF_MSP430_MACH_MSP430x11 = 11,
