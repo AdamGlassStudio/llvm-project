@@ -25,10 +25,16 @@ class Proc<string Name, list<SubtargetFeature> Features>
 
 def : Proc<"generic", []>;
 
+def VAXAsmParser : AsmParser {
+  let AllowDuplicateRegisterNames = 1;
+  let ShouldEmitMatchRegisterAltName = 1;
+}
+
 //===----------------------------------------------------------------------===//
 // Target
 //===----------------------------------------------------------------------===//
 
 def VAX : Target {
   let InstructionSet = VAXInstrInfo;
+  let AssemblyParsers = [VAXAsmParser];
 }

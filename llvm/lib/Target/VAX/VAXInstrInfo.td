@@ -14,6 +14,7 @@ include "VAXInstrFormats.td"
 class Pseudo<dag outs, dag ins, string asmstr, list<dag> pattern>
     : InstVAX<0, outs, ins, asmstr, pattern> {
   let isPseudo = 1;
+  let isCodeGenOnly = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -34,9 +35,15 @@ def vax_pcrelwrapper : SDNode<"VAXISD::PCRelWrapper", SDT_VAXPCRel>;
 //   Printed as: disp(base), or (base) when disp is 0.
 //===----------------------------------------------------------------------===//
 
+def VAXMemAsmOperand : AsmOperandClass {
+  let Name = "Mem";
+  let ParserMethod = "parseMemOperand";
+}
+
 def VAXMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
   let MIOperandInfo = (ops GPR, i32imm);
+  let ParserMatchClass = VAXMemAsmOperand;
 }
 
 // ComplexPattern that recognizes base + displacement addressing.
@@ -282,7 +289,7 @@ def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>;
 // JMP — indirect branch through register (for jump tables / computed goto).
 // VAX JMP opcode 0x17; operand is an address specifier.
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
-def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t($target)",
+def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t(${target})",
     [(brind GPRnoPC:$target)]>;
 
 // CASEL — hardware switch dispatch via inline word-displacement table.
@@ -583,9 +590,15 @@ def CALLS_direct : InstVAX<0xFB, (outs),
     (ins i32imm:$count, i32imm:$callee),
     "calls\t$count, $callee", []>;
 // Indirect call: callee address is in a register (register deferred addressing)
+let isCodeGenOnly = 1 in
 def CALLS_indir : InstVAX<0xFB, (outs),
     (ins i32imm:$count, GPRnoPC:$callee),
-    "calls\t$count, ($callee)", []>;
+    "calls\t$count, (${callee})", []>;
+// Indirect call (assembler form): callee is a memory operand (%reg deferred)
+let HasMemOp = 1 in
+def CALLS_mem : InstVAX<0xFB, (outs),
+    (ins i32imm:$count, VAXMemOp:$callee),
+    "calls\t$count, $callee", []>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -695,6 +708,7 @@ def EMUL : InstVAX<0x7A, (outs QPR:$dst),
 def VAXFMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
   let MIOperandInfo = (ops GPR, i32imm);
+  let ParserMatchClass = VAXMemAsmOperand;
 }
 
 // All F_float data instructions set PSW condition codes.
@@ -784,6 +798,7 @@ def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
 def VAXDMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
   let MIOperandInfo = (ops GPR, i32imm);
+  let ParserMatchClass = VAXMemAsmOperand;
 }
 
 // All D_float data instructions set PSW condition codes.
