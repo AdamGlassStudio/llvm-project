@@ -13,6 +13,7 @@ add_public_tablegen_target(VAXCommonTableGen)
 
 add_llvm_target(VAXCodeGen
   VAXAsmPrinter.cpp
+  VAXFixupPSW.cpp
   VAXFrameLowering.cpp
   VAXInstrInfo.cpp
   VAXISelDAGToDAG.cpp

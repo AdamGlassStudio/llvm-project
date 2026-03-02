@@ -55,6 +55,9 @@ let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>;
 
 // CLRL — zero a longword register; cheapest way to load the constant 0
+// Nearly all VAX data-manipulation instructions set condition codes (N/Z/V/C
+// in PSW). Each instruction or block below explicitly declares Defs = [PSW].
+let Defs = [PSW] in
 def CLRL : InstVAX<0xD4, (outs GPRnoPC:$dst), (ins),
     "clrl\t$dst", [(set GPRnoPC:$dst, (i32 0))]>;
 
@@ -64,6 +67,8 @@ def CLRL : InstVAX<0xD4, (outs GPRnoPC:$dst), (ins),
 
 // MOVL (opcode 0xD0) — longword (32-bit) move, various operand forms.
 // All variants share the opcode; operand specifiers encode the addressing mode.
+// All MOV/MOVAL instructions set PSW condition codes.
+let Defs = [PSW] in {
 
 // reg <- reg  (register copy; no DAG pattern — emitted by copyPhysReg)
 def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
@@ -119,6 +124,7 @@ def MOVAL_ga : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
+} // let Defs = [PSW] — end of MOV/MOVAL block
 
 //===----------------------------------------------------------------------===//
 // Phase 5 — Integer Arithmetic (longword i32)
@@ -142,6 +148,8 @@ multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
       [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>;
 }
 
+// All integer ALU instructions set PSW condition codes.
+let Defs = [PSW] in {
 defm ADDL3 : VAXAlu3_comm<0xC1, "addl3", add>;
 defm MULL3 : VAXAlu3_comm<0xC5, "mull3", mul>;
 defm BISL3 : VAXAlu3_comm<0xC9, "bisl3", or>;
@@ -202,6 +210,7 @@ def MOVZBL_rg : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 def MOVZBL_rg_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movzbl\t$sym, $dst",
     [(set GPRnoPC:$dst, (extloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+} // let Defs = [PSW] — end of integer ALU + MOVZBL block
 
 //===----------------------------------------------------------------------===//
 // Phase 6 — Comparisons + Branches
@@ -289,6 +298,22 @@ def BLEQU : InstVAX<0x1B, (outs), (ins brtarget:$dst), "blequ\t$dst",
     [(vax_brcc bb:$dst, VAXCC_LEQU)]>;
 }
 
+// Fused compare-branch pseudos: prevent the RA from inserting PSW-clobbering
+// COPYs between compare and conditional branch.  These are created by a
+// pre-RA pass and expanded back into CMP + Bcc after RA.
+let isPseudo = 1, isBranch = 1, isTerminator = 1, Defs = [PSW] in {
+def CMP_BRANCH_ri : Pseudo<(outs),
+    (ins GPRnoPC:$lhs, i32imm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMP_BRANCH_rr : Pseudo<(outs),
+    (ins GPRnoPC:$lhs, GPRnoPC:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TST_BRANCH : Pseudo<(outs),
+    (ins GPRnoPC:$src, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPF_BRANCH : Pseudo<(outs),
+    (ins GPRI:$lhs, GPRI:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPD_BRANCH : Pseudo<(outs),
+    (ins QPR:$lhs, QPR:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+}
+
 // INCL / DECL — increment / decrement longword (sets PSW).
 let Defs = [PSW] in {
 def INCL : InstVAX<0xD6, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
@@ -306,6 +331,9 @@ def DECL : InstVAX<0xD7, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
 //===----------------------------------------------------------------------===//
 // Phase 7 — Sign/Zero-Extend Loads + Truncating Stores
 //===----------------------------------------------------------------------===//
+
+// All these conversion/move instructions set PSW condition codes.
+let Defs = [PSW] in {
 
 // CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
 // source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
@@ -361,6 +389,7 @@ def MOVW_mr : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
 def MOVW_mg : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movw\t$src, $sym",
     [(truncstorei16 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+} // let Defs = [PSW] — end of Phase 7 conversion/move block
 
 // LEA_FI — materialize frame slot address as a register value.
 // Pseudo: expanded by eliminateFrameIndex to addl3 $offset, %fp, $dst.
@@ -389,6 +418,14 @@ def SELECT_CC_Pseudo : Pseudo<(outs GPRnoPC:$dst),
 // Phase 10 — Shift + Rotate
 //===----------------------------------------------------------------------===//
 
+// All shift/rotate instructions set PSW condition codes.
+
+// Custom node for VAX arithmetic shift (handles negative cnt for right shift).
+def SDT_VAXASHL : SDTypeProfile<1, 2, [SDTCisSameAs<0, 2>, SDTCisInt<0>,
+                                        SDTCisInt<1>]>;
+def vax_ashl : SDNode<"VAXISD::ASHL", SDT_VAXASHL>;
+
+let Defs = [PSW] in {
 // ASHL (0x78) — Arithmetic Shift Longword: dst = src << cnt (positive cnt),
 // or dst = src >> |cnt| (arithmetic, negative cnt).
 // VAX encoding: ashl cnt, src, dst.
@@ -401,11 +438,6 @@ def ASHL_ir : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins i32imm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>;
-
-// Custom node for VAX arithmetic shift (handles negative cnt for right shift).
-def SDT_VAXASHL : SDTypeProfile<1, 2, [SDTCisSameAs<0, 2>, SDTCisInt<0>,
-                                        SDTCisInt<1>]>;
-def vax_ashl : SDNode<"VAXISD::ASHL", SDT_VAXASHL>;
 
 // ASHL for custom SRA lowering (cnt is already negated by LowerSRA).
 def ASHL_rr_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
@@ -426,6 +458,7 @@ def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
     (ins i32imm:$cnt, GPRnoPC:$src),
     "rotl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>;
+} // let Defs = [PSW] — end of shift/rotate block
 
 //===----------------------------------------------------------------------===//
 // Phase 8 — Function calls
@@ -449,6 +482,7 @@ def ADJCALLSTACKUP : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 }
 
 // SUBL2_ri — subl2 $imm, $dst  (dst -= imm)  opcode 0xA2
+let Defs = [PSW] in {
 def SUBL2_ri : InstVAX<0xA2, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
     "subl2\t$imm, $dst", []> {
   let Constraints = "$src = $dst";
@@ -459,13 +493,14 @@ def ADDL2_ri : InstVAX<0xA0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src
     "addl2\t$imm, $dst", []> {
   let Constraints = "$src = $dst";
 }
+} // let Defs = [PSW]
 
 // PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
 def SDT_VAXPushL : SDTypeProfile<0, 1, [SDTCisInt<0>]>;
 def vax_pushl : SDNode<"VAXISD::PUSHL", SDT_VAXPushL,
     [SDNPHasChain, SDNPOutGlue]>;
 
-let Defs = [SP], Uses = [SP] in {
+let Defs = [SP, PSW], Uses = [SP] in {
 def PUSHL_r : InstVAX<0xDD, (outs), (ins GPRnoPC:$src),
     "pushl\t$src", [(vax_pushl GPRnoPC:$src)]>;
 def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
@@ -473,8 +508,9 @@ def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
 }
 
 // CALLS — call subroutine with stack arguments  opcode 0xFB
+// CALLS clears all condition codes and clobbers R0-R5, SP, AP, FP.
 let isCall = 1, Uses = [SP],
-    Defs = [SP, AP, FP, R0, R1, R2, R3, R4, R5] in {
+    Defs = [SP, AP, FP, R0, R1, R2, R3, R4, R5, PSW] in {
 // Direct call: callee is a global address or external symbol
 def CALLS_direct : InstVAX<0xFB, (outs),
     (ins i32imm:$count, i32imm:$callee),
@@ -554,6 +590,8 @@ def VAXFMemOp : Operand<iPTR> {
   let MIOperandInfo = (ops GPR, i32imm);
 }
 
+// All F_float data instructions set PSW condition codes.
+let Defs = [PSW] in {
 // MOVL for f32: load/store (reuse i32 move opcode, different type).
 def MOVF_rm : InstVAX<0xD0, (outs GPRI:$dst), (ins VAXFMemOp:$src),
     "movl\t$src, $dst",
@@ -598,6 +636,7 @@ def CVTFL : InstVAX<0x56, (outs GPRnoPC:$dst), (ins GPRI:$src),
 def CVTLF : InstVAX<0x4E, (outs GPRI:$dst), (ins GPRnoPC:$src),
     "cvtlf\t$src, $dst",
     [(set GPRI:$dst, (sint_to_fp GPRnoPC:$src))]>;
+} // let Defs = [PSW] — end of F_float data block
 
 // FP compare: CMPF sets PSW, used by FP branch/select via VAXISD::FCMP.
 def SDT_VAXFCMP : SDTypeProfile<0, 2, [SDTCisSameAs<0,1>, SDTCisFP<0>]>;
@@ -630,6 +669,8 @@ def VAXDMemOp : Operand<iPTR> {
   let MIOperandInfo = (ops GPR, i32imm);
 }
 
+// All D_float data instructions set PSW condition codes.
+let Defs = [PSW] in {
 // MOVD (0x70) — Move D_float (64-bit) using register pairs.
 def MOVD_rm : InstVAX<0x70, (outs QPR:$dst), (ins VAXDMemOp:$src),
     "movd\t$src, $dst",
@@ -682,6 +723,7 @@ def CVTDF : InstVAX<0x76, (outs GPRI:$dst), (ins QPR:$src),
 def CVTFD : InstVAX<0x56, (outs QPR:$dst), (ins GPRI:$src),
     "cvtfd\t$src, $dst",
     [(set QPR:$dst, (fpextend GPRI:$src))]>;
+} // let Defs = [PSW] — end of D_float data block
 
 // D_float compare: CMPD sets PSW.
 let Defs = [PSW] in {
