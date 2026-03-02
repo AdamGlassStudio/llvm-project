@@ -85,6 +85,7 @@ public:
   }
 
   bool addInstSelector() override;
+  void addIRPasses() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
@@ -94,6 +95,11 @@ public:
 
 TargetPassConfig *VAXTargetMachine::createPassConfig(PassManagerBase &PM) {
   return new VAXPassConfig(*this, PM);
+}
+
+void VAXPassConfig::addIRPasses() {
+  addPass(createAtomicExpandLegacyPass());
+  TargetPassConfig::addIRPasses();
 }
 
 bool VAXPassConfig::addInstSelector() {
