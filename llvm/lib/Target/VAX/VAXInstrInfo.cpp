@@ -10,6 +10,7 @@
 #include "VAXInstrInfo.h"
 #include "VAXSubtarget.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 
@@ -99,57 +100,71 @@ bool VAXInstrInfo::analyzeBranch(MachineBasicBlock &MBB,
                                   MachineBasicBlock *&FBB,
                                   SmallVectorImpl<MachineOperand> &Cond,
                                   bool AllowModify) const {
-  MachineBasicBlock::iterator I = MBB.getLastNonDebugInstr();
-  if (I == MBB.end())
-    return false;
-
-  // Walk backwards past non-branch terminators.
-  while (I != MBB.end() && !I->isTerminator())
+  // Start from the bottom and work up, examining terminator instructions.
+  MachineBasicBlock::iterator I = MBB.end();
+  while (I != MBB.begin()) {
     --I;
-  if (I == MBB.end())
-    return false;
+    if (I->isDebugInstr())
+      continue;
 
-  // Skip non-analyzable terminators (indirect branches, CASEL, etc.).
-  unsigned Opc = I->getOpcode();
-  if (!isCondBranch(Opc) && !isUncondBranch(Opc))
-    return true;
+    // Stop at the first non-terminator.
+    if (!I->isTerminator())
+      break;
 
-  // Last instruction is an unconditional branch.
-  if (isUncondBranch(Opc)) {
-    TBB = I->getOperand(0).getMBB();
+    unsigned Opc = I->getOpcode();
 
-    // Check for preceding conditional branch.
-    if (I != MBB.begin()) {
-      --I;
-      if (I->isTerminator() && isCondBranch(I->getOpcode())) {
-        FBB = TBB;
+    // Non-analyzable terminators (indirect branches, CASEL, etc.).
+    if (!isCondBranch(Opc) && !isUncondBranch(Opc))
+      return true;
+
+    // Handle unconditional branches.
+    if (isUncondBranch(Opc)) {
+      if (!AllowModify) {
+        // If we already saw an unconditional branch (walking bottom-up),
+        // there are two consecutive unconditional branches — bail out.
+        if (TBB && Cond.empty())
+          return true;
         TBB = I->getOperand(0).getMBB();
-        Cond.push_back(MachineOperand::CreateImm(I->getOpcode()));
-        return false;
+        continue;
       }
+
+      // If the block has any instructions after an unconditional branch,
+      // delete them (they are dead code) and remove stale successors.
+      if (std::next(I) != MBB.end()) {
+        // Collect targets of dead branches being removed.
+        MachineBasicBlock *KeepSucc = I->getOperand(0).getMBB();
+        for (auto J = std::next(I); J != MBB.end();) {
+          if (J->isBranch() && !J->isIndirectBranch()) {
+            for (const MachineOperand &MO : J->operands()) {
+              if (MO.isMBB() && MO.getMBB() != KeepSucc)
+                MBB.removeSuccessor(MO.getMBB());
+            }
+          }
+          J = MBB.erase(J);
+        }
+      }
+
+      Cond.clear();
+      FBB = nullptr;
+
+      // TBB is used to indicate the unconditional destination.
+      TBB = I->getOperand(0).getMBB();
+      continue;
     }
 
-    // Just an unconditional branch.
-    return false;
-  }
+    // Handle conditional branches.
+    assert(isCondBranch(Opc));
 
-  // Last instruction is a conditional branch.
-  TBB = I->getOperand(0).getMBB();
-  Cond.push_back(MachineOperand::CreateImm(Opc));
-
-  // Check for preceding branch.
-  if (I != MBB.begin()) {
-    --I;
-    if (I->isTerminator()) {
-      if (isUncondBranch(I->getOpcode())) {
-        // cond + uncond before it? That's unusual (normally cond then uncond).
-        return true;
-      }
-      if (isCondBranch(I->getOpcode())) {
-        // Two conditional branches? Can't analyze.
-        return true;
-      }
+    // Working from the bottom, handle the first conditional branch.
+    if (Cond.empty()) {
+      FBB = TBB;
+      TBB = I->getOperand(0).getMBB();
+      Cond.push_back(MachineOperand::CreateImm(Opc));
+      continue;
     }
+
+    // Multiple conditional branches? Can't handle.
+    return true;
   }
 
   return false;
@@ -167,18 +182,20 @@ unsigned VAXInstrInfo::removeBranch(MachineBasicBlock &MBB,
 
   I->eraseFromParent();
   unsigned Count = 1;
+  int Removed = isUncondBranch(Opc) ? 3 : 2; // BRW=3, Bcc=2
 
   I = MBB.getLastNonDebugInstr();
   if (I != MBB.end()) {
     Opc = I->getOpcode();
     if (isCondBranch(Opc) || isUncondBranch(Opc)) {
+      Removed += isUncondBranch(Opc) ? 3 : 2;
       I->eraseFromParent();
       ++Count;
     }
   }
 
   if (BytesRemoved)
-    *BytesRemoved = 0; // We don't track exact byte counts.
+    *BytesRemoved = Removed;
   return Count;
 }
 
@@ -195,7 +212,7 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
     assert(!FBB && "Unconditional branch with false block?");
     BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(TBB);
     if (BytesAdded)
-      *BytesAdded = 0;
+      *BytesAdded = 3;
     return 1;
   }
 
@@ -205,14 +222,14 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
 
   if (!FBB) {
     if (BytesAdded)
-      *BytesAdded = 0;
+      *BytesAdded = 2;
     return 1;
   }
 
   // Conditional + fallthrough unconditional.
   BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(FBB);
   if (BytesAdded)
-    *BytesAdded = 0;
+    *BytesAdded = 5; // 2 (Bcc) + 3 (BRW)
   return 2;
 }
 
@@ -222,4 +239,88 @@ bool VAXInstrInfo::reverseBranchCondition(
   unsigned Opc = Cond[0].getImm();
   Cond[0].setImm(getOppositeBranch(Opc));
   return false;
+}
+
+bool VAXInstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
+                                         int64_t BrOffset) const {
+  switch (BranchOpc) {
+  // Conditional branches have 8-bit signed displacement: ±127 bytes.
+  case VAX::BEQL: case VAX::BNEQ:
+  case VAX::BGTR: case VAX::BGEQ: case VAX::BLSS: case VAX::BLEQ:
+  case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
+    return isInt<8>(BrOffset);
+  // BRB has 8-bit signed displacement.
+  case VAX::BRB:
+    return isInt<8>(BrOffset);
+  // BRW has 16-bit signed displacement: ±32 KB.
+  case VAX::BRW:
+    return isInt<16>(BrOffset);
+  default:
+    llvm_unreachable("Unknown branch opcode");
+  }
+}
+
+MachineBasicBlock *
+VAXInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
+  switch (MI.getOpcode()) {
+  case VAX::BEQL: case VAX::BNEQ:
+  case VAX::BGTR: case VAX::BGEQ: case VAX::BLSS: case VAX::BLEQ:
+  case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
+  case VAX::BRB: case VAX::BRW:
+    return MI.getOperand(0).getMBB();
+  default:
+    llvm_unreachable("Unexpected branch opcode");
+  }
+}
+
+void VAXInstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
+                                        MachineBasicBlock &NewDestBB,
+                                        MachineBasicBlock &RestoreBB,
+                                        const DebugLoc &DL, int64_t BrOffset,
+                                        RegScavenger *RS) const {
+  // For branches beyond BRW range we'd need JMP, but ±32 KB should suffice
+  // for any reasonable function. Just emit BRW.
+  BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(&NewDestBB);
+}
+
+unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
+  unsigned Opc = MI.getOpcode();
+
+  // Pseudos that expand later.
+  if (MI.isMetaInstruction())
+    return 0;
+
+  switch (Opc) {
+  // 2-byte branches: opcode + 8-bit displacement.
+  case VAX::BEQL: case VAX::BNEQ:
+  case VAX::BGTR: case VAX::BGEQ: case VAX::BLSS: case VAX::BLEQ:
+  case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
+  case VAX::BRB:
+    return 2;
+  // 3-byte branch: opcode + 16-bit displacement.
+  case VAX::BRW:
+    return 3;
+  // CASEL pseudo expands to: casel instr (4B) + (limit+1)*2B table + brw (3B).
+  case VAX::CASEL: {
+    unsigned Limit = MI.getOperand(1).getImm();
+    return 4 + (Limit + 1) * 2 + 3;
+  }
+  default:
+    break;
+  }
+
+  // For non-branch instructions, use a conservative estimate.
+  // VAX instructions are variable-length; most are 2–10 bytes.
+  // Use the MCInst encoding size if available, otherwise estimate.
+  const MCInstrDesc &Desc = MI.getDesc();
+  unsigned Size = Desc.getSize();
+  if (Size)
+    return Size;
+
+  // Conservative fallback: count operands and estimate.
+  // VAX instructions are variable-length (1–30+ bytes).
+  // Overestimate to ensure BranchRelaxation is safe.
+  // Opcode(1-2) + each operand can be up to 6 bytes (displacement mode).
+  unsigned NumOps = Desc.getNumOperands();
+  return 2 + NumOps * 6;
 }

@@ -13,11 +13,13 @@ define i32 @clz(i32 %x) {
 ; CHECK-LABEL: clz:
 ; CHECK:       movl 4(%ap), %r0
 ; CHECK:       tstl %r0
-; CHECK:       beql .LBB0_1
+; CHECK:       bneq .LBB0_1
+; CHECK:       brw .LBB0_2
+; CHECK:       .LBB0_1:
 ; CHECK:       rotl
 ; CHECK:       mcoml
 ; CHECK:       ret
-; CHECK:       .LBB0_1:
+; CHECK:       .LBB0_2:
 ; CHECK:       movl $32, %r0
 ; CHECK:       ret
   %r = call i32 @llvm.ctlz.i32(i32 %x, i1 false)
@@ -28,13 +30,15 @@ define i32 @ctz(i32 %x) {
 ; CHECK-LABEL: ctz:
 ; CHECK:       movl 4(%ap), %r0
 ; CHECK:       tstl %r0
-; CHECK:       beql .LBB1_1
+; CHECK:       bneq .LBB1_1
+; CHECK:       brw .LBB1_2
+; CHECK:       .LBB1_1:
 ; CHECK:       decl
 ; CHECK:       bicl2
 ; CHECK:       mull2
 ; CHECK:       movzbl
 ; CHECK:       ret
-; CHECK:       .LBB1_1:
+; CHECK:       .LBB1_2:
 ; CHECK:       movl $32, %r0
 ; CHECK:       ret
   %r = call i32 @llvm.cttz.i32(i32 %x, i1 false)
