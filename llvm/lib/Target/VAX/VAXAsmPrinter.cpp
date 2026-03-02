@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
@@ -79,6 +80,42 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     Inst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm())); // offset
     Inst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg())); // FP
     EmitToStreamer(*OutStreamer, Inst);
+    return;
+  }
+
+  // Expand CASEL pseudo: emit casel instruction + inline word displacement table.
+  if (MI->getOpcode() == VAX::CASEL) {
+    Register IndexReg = MI->getOperand(0).getReg();
+    int64_t Limit = MI->getOperand(1).getImm();
+    unsigned JTI = MI->getOperand(2).getIndex();
+
+    // Emit: casel %rN, $0, $limit
+    // We emit this as raw text since CASEL is not a real MC instruction.
+    SmallString<64> Str;
+    raw_svector_ostream OS(Str);
+    OS << "\tcasel\t"
+       << VAXInstPrinter::getRegisterName(IndexReg)
+       << ", $0, $" << Limit;
+    OutStreamer->emitRawText(Str);
+
+    // Emit the word displacement table: .word target - tablebase
+    // CASEL sets PC to the start of the table, then adds sign-extended
+    // word displacement. All entries are relative to the table base.
+    const MachineJumpTableInfo *MJTI = MF->getJumpTableInfo();
+    const std::vector<MachineJumpTableEntry> &JT = MJTI->getJumpTables();
+    const std::vector<MachineBasicBlock *> &JTBBs = JT[JTI].MBBs;
+
+    // Label at the start of the displacement table.
+    MCSymbol *TableBase = OutContext.createTempSymbol();
+    OutStreamer->emitLabel(TableBase);
+
+    for (MachineBasicBlock *MBB : JTBBs) {
+      // Emit .word (target - tablebase) as a 16-bit value.
+      const MCExpr *Expr = MCBinaryExpr::createSub(
+          MCSymbolRefExpr::create(MBB->getSymbol(), OutContext),
+          MCSymbolRefExpr::create(TableBase, OutContext), OutContext);
+      OutStreamer->emitValue(Expr, 2);
+    }
     return;
   }
 

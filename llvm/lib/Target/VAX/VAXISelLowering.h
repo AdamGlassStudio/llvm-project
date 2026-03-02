@@ -39,6 +39,8 @@ enum NodeType : unsigned {
   PUSHL,
   // FP compare (CMPF): sets PSW from FP operands.
   FCMP,
+  // CASEL switch dispatch: (chain, index, limit, JTI) → jumps to table entry
+  CASEL,
 };
 } // namespace VAXISD
 
@@ -74,6 +76,7 @@ private:
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
@@ -86,6 +89,8 @@ private:
 
   Register getExceptionPointerRegister(const Constant *PersonalityFn) const override;
   Register getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
+
+  unsigned getJumpTableEncoding() const override;
 
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
