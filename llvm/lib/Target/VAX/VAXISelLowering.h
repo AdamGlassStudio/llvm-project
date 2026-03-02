@@ -41,6 +41,12 @@ enum NodeType : unsigned {
   FCMP,
   // CASEL switch dispatch: (chain, index, limit, JTI) → jumps to table entry
   CASEL,
+  // ASHQ: arithmetic shift quadword. (cnt:i32, src_lo:i32, src_hi:i32) →
+  // (dst_lo:i32, dst_hi:i32). Positive cnt = left shift, negative = right.
+  ASHQ,
+  // EMUL: extended multiply. (a:i32, b:i32, add:i32) →
+  // (lo:i32, hi:i32). Result = a*b + sign_extend(add).
+  EMUL,
 };
 } // namespace VAXISD
 
@@ -75,6 +81,9 @@ private:
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;

@@ -18,8 +18,16 @@ define i32 @urem(i32 %a, i32 %b) {
 
 define i32 @sdiv_by_const(i32 %a) {
 ; CHECK-LABEL: sdiv_by_const:
-; CHECK: divl3
+; SMUL_LOHI available → magic-number multiply via EMUL.
+; CHECK: emul
   %r = sdiv i32 %a, 7
+  ret i32 %r
+}
+
+define i32 @sdiv(i32 %a, i32 %b) {
+; CHECK-LABEL: sdiv:
+; CHECK: divl3
+  %r = sdiv i32 %a, %b
   ret i32 %r
 }
 

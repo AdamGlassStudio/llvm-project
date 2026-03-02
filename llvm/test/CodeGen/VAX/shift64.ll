@@ -1,10 +1,10 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf < %s | FileCheck %s
 ;
-; Test 64-bit shifts (SHL_PARTS, SRL_PARTS, SRA_PARTS).
-; Regression test: SHL_PARTS was not expanded.
+; Test 64-bit shifts using ASHQ instruction.
 
 define i64 @shl64(i64 %a, i32 %n) {
 ; CHECK-LABEL: shl64:
+; CHECK: ashq
 ; CHECK: ret
   %ext = zext i32 %n to i64
   %r = shl i64 %a, %ext
@@ -13,6 +13,8 @@ define i64 @shl64(i64 %a, i32 %n) {
 
 define i64 @lshr64(i64 %a, i32 %n) {
 ; CHECK-LABEL: lshr64:
+; No ASHQ for logical right shift — uses libcall.
+; CHECK: calls {{.*}}, __lshrdi3
 ; CHECK: ret
   %ext = zext i32 %n to i64
   %r = lshr i64 %a, %ext
@@ -21,6 +23,8 @@ define i64 @lshr64(i64 %a, i32 %n) {
 
 define i64 @ashr64(i64 %a, i32 %n) {
 ; CHECK-LABEL: ashr64:
+; CHECK: mnegl
+; CHECK: ashq
 ; CHECK: ret
   %ext = zext i32 %n to i64
   %r = ashr i64 %a, %ext
