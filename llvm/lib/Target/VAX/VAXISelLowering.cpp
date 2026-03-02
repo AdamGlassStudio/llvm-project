@@ -118,6 +118,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i1, Promote);
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i1, Promote);
 
+  // SIGN_EXTEND_INREG i1: no VAX instruction; expand to shift pair.
+  // i8 and i16 are handled by CVTBL/CVTWL patterns in TableGen.
+  setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
+
   // Truncating stores: MOVB (i8) and MOVW (i16).
   setTruncStoreAction(MVT::i32, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i32, MVT::i16, Legal);
@@ -268,6 +272,9 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
 
   // Map LLVM condition codes to VAX branch condition integers (see VAXCC enum
   // in VAXInstrInfo.td / branch PatLeaves).
+  // Note: SETUGT/etc. mean "unsigned" for integer and "unordered" for FP.
+  // VAX F_float/D_float have no NaN, so unordered FP compares → ordered.
+  bool IsFP = LHS.getValueType().isFloatingPoint();
   unsigned VAXCC;
   switch (CC) {
   default: llvm_unreachable("unsupported condition code for VAX BR_CC");
@@ -277,14 +284,23 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
   case ISD::SETGE:  case ISD::SETOGE: VAXCC = 3; break; // BGEQ  (signed)
   case ISD::SETLT:  case ISD::SETOLT: VAXCC = 4; break; // BLSS  (signed)
   case ISD::SETLE:  case ISD::SETOLE: VAXCC = 5; break; // BLEQ  (signed)
-  case ISD::SETUGT: VAXCC = 6; break; // BGTRU (unsigned)
-  case ISD::SETUGE: VAXCC = 7; break; // BGEQU (unsigned)
-  case ISD::SETULT: VAXCC = 8; break; // BLSSU (unsigned)
-  case ISD::SETULE: VAXCC = 9; break; // BLEQU (unsigned)
+  // FP-only unordered: no NaN on VAX, so map to ordered equivalents.
+  case ISD::SETUEQ: VAXCC = 0; break; // BEQL
+  case ISD::SETUNE: VAXCC = 1; break; // BNEQ
+  // SETUGT/SETUGE/SETULT/SETULE: unsigned for integer, unordered for FP.
+  case ISD::SETUGT: VAXCC = IsFP ? 2 : 6; break; // BGTR or BGTRU
+  case ISD::SETUGE: VAXCC = IsFP ? 3 : 7; break; // BGEQ or BGEQU
+  case ISD::SETULT: VAXCC = IsFP ? 4 : 8; break; // BLSS or BLSSU
+  case ISD::SETULE: VAXCC = IsFP ? 5 : 9; break; // BLEQ or BLEQU
+  // SETUO (unordered) → never true on VAX (no NaN).
+  case ISD::SETUO:
+    return Chain;
+  // SETO (ordered) → always true on VAX — unconditional branch.
+  case ISD::SETO:
+    return DAG.getNode(ISD::BR, DL, MVT::Other, Chain, Dest);
   }
 
   // Use FCMP for floating-point, CMP for integer.
-  bool IsFP = LHS.getValueType().isFloatingPoint();
   unsigned CmpOpc = IsFP ? VAXISD::FCMP : VAXISD::CMP;
   SDValue Cmp = DAG.getNode(CmpOpc, DL, MVT::Glue, LHS, RHS);
   return DAG.getNode(VAXISD::BRCC, DL, MVT::Other,
@@ -293,19 +309,19 @@ SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {
                      Cmp);
 }
 
-static unsigned mapISDCCToVAXCC(ISD::CondCode CC) {
+static unsigned mapISDCCToVAXCC(ISD::CondCode CC, bool IsFP) {
   switch (CC) {
   default: llvm_unreachable("unsupported condition code for VAX SELECT_CC");
-  case ISD::SETEQ:  case ISD::SETOEQ: return 0;
-  case ISD::SETNE:  case ISD::SETONE: return 1;
+  case ISD::SETEQ:  case ISD::SETOEQ: case ISD::SETUEQ: return 0;
+  case ISD::SETNE:  case ISD::SETONE: case ISD::SETUNE: return 1;
   case ISD::SETGT:  case ISD::SETOGT: return 2;
   case ISD::SETGE:  case ISD::SETOGE: return 3;
   case ISD::SETLT:  case ISD::SETOLT: return 4;
   case ISD::SETLE:  case ISD::SETOLE: return 5;
-  case ISD::SETUGT: return 6;
-  case ISD::SETUGE: return 7;
-  case ISD::SETULT: return 8;
-  case ISD::SETULE: return 9;
+  case ISD::SETUGT: return IsFP ? 2 : 6;
+  case ISD::SETUGE: return IsFP ? 3 : 7;
+  case ISD::SETULT: return IsFP ? 4 : 8;
+  case ISD::SETULE: return IsFP ? 5 : 9;
   }
 }
 
@@ -318,8 +334,14 @@ SDValue VAXTargetLowering::LowerSELECT_CC(SDValue Op,
   SDValue FalseV = Op.getOperand(3);
   ISD::CondCode CC = cast<CondCodeSDNode>(Op.getOperand(4))->get();
 
-  unsigned VAXCC = mapISDCCToVAXCC(CC);
+  // VAX has no NaN — SETUO always false, SETO always true.
+  if (CC == ISD::SETUO)
+    return FalseV;
+  if (CC == ISD::SETO)
+    return TrueV;
+
   bool IsFP = LHS.getValueType().isFloatingPoint();
+  unsigned VAXCC = mapISDCCToVAXCC(CC, IsFP);
   unsigned CmpOpc = IsFP ? VAXISD::FCMP : VAXISD::CMP;
   SDValue Cmp = DAG.getNode(CmpOpc, DL, MVT::Glue, LHS, RHS);
   return DAG.getNode(VAXISD::SELECT_CC, DL, Op.getValueType(),
