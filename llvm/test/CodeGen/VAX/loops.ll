@@ -6,7 +6,7 @@
 define i32 @sum_array(ptr %arr, i32 %n) {
 ; CHECK-LABEL: sum_array:
 ; CHECK: .LBB0_2:
-; CHECK: addl3
+; CHECK: addl2
 ; CHECK: decl
 ; CHECK: bneq .LBB0_2
 entry:

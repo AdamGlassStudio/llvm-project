@@ -3,7 +3,7 @@
 ; Multiply
 define i32 @test_mul(i32 %a, i32 %b) {
 ; CHECK-LABEL: test_mul:
-; CHECK: mull3
+; CHECK: mull2
   %r = mul i32 %a, %b
   ret i32 %r
 }
@@ -27,7 +27,7 @@ define i32 @test_neg(i32 %a) {
 ; OR
 define i32 @test_or(i32 %a, i32 %b) {
 ; CHECK-LABEL: test_or:
-; CHECK: bisl3
+; CHECK: bisl2
   %r = or i32 %a, %b
   ret i32 %r
 }
@@ -35,7 +35,7 @@ define i32 @test_or(i32 %a, i32 %b) {
 ; XOR
 define i32 @test_xor(i32 %a, i32 %b) {
 ; CHECK-LABEL: test_xor:
-; CHECK: xorl3
+; CHECK: xorl2
   %r = xor i32 %a, %b
   ret i32 %r
 }

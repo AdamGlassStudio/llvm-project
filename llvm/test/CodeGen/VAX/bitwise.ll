@@ -52,7 +52,7 @@ define i32 @ashr_const(i32 %a) {
 define i32 @lshr_const(i32 %a) {
 ; CHECK-LABEL: lshr_const:
 ; CHECK: rotl $28
-; CHECK: bicl3
+; CHECK: bicl2
   %r = lshr i32 %a, 4
   ret i32 %r
 }
