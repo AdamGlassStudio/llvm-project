@@ -33,7 +33,7 @@ define i32 @ctz(i32 %x) {
 ; CHECK:       .LBB1_1:
 ; CHECK:       decl %r0
 ; CHECK:       bicl3
-; CHECK:       mull3
+; CHECK:       mull2
 ; CHECK:       movzbl
 ; CHECK:       .LBB1_2:
 ; CHECK:       ret
@@ -47,7 +47,7 @@ define i32 @bswap(i32 %x) {
 ; CHECK:       ashl $24, %r0, %r1
 ; CHECK:       bicl3
 ; CHECK:       ashl $8
-; CHECK:       bisl3
+; CHECK:       bisl2
 ; CHECK:       rotl $8
 ; CHECK:       rotl $24
 ; CHECK:       ret
@@ -59,11 +59,11 @@ define i32 @popcount(i32 %x) {
 ; CHECK-LABEL: popcount:
 ; CHECK:       movl 4(%ap), %r0
 ; CHECK:       rotl $31
+; CHECK:       subl2
 ; CHECK:       bicl3
-; CHECK:       subl3
-; CHECK:       mull3 $16843009
+; CHECK:       mull2 $16843009
 ; CHECK:       rotl $8
-; CHECK:       bicl3 $-256
+; CHECK:       bicl2 $-256
 ; CHECK:       ret
   %r = call i32 @llvm.ctpop.i32(i32 %x)
   ret i32 %r

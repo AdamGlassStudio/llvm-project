@@ -18,6 +18,7 @@ add_llvm_target(VAXCodeGen
   VAXInstrInfo.cpp
   VAXISelDAGToDAG.cpp
   VAXISelLowering.cpp
+  VAXPeephole.cpp
   VAXRegisterInfo.cpp
   VAXSubtarget.cpp
   VAXTargetMachine.cpp

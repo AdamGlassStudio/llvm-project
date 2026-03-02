@@ -7,7 +7,7 @@ declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32)
 ; Signed add overflow — extract value
 define i32 @sadd_overflow(i32 %a, i32 %b) {
 ; CHECK-LABEL: sadd_overflow:
-; CHECK: addl3
+; CHECK: addl2
   %r = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %a, i32 %b)
   %v = extractvalue { i32, i1 } %r, 0
   ret i32 %v
@@ -17,8 +17,8 @@ define i32 @sadd_overflow(i32 %a, i32 %b) {
 define i32 @abs_val(i32 %a) {
 ; CHECK-LABEL: abs_val:
 ; CHECK: ashl $-31
-; CHECK: xorl3
-; CHECK: subl3
+; CHECK: xorl2
+; CHECK: subl2
   %neg = sub i32 0, %a
   %cmp = icmp sgt i32 %a, -1
   %r = select i1 %cmp, i32 %a, i32 %neg

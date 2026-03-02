@@ -34,7 +34,7 @@ define void @store_through_ptr(ptr %p, i32 %v) {
 define i32 @array_element(ptr %arr, i32 %idx) {
 ; CHECK-LABEL: array_element:
 ; CHECK: ashl $2
-; CHECK: addl3
+; CHECK: addl2
 ; CHECK: movl (%r0), %r0
   %gep = getelementptr i32, ptr %arr, i32 %idx
   %v = load i32, ptr %gep

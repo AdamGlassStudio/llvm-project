@@ -33,7 +33,7 @@ define i32 @add_impl(i32 %a, i32 %b) {
 ; CHECK: .word 0
 ; CHECK-DAG: movl 4(%ap), {{%r[0-9]+}}
 ; CHECK-DAG: movl 8(%ap), {{%r[0-9]+}}
-; CHECK: addl3
+; CHECK: addl2
 ; CHECK: ret
   %r = add i32 %a, %b
   ret i32 %r

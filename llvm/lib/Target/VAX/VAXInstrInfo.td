@@ -493,6 +493,48 @@ def ADDL2_ri : InstVAX<0xA0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src
     "addl2\t$imm, $dst", []> {
   let Constraints = "$src = $dst";
 }
+
+// 2-operand register-register forms: opl2 src, dst → dst OP= src
+def ADDL2_rr : InstVAX<0xC0, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "addl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def SUBL2_rr : InstVAX<0xC2, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "subl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def MULL2_rr : InstVAX<0xC4, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "mull2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def MULL2_ri : InstVAX<0xC4, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
+    "mull2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def BISL2_rr : InstVAX<0xC8, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "bisl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def BISL2_ri : InstVAX<0xC8, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
+    "bisl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def XORL2_rr : InstVAX<0xCC, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "xorl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def XORL2_ri : InstVAX<0xCC, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
+    "xorl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def BICL2_rr : InstVAX<0xCA, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+    "bicl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+def BICL2_ri : InstVAX<0xCA, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
+    "bicl2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
 } // let Defs = [PSW]
 
 // PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
