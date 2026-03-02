@@ -25,6 +25,14 @@ class MCTargetOptions;
 class StringRef;
 class Triple;
 
+MCCodeEmitter *createVAXMCCodeEmitter(const MCInstrInfo &MCII, MCContext &Ctx);
+
+MCAsmBackend *createVAXAsmBackend(const Target &T, const MCSubtargetInfo &STI,
+                                  const MCRegisterInfo &MRI,
+                                  const MCTargetOptions &Options);
+
+std::unique_ptr<MCObjectTargetWriter> createVAXELFObjectWriter();
+
 } // namespace llvm
 
 // Defines symbolic names for VAX registers.

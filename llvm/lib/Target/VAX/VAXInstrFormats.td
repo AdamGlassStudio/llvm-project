@@ -26,4 +26,12 @@ class InstVAX<bits<16> op, dag outs, dag ins, string asmstr, list<dag> pattern>
   // VAX instructions are variable-length; set a large size and let the
   // assembler/encoder determine the real encoding size.
   let Size = 0;
+
+  // TSFlags layout for the MCCodeEmitter:
+  //   Bit  0:     HasMemOp — MCInst operands [1,2] form a 2-slot memory pair.
+  //   Bits 1-16:  HWOpcode — the 1-2 byte hardware opcode value.
+  bit HasMemOp = 0;
+  bits<16> HWOpcode = op;
+  let TSFlags{0} = HasMemOp;
+  let TSFlags{16-1} = HWOpcode;
 }

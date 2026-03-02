@@ -71,4 +71,8 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTargetMC() {
                                           createVAXMCSubtargetInfo);
   TargetRegistry::RegisterMCInstPrinter(getTheVAXTarget(),
                                         createVAXMCInstPrinter);
+  TargetRegistry::RegisterMCCodeEmitter(getTheVAXTarget(),
+                                        createVAXMCCodeEmitter);
+  TargetRegistry::RegisterMCAsmBackend(getTheVAXTarget(),
+                                       createVAXAsmBackend);
 }
