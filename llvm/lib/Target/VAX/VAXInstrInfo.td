@@ -136,6 +136,10 @@ def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
+// Atomic load/store: VAX aligned 32-bit loads/stores are naturally atomic.
+def : Pat<(atomic_load_32 VAXMem:$src), (MOVL_rm VAXMemOp:$src)>;
+def : Pat<(atomic_store_32 GPRnoPC:$src, VAXMem:$dst), (MOVL_mr GPRnoPC:$src, VAXMemOp:$dst)>;
+
 //===----------------------------------------------------------------------===//
 // Phase 5 — Integer Arithmetic (longword i32)
 //===----------------------------------------------------------------------===//
