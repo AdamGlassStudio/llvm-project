@@ -12,6 +12,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -32,6 +33,11 @@ public:
   // Returns true and sets Base/Offset when Addr matches a known form:
   //   FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
   bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
+
+  // Handle 'm' constraint for inline assembly memory operands.
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op,
+                                    InlineAsm::ConstraintCode ConstraintID,
+                                    std::vector<SDValue> &OutOps) override;
 
 // Include the pieces auto-generated from the target description.
 #include "VAXGenDAGISel.inc"
@@ -123,6 +129,25 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
   return true;
+}
+
+bool VAXDAGToDAGISel::SelectInlineAsmMemoryOperand(
+    const SDValue &Op, InlineAsm::ConstraintCode ConstraintID,
+    std::vector<SDValue> &OutOps) {
+  switch (ConstraintID) {
+  default:
+    return true;
+  case InlineAsm::ConstraintCode::m:
+  case InlineAsm::ConstraintCode::o:
+  case InlineAsm::ConstraintCode::p: {
+    SDValue Base, Offset;
+    if (!SelectVAXAddr(Op, Base, Offset))
+      return true;
+    OutOps.push_back(Base);
+    OutOps.push_back(Offset);
+    return false;
+  }
+  }
 }
 
 namespace {
