@@ -293,11 +293,17 @@ def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t(${target})",
     [(brind GPRnoPC:$target)]>;
 
 // CASEL — hardware switch dispatch via inline word-displacement table.
-// Pseudo: lowered in AsmPrinter to emit casel + .word entries.
+// Pseudo: lowered in AsmPrinter to CASEL_L MCInst + .word entries.
 let isPseudo = 1, isBranch = 1, isTerminator = 1, isBarrier = 1,
     isIndirectBranch = 1 in
 def CASEL : Pseudo<(outs), (ins GPRnoPC:$index, i32imm:$limit, i32imm:$jti),
     "", [(VAXISD_CASEL GPRnoPC:$index, (i32 imm:$limit), (i32 tjumptable:$jti))]>;
+
+// Real CASEL_L instruction (opcode 0xCF): casel selector, base, limit.
+// Used by AsmPrinter expansion of the CASEL pseudo and parseable by AsmParser.
+def CASEL_L : InstVAX<0xCF, (outs),
+    (ins GPRnoPC:$selector, i32imm:$base, i32imm:$limit),
+    "casel\t$selector, $base, $limit", []>;
 
 // Conditional branches (8-bit signed displacement ±127 B; all use PSW).
 // Each is a separate def so the opcode byte is fixed at instruction level.
