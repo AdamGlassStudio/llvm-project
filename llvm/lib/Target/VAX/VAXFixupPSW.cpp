@@ -1,0 +1,293 @@
+//===-- VAXFixupPSW.cpp - Fix PSW clobbers via compare-branch fusion ------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// On VAX, nearly all data-manipulation instructions (including MOVL used for
+// register copies) set condition codes in PSW. The register allocator inserts
+// COPY pseudos that are later expanded to MOVL_rr, but the RA doesn't know
+// that COPY will clobber PSW. This can place a MOVL between a compare (CMPL)
+// and a conditional branch (Bcc), producing incorrect code.
+//
+// Solution: two passes that bracket register allocation:
+//
+// 1. VAXFuseCmpBranch (pre-RA): Fuses adjacent CMP/TST + Bcc into a single
+//    CMP_BRANCH pseudo-instruction. The RA sees this as one instruction and
+//    cannot insert COPYs between compare and branch.
+//
+// 2. VAXExpandCmpBranch (post-RA): Expands the fused pseudo back into
+//    separate CMP + Bcc instructions before any branch analysis passes run.
+//
+//===----------------------------------------------------------------------===//
+
+#include "VAX.h"
+#include "VAXInstrInfo.h"
+#include "MCTargetDesc/VAXMCTargetDesc.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
+
+using namespace llvm;
+
+#define FUSE_DEBUG_TYPE "vax-fuse-cmp-branch"
+#define EXPAND_DEBUG_TYPE "vax-expand-cmp-branch"
+#define DEBUG_TYPE "vax-fixup-psw"
+
+// Map condition code integer to the corresponding Bcc opcode.
+static unsigned ccToBranchOpcode(unsigned CC) {
+  switch (CC) {
+  case 0: return VAX::BEQL;
+  case 1: return VAX::BNEQ;
+  case 2: return VAX::BGTR;
+  case 3: return VAX::BGEQ;
+  case 4: return VAX::BLSS;
+  case 5: return VAX::BLEQ;
+  case 6: return VAX::BGTRU;
+  case 7: return VAX::BGEQU;
+  case 8: return VAX::BLSSU;
+  case 9: return VAX::BLEQU;
+  default: llvm_unreachable("invalid VAX condition code");
+  }
+}
+
+// Map Bcc opcode to condition code integer.
+static unsigned branchOpcodeToCC(unsigned Opc) {
+  switch (Opc) {
+  case VAX::BEQL:  return 0;
+  case VAX::BNEQ:  return 1;
+  case VAX::BGTR:  return 2;
+  case VAX::BGEQ:  return 3;
+  case VAX::BLSS:  return 4;
+  case VAX::BLEQ:  return 5;
+  case VAX::BGTRU: return 6;
+  case VAX::BGEQU: return 7;
+  case VAX::BLSSU: return 8;
+  case VAX::BLEQU: return 9;
+  default: return ~0U;
+  }
+}
+
+// Get the compare opcode that corresponds to a fused pseudo.
+static unsigned fusedToCmpOpcode(unsigned Opc) {
+  switch (Opc) {
+  case VAX::CMP_BRANCH_ri: return VAX::CMPL_ri;
+  case VAX::CMP_BRANCH_rr: return VAX::CMPL_rr;
+  case VAX::TST_BRANCH:    return VAX::TSTL;
+  case VAX::CMPF_BRANCH:   return VAX::CMPF;
+  case VAX::CMPD_BRANCH:   return VAX::CMPD;
+  default: return 0;
+  }
+}
+
+static bool isFusedCmpBranch(unsigned Opc) {
+  return fusedToCmpOpcode(Opc) != 0;
+}
+
+// Return true if MI is a compare/test instruction.
+static bool isCompareOrTest(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case VAX::CMPL_ri:
+  case VAX::CMPL_rr:
+  case VAX::TSTL:
+  case VAX::CMPF:
+  case VAX::CMPD:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// Return the fused pseudo opcode for a given compare opcode.
+static unsigned cmpToFusedOpcode(unsigned CmpOpc) {
+  switch (CmpOpc) {
+  case VAX::CMPL_ri: return VAX::CMP_BRANCH_ri;
+  case VAX::CMPL_rr: return VAX::CMP_BRANCH_rr;
+  case VAX::TSTL:    return VAX::TST_BRANCH;
+  case VAX::CMPF:    return VAX::CMPF_BRANCH;
+  case VAX::CMPD:    return VAX::CMPD_BRANCH;
+  default: return 0;
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// VAXFuseCmpBranch — Pre-RA: fuse CMP + Bcc into CMP_BRANCH pseudo
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+class VAXFuseCmpBranch : public MachineFunctionPass {
+public:
+  static char ID;
+  VAXFuseCmpBranch() : MachineFunctionPass(ID) {}
+
+  StringRef getPassName() const override {
+    return "VAX Fuse Compare-Branch";
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override;
+};
+
+char VAXFuseCmpBranch::ID = 0;
+
+} // end anonymous namespace
+
+bool VAXFuseCmpBranch::runOnMachineFunction(MachineFunction &MF) {
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  bool Changed = false;
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*advanced below*/) {
+      MachineInstr &CmpMI = *II;
+      if (!isCompareOrTest(CmpMI)) {
+        ++II;
+        continue;
+      }
+
+      // Check if the next non-debug instruction is a conditional branch.
+      auto NextIt = std::next(II);
+      while (NextIt != IE && NextIt->isDebugInstr())
+        ++NextIt;
+
+      if (NextIt == IE) {
+        ++II;
+        continue;
+      }
+
+      unsigned CC = branchOpcodeToCC(NextIt->getOpcode());
+      if (CC == ~0U) {
+        ++II;
+        continue;
+      }
+
+      unsigned FusedOpc = cmpToFusedOpcode(CmpMI.getOpcode());
+      if (!FusedOpc) {
+        ++II;
+        continue;
+      }
+
+      // Get branch target.
+      MachineBasicBlock *TargetBB = NextIt->getOperand(0).getMBB();
+
+      // Build the fused pseudo.
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, II, CmpMI.getDebugLoc(), TII->get(FusedOpc));
+
+      // Copy compare explicit operands only (skip implicit PSW defs).
+      for (unsigned i = 0, e = CmpMI.getNumExplicitOperands(); i < e; ++i) {
+        MIB.add(CmpMI.getOperand(i));
+      }
+
+      // Add condition code and branch target.
+      MIB.addImm(CC);
+      MIB.addMBB(TargetBB);
+
+      LLVM_DEBUG(dbgs() << "VAXFuseCmpBranch: fusing " << CmpMI << "  + "
+                        << *NextIt << "  -> " << *MIB << "\n");
+
+      // Remove the original CMP and Bcc.
+      auto EraseIt1 = II;
+      auto EraseIt2 = NextIt;
+      II = std::next(EraseIt2);
+      EraseIt1->eraseFromParent();
+      EraseIt2->eraseFromParent();
+      Changed = true;
+    }
+  }
+  return Changed;
+}
+
+//===----------------------------------------------------------------------===//
+// VAXExpandCmpBranch — Post-RA: expand CMP_BRANCH back into CMP + Bcc
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+class VAXExpandCmpBranch : public MachineFunctionPass {
+public:
+  static char ID;
+  VAXExpandCmpBranch() : MachineFunctionPass(ID) {}
+
+  StringRef getPassName() const override {
+    return "VAX Expand Compare-Branch";
+  }
+
+  bool runOnMachineFunction(MachineFunction &MF) override;
+};
+
+char VAXExpandCmpBranch::ID = 0;
+
+} // end anonymous namespace
+
+bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  bool Changed = false;
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*advanced below*/) {
+      MachineInstr &MI = *II;
+      if (!isFusedCmpBranch(MI.getOpcode())) {
+        ++II;
+        continue;
+      }
+
+      unsigned CmpOpc = fusedToCmpOpcode(MI.getOpcode());
+      DebugLoc DL = MI.getDebugLoc();
+
+      // Operand layout:
+      //   CMP_BRANCH_ri: lhs(reg), rhs(imm), cc(imm), dst(MBB)
+      //   CMP_BRANCH_rr: lhs(reg), rhs(reg), cc(imm), dst(MBB)
+      //   TST_BRANCH:    src(reg), cc(imm), dst(MBB)
+      //   CMPF_BRANCH:   lhs(reg), rhs(reg), cc(imm), dst(MBB)
+      //   CMPD_BRANCH:   lhs(reg), rhs(reg), cc(imm), dst(MBB)
+
+      unsigned NumExplicit = MI.getNumExplicitOperands();
+      // Last two explicit operands are always cc(imm) and dst(MBB).
+      unsigned CC = MI.getOperand(NumExplicit - 2).getImm();
+      MachineBasicBlock *TargetBB = MI.getOperand(NumExplicit - 1).getMBB();
+
+      // Emit the compare (all explicit operands except cc and dst).
+      MachineInstrBuilder CmpMIB =
+          BuildMI(MBB, II, DL, TII->get(CmpOpc));
+      for (unsigned i = 0, e = NumExplicit - 2; i < e; ++i)
+        CmpMIB.add(MI.getOperand(i));
+
+      // Emit the branch.
+      unsigned BrOpc = ccToBranchOpcode(CC);
+      BuildMI(MBB, II, DL, TII->get(BrOpc)).addMBB(TargetBB);
+
+      LLVM_DEBUG(dbgs() << "VAXExpandCmpBranch: expanding " << MI << "\n");
+
+      auto EraseIt = II;
+      ++II;
+      EraseIt->eraseFromParent();
+      Changed = true;
+    }
+  }
+  return Changed;
+}
+
+//===----------------------------------------------------------------------===//
+// Pass initialization and creation
+//===----------------------------------------------------------------------===//
+
+INITIALIZE_PASS(VAXFuseCmpBranch, FUSE_DEBUG_TYPE,
+                "VAX Fuse Compare-Branch", false, false)
+INITIALIZE_PASS(VAXExpandCmpBranch, EXPAND_DEBUG_TYPE,
+                "VAX Expand Compare-Branch", false, false)
+
+FunctionPass *llvm::createVAXFuseCmpBranchPass() {
+  return new VAXFuseCmpBranch();
+}
+
+FunctionPass *llvm::createVAXExpandCmpBranchPass() {
+  return new VAXExpandCmpBranch();
+}
+
+// Keep the old entry point for compatibility (now a no-op that can be removed).
+FunctionPass *llvm::createVAXFixupPSWPass() {
+  return new VAXExpandCmpBranch();
+}
