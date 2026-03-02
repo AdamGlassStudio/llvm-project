@@ -104,6 +104,11 @@ private:
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
                                StringRef Constraint, MVT VT) const override;
+
+  TargetLoweringBase::AtomicExpansionKind
+  shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const override;
+  TargetLoweringBase::AtomicExpansionKind
+  shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *AI) const override;
 };
 
 } // namespace llvm

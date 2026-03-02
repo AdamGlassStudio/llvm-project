@@ -168,6 +168,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // interlocked instructions (BBSSI, BBCCI, ADAWI) rather than fences.
   setOperationAction(ISD::ATOMIC_FENCE,       MVT::Other, Expand);
 
+  // Atomic load/store: VAX is single-core with strict ordering, so
+  // monotonic/acquire/release atomic loads/stores are just regular loads/stores.
+  setMaxAtomicSizeInBitsSupported(32);
+  setMinCmpXchgSizeInBits(32);
+
   // FP bitcast: VAX D_float is not IEEE754, so bitcast between FP and int
   // must go through memory (store as one type, load as another).
   setOperationAction(ISD::BITCAST,    MVT::f32, Expand);
@@ -195,6 +200,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FPOW,       MVT::f32, Expand);
   setOperationAction(ISD::FMINNUM,    MVT::f32, Expand);
   setOperationAction(ISD::FMAXNUM,    MVT::f32, Expand);
+  setOperationAction(ISD::FMA,        MVT::f32, Expand);
 
   // D_float (f64) support: VAX has native D_float arithmetic using QPR pairs.
   setOperationAction(ISD::BR_CC,      MVT::f64, Custom);
@@ -213,6 +219,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FPOW,       MVT::f64, Expand);
   setOperationAction(ISD::FMINNUM,    MVT::f64, Expand);
   setOperationAction(ISD::FMAXNUM,    MVT::f64, Expand);
+  setOperationAction(ISD::FMA,        MVT::f64, Expand);
   // D_float ↔ int conversions.
   setOperationAction(ISD::FP_TO_SINT, MVT::i32, Legal);
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Legal);
@@ -856,4 +863,17 @@ VAXTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
     }
   }
   return TargetLowering::getRegForInlineAsmConstraint(TRI, Constraint, VT);
+}
+
+TargetLoweringBase::AtomicExpansionKind
+VAXTargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
+  // VAX is single-core with strict memory ordering. Atomic RMW can be
+  // lowered to non-atomic load/op/store (no concurrent writers).
+  return AtomicExpansionKind::NotAtomic;
+}
+
+TargetLoweringBase::AtomicExpansionKind
+VAXTargetLowering::shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *AI) const {
+  // VAX is single-core — CAS expands to a simple compare-and-store.
+  return AtomicExpansionKind::NotAtomic;
 }
