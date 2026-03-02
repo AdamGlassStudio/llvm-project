@@ -81,9 +81,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Signed remainder also needs expansion (no REML instruction).
   setOperationAction(ISD::SREM, MVT::i32, Expand);
 
-  // i64 mul expansion needs umul_lohi/smul_lohi → expand to libcalls.
+  // i64 mul: EMUL (32×32→64) handles SMUL_LOHI directly.
+  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Custom);
+  // Remaining i64 mul/div expansions still use libcalls.
   setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
-  setOperationAction(ISD::SMUL_LOHI, MVT::i32, Expand);
   setOperationAction(ISD::MULHU, MVT::i32, Expand);
   setOperationAction(ISD::MULHS, MVT::i32, Expand);
 
@@ -150,11 +151,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
 
-  // 64-bit shift parts: expand SHL_PARTS/SRL_PARTS/SRA_PARTS so the
-  // legalizer handles i64 shifts by splitting into i32 operations.
-  setOperationAction(ISD::SHL_PARTS,  MVT::i32, Expand);
+  // 64-bit shift parts: ASHQ handles SHL and SRA directly (single instruction).
+  // SRL_PARTS has no direct quadword equivalent — ASHQ is arithmetic only.
+  setOperationAction(ISD::SHL_PARTS,  MVT::i32, Custom);
+  setOperationAction(ISD::SRA_PARTS,  MVT::i32, Custom);
   setOperationAction(ISD::SRL_PARTS,  MVT::i32, Expand);
-  setOperationAction(ISD::SRA_PARTS,  MVT::i32, Expand);
 
   // Dynamic stack allocation (VLAs): expand to SP adjustment.
   setOperationAction(ISD::DYNAMIC_STACKALLOC, MVT::i32, Expand);
@@ -234,6 +235,8 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::PUSHL:        return "VAXISD::PUSHL";
   case VAXISD::FCMP:         return "VAXISD::FCMP";
   case VAXISD::CASEL:        return "VAXISD::CASEL";
+  case VAXISD::ASHQ:         return "VAXISD::ASHQ";
+  case VAXISD::EMUL:         return "VAXISD::EMUL";
   default:                   return nullptr;
   }
 }
@@ -248,6 +251,9 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::AND:           return LowerAND(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
+  case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
+  case ISD::SRA_PARTS:     return LowerSRA_PARTS(Op, DAG);
+  case ISD::SMUL_LOHI:     return LowerSMUL_LOHI(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
@@ -420,6 +426,51 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
                                  DAG.getAllOnesConstant(DL, MVT::i32));
   SDValue Mask = DAG.getNOT(DL, SignBits, MVT::i32);
   return DAG.getNode(ISD::AND, DL, MVT::i32, Shifted, Mask);
+}
+
+SDValue VAXTargetLowering::LowerSHL_PARTS(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  // shl_parts(lo, hi, amt) → ASHQ(amt, lo, hi) → (dst_lo, dst_hi)
+  SDLoc DL(Op);
+  SDValue Lo = Op.getOperand(0);
+  SDValue Hi = Op.getOperand(1);
+  SDValue Amt = Op.getOperand(2);
+  SDValue ASHQ = DAG.getNode(VAXISD::ASHQ, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32), Amt, Lo, Hi);
+  return DAG.getMergeValues({ASHQ.getValue(0), ASHQ.getValue(1)}, DL);
+}
+
+SDValue VAXTargetLowering::LowerSRA_PARTS(SDValue Op,
+                                           SelectionDAG &DAG) const {
+  // sra_parts(lo, hi, amt) → ASHQ(-amt, lo, hi) → (dst_lo, dst_hi)
+  SDLoc DL(Op);
+  SDValue Lo = Op.getOperand(0);
+  SDValue Hi = Op.getOperand(1);
+  SDValue Amt = Op.getOperand(2);
+
+  SDValue NegAmt;
+  if (auto *CN = dyn_cast<ConstantSDNode>(Amt)) {
+    NegAmt = DAG.getSignedConstant(-CN->getSExtValue(), DL, MVT::i32);
+  } else {
+    NegAmt = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                          DAG.getConstant(0, DL, MVT::i32), Amt);
+  }
+  SDValue ASHQ = DAG.getNode(VAXISD::ASHQ, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32), NegAmt, Lo, Hi);
+  return DAG.getMergeValues({ASHQ.getValue(0), ASHQ.getValue(1)}, DL);
+}
+
+SDValue VAXTargetLowering::LowerSMUL_LOHI(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  // smul_lohi(a, b) → EMUL(a, b, 0) → (lo, hi)
+  // EMUL computes a*b + sign_extend(addend); we pass addend=0.
+  SDLoc DL(Op);
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
+  SDValue EMUL = DAG.getNode(VAXISD::EMUL, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32), A, B, Zero);
+  return DAG.getMergeValues({EMUL.getValue(0), EMUL.getValue(1)}, DL);
 }
 
 SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,

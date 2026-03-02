@@ -90,6 +90,80 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  // ASHQ — quadword shift. The VAXISD::ASHQ node has i32 operands (cnt, lo,
+  // hi) and i32 results (lo, hi), but the hardware ASHQ reads/writes
+  // consecutive register pairs. Build REG_SEQUENCE to form QPR, emit ASHQ,
+  // then EXTRACT_SUBREG to get the i32 halves back.
+  if (N->getOpcode() == VAXISD::ASHQ) {
+    SDLoc DL(N);
+    SDValue Cnt   = N->getOperand(0);
+    SDValue SrcLo = N->getOperand(1);
+    SDValue SrcHi = N->getOperand(2);
+
+    // Build QPR from i32 halves: REG_SEQUENCE QPRRegClass, SrcLo, sub_lo, SrcHi, sub_hi.
+    SDValue QprRC = CurDAG->getTargetConstant(VAX::QPRRegClassID, DL, MVT::i32);
+    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDNode *SrcPair = CurDAG->getMachineNode(
+        TargetOpcode::REG_SEQUENCE, DL, MVT::i64,
+        {QprRC, SrcLo, SubLoIdx, SrcHi, SubHiIdx});
+
+    // Choose register or immediate count variant.
+    unsigned Opc = VAX::ASHQ;
+    if (ConstantSDNode *CntC = dyn_cast<ConstantSDNode>(Cnt)) {
+      Opc = VAX::ASHQ_i;
+      Cnt = CurDAG->getTargetConstant(CntC->getSExtValue(), DL, MVT::i32);
+    }
+
+    // Emit ASHQ: (QPR:$dst) = ashq cnt, QPR:$src.
+    SDNode *Ashq = CurDAG->getMachineNode(
+        Opc, DL, MVT::i64, {Cnt, SDValue(SrcPair, 0)});
+
+    // Extract i32 halves from QPR result.
+    SDNode *Lo = CurDAG->getMachineNode(
+        TargetOpcode::EXTRACT_SUBREG, DL, MVT::i32,
+        SDValue(Ashq, 0), SubLoIdx);
+    SDNode *Hi = CurDAG->getMachineNode(
+        TargetOpcode::EXTRACT_SUBREG, DL, MVT::i32,
+        SDValue(Ashq, 0), SubHiIdx);
+
+    ReplaceUses(SDValue(N, 0), SDValue(Lo, 0));
+    ReplaceUses(SDValue(N, 1), SDValue(Hi, 0));
+    CurDAG->RemoveDeadNode(N);
+    return;
+  }
+
+  // EMUL — extended multiply. Inputs are i32, output is quadword (QPR).
+  if (N->getOpcode() == VAXISD::EMUL) {
+    SDLoc DL(N);
+    SDValue Mulr   = N->getOperand(0);
+    SDValue Muld   = N->getOperand(1);
+    SDValue Addend = N->getOperand(2);
+
+    // Addend must be an immediate (we always pass 0 from LowerSMUL_LOHI).
+    SDValue Add = CurDAG->getTargetConstant(
+        cast<ConstantSDNode>(Addend)->getSExtValue(), DL, MVT::i32);
+
+    // Emit EMUL: (QPR:$dst) = emul mulr, muld, add.
+    SDNode *Emul = CurDAG->getMachineNode(
+        VAX::EMUL, DL, MVT::i64, {Mulr, Muld, Add});
+
+    // Extract i32 halves.
+    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDNode *Lo = CurDAG->getMachineNode(
+        TargetOpcode::EXTRACT_SUBREG, DL, MVT::i32,
+        SDValue(Emul, 0), SubLoIdx);
+    SDNode *Hi = CurDAG->getMachineNode(
+        TargetOpcode::EXTRACT_SUBREG, DL, MVT::i32,
+        SDValue(Emul, 0), SubHiIdx);
+
+    ReplaceUses(SDValue(N, 0), SDValue(Lo, 0));
+    ReplaceUses(SDValue(N, 1), SDValue(Hi, 0));
+    CurDAG->RemoveDeadNode(N);
+    return;
+  }
+
   SelectCode(N);
 }
 
