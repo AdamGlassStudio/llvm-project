@@ -637,6 +637,46 @@ def SUBL3_ri_cc : InstVAX<0xC3, (outs GPRnoPC:$dst),
 }
 
 //===----------------------------------------------------------------------===//
+// Quadword Operations (ASHQ, EMUL, EDIV)
+//===----------------------------------------------------------------------===//
+
+// ASHQ (0x79) — Arithmetic Shift Quadword.
+// cnt > 0: left shift; cnt < 0: arithmetic right shift.
+// Operands: cnt (byte), src (quadword), dst (quadword).
+// Quadword operands use QPR (consecutive register pair Rn:Rn+1).
+// Selected via custom ISel in VAXISelDAGToDAG (builds REG_SEQUENCE for QPR).
+def SDT_VAXASHQ : SDTypeProfile<2, 3,
+    [SDTCisVT<0, i32>, SDTCisVT<1, i32>,   // results: lo, hi
+     SDTCisVT<2, i32>,                       // cnt
+     SDTCisVT<3, i32>, SDTCisVT<4, i32>]>;  // src: lo, hi
+def vax_ashq : SDNode<"VAXISD::ASHQ", SDT_VAXASHQ>;
+
+let Defs = [PSW] in {
+let Constraints = "@earlyclobber $dst" in {
+def ASHQ : InstVAX<0x79, (outs QPR:$dst),
+    (ins GPRnoPC:$cnt, QPR:$src),
+    "ashq\t$cnt, $src, $dst", []>;
+def ASHQ_i : InstVAX<0x79, (outs QPR:$dst),
+    (ins i32imm:$cnt, QPR:$src),
+    "ashq\t$cnt, $src, $dst", []>;
+}
+}
+
+// EMUL (0x7A) — Extended Multiply: result = mulr * muld + sign_extend(add)
+// Produces 64-bit result in dst (quadword).
+// Selected via custom ISel in VAXISelDAGToDAG (extracts QPR subregs).
+def SDT_VAXEMUL : SDTypeProfile<2, 3,
+    [SDTCisVT<0, i32>, SDTCisVT<1, i32>,   // results: lo, hi
+     SDTCisVT<2, i32>, SDTCisVT<3, i32>,   // mulr, muld
+     SDTCisVT<4, i32>]>;                    // addend
+def vax_emul : SDNode<"VAXISD::EMUL", SDT_VAXEMUL>;
+
+let Defs = [PSW], Constraints = "@earlyclobber $dst" in
+def EMUL : InstVAX<0x7A, (outs QPR:$dst),
+    (ins GPRnoPC:$mulr, GPRnoPC:$muld, i32imm:$add),
+    "emul\t$mulr, $muld, $add, $dst", []>;
+
+//===----------------------------------------------------------------------===//
 // Phase 14B — F_float (32-bit floating point)
 //===----------------------------------------------------------------------===//
 
