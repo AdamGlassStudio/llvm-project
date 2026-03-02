@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -57,8 +58,8 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::BR_CC,   MVT::i32,   Custom);
   setOperationAction(ISD::BRCOND,  MVT::Other,  Expand);
 
-  // Switch/jump tables: expand BR_JT to BRIND (load address from table, JMP).
-  setOperationAction(ISD::BR_JT, MVT::Other, Expand);
+  // Switch/jump tables: custom-lower BR_JT to CASEL instruction.
+  setOperationAction(ISD::BR_JT, MVT::Other, Custom);
 
   // Variadic function support.
   setOperationAction(ISD::VASTART, MVT::Other, Custom);
@@ -228,6 +229,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::SELECT_CC:    return "VAXISD::SELECT_CC";
   case VAXISD::PUSHL:        return "VAXISD::PUSHL";
   case VAXISD::FCMP:         return "VAXISD::FCMP";
+  case VAXISD::CASEL:        return "VAXISD::CASEL";
   default:                   return nullptr;
   }
 }
@@ -243,6 +245,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
+  case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
   case ISD::VASTART:       return LowerVASTART(Op, DAG);
   case ISD::FRAMEADDR:     return LowerFRAMEADDR(Op, DAG);
@@ -419,6 +422,31 @@ SDValue VAXTargetLowering::LowerJumpTable(SDValue Op,
   SDLoc DL(JT);
   SDValue Table = DAG.getTargetJumpTable(JT->getIndex(), MVT::i32);
   return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Table);
+}
+
+SDValue VAXTargetLowering::LowerBR_JT(SDValue Op, SelectionDAG &DAG) const {
+  SDValue Chain = Op.getOperand(0);
+  SDValue Table = Op.getOperand(1);
+  SDValue Index = Op.getOperand(2);
+  SDLoc DL(Op);
+
+  JumpTableSDNode *JT = cast<JumpTableSDNode>(Table);
+  unsigned JTI = JT->getIndex();
+
+  // Get jump table size to determine the limit operand for CASEL.
+  const MachineJumpTableInfo *MJTI =
+      DAG.getMachineFunction().getOrCreateJumpTableInfo(
+          MachineJumpTableInfo::EK_Inline);
+  unsigned NumEntries = MJTI->getJumpTables()[JTI].MBBs.size();
+  SDValue Limit = DAG.getConstant(NumEntries - 1, DL, MVT::i32);
+  SDValue JTIVal = DAG.getTargetJumpTable(JTI, MVT::i32);
+
+  return DAG.getNode(VAXISD::CASEL, DL, MVT::Other, Chain, Index, Limit,
+                     JTIVal);
+}
+
+unsigned VAXTargetLowering::getJumpTableEncoding() const {
+  return MachineJumpTableInfo::EK_Inline;
 }
 
 SDValue VAXTargetLowering::LowerConstantPool(SDValue Op,

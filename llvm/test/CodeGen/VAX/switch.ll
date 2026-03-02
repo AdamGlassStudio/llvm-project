@@ -19,15 +19,14 @@ case1: ret i32 20
 default: ret i32 99
 }
 
-; Large switch — lowered via jump table.
+; Large switch — lowered via CASEL (hardware case dispatch).
 define i32 @test_switch_jt(i32 %x) {
 ; CHECK-LABEL: test_switch_jt:
 ; CHECK:       cmpl {{.*}}, $4
 ; CHECK:       bgtru
-; CHECK:       ashl $2
-; CHECK:       moval .LJTI
-; CHECK:       jmp
-; CHECK:       .long .LBB
+; CHECK:       casel %r0, $0, $4
+; CHECK-NEXT:  .Ltmp
+; CHECK:       .word
 entry:
   switch i32 %x, label %default [
     i32 0, label %case0

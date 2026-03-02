@@ -230,6 +230,13 @@ def SDT_VAXBRCC : SDTypeProfile<0, 2,
 def vax_brcc : SDNode<"VAXISD::BRCC", SDT_VAXBRCC,
     [SDNPHasChain, SDNPInGlue]>;
 
+// SDNode for VAXISD::CASEL: hardware switch dispatch.
+// Operands: index:i32, limit:i32, jti:i32. Chain is implicit.
+def SDT_VAXCASEL : SDTypeProfile<0, 3,
+    [SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>]>;
+def VAXISD_CASEL : SDNode<"VAXISD::CASEL", SDT_VAXCASEL,
+    [SDNPHasChain]>;
+
 // Condition-code integer constants used as pattern leaves in branch defs.
 // Must match the VAXCC values assigned in LowerBR_CC().
 def VAXCC_EQL  : PatLeaf<(i32 0)>;   // equal
@@ -272,6 +279,13 @@ def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>;
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
 def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t($target)",
     [(brind GPRnoPC:$target)]>;
+
+// CASEL — hardware switch dispatch via inline word-displacement table.
+// Pseudo: lowered in AsmPrinter to emit casel + .word entries.
+let isPseudo = 1, isBranch = 1, isTerminator = 1, isBarrier = 1,
+    isIndirectBranch = 1 in
+def CASEL : Pseudo<(outs), (ins GPRnoPC:$index, i32imm:$limit, i32imm:$jti),
+    "", [(VAXISD_CASEL GPRnoPC:$index, (i32 imm:$limit), (i32 tjumptable:$jti))]>;
 
 // Conditional branches (8-bit signed displacement ±127 B; all use PSW).
 // Each is a separate def so the opcode byte is fixed at instruction level.
