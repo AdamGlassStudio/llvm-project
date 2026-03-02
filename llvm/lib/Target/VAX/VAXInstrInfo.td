@@ -656,9 +656,17 @@ def MOVF_rm : InstVAX<0xD0, (outs GPRI:$dst), (ins VAXFMemOp:$src),
 def MOVF_rcp : InstVAX<0xD0, (outs GPRI:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
     [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
+// f32 load from global address
+def MOVF_rga : InstVAX<0xD0, (outs GPRI:$dst), (ins i32imm:$sym),
+    "movl\t$sym, $dst",
+    [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
 def MOVF_mr : InstVAX<0xD0, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
     "movl\t$src, $dst",
     [(store (f32 GPRI:$src), VAXMem:$dst)]>;
+// f32 store to global address
+def MOVF_mga : InstVAX<0xD0, (outs), (ins GPRI:$src, i32imm:$sym),
+    "movl\t$src, $sym",
+    [(store (f32 GPRI:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
 def MOVF_rr : InstVAX<0xD0, (outs GPRI:$dst), (ins GPRI:$src),
     "movl\t$src, $dst", []>;
 
@@ -735,9 +743,17 @@ def MOVD_rm : InstVAX<0x70, (outs QPR:$dst), (ins VAXDMemOp:$src),
 def MOVD_rcp : InstVAX<0x70, (outs QPR:$dst), (ins i32imm:$sym),
     "movd\t$sym, $dst",
     [(set QPR:$dst, (f64 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
+// f64 load from global address
+def MOVD_rga : InstVAX<0x70, (outs QPR:$dst), (ins i32imm:$sym),
+    "movd\t$sym, $dst",
+    [(set QPR:$dst, (f64 (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
 def MOVD_mr : InstVAX<0x70, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     "movd\t$src, $dst",
     [(store (f64 QPR:$src), VAXMem:$dst)]>;
+// f64 store to global address
+def MOVD_mga : InstVAX<0x70, (outs), (ins QPR:$src, i32imm:$sym),
+    "movd\t$src, $sym",
+    [(store (f64 QPR:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
 def MOVD_rr : InstVAX<0x70, (outs QPR:$dst), (ins QPR:$src),
     "movd\t$src, $dst", []>;
 
