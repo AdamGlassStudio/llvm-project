@@ -3,6 +3,7 @@ add_llvm_component_group(VAX)
 set(LLVM_TARGET_DEFINITIONS VAX.td)
 
 tablegen(LLVM VAXGenAsmWriter.inc     -gen-asm-writer)
+tablegen(LLVM VAXGenAsmMatcher.inc    -gen-asm-matcher)
 tablegen(LLVM VAXGenCallingConv.inc   -gen-callingconv)
 tablegen(LLVM VAXGenDAGISel.inc       -gen-dag-isel)
 tablegen(LLVM VAXGenInstrInfo.inc     -gen-instr-info)
@@ -44,3 +45,4 @@ add_llvm_target(VAXCodeGen
 
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)
+add_subdirectory(AsmParser)

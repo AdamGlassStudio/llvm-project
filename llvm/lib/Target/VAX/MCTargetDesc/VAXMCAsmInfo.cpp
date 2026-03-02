@@ -28,5 +28,5 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   // Use external GAS assembler — the integrated assembler does not yet
   // support VAX instruction encoding.
-  UseIntegratedAssembler = false;
+  UseIntegratedAssembler = true;
 }
