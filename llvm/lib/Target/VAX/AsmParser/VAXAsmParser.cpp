@@ -61,6 +61,7 @@ private:
   };
 
   SMLoc Start, End;
+  bool IsRegDirect = false; // Bare register morphed to Mem
 
 public:
   VAXOperand(KindTy K, SMLoc S, SMLoc E) : Kind(K), Start(S), End(E) {}
@@ -86,6 +87,16 @@ public:
     Reg = R;
   }
 
+  // Morph this operand into a Mem operand (for validateTargetOperandClass).
+  // regDirect=true means this was a bare register, not register deferred.
+  void morphToMem(MCRegister Base, const MCExpr *Disp, bool regDirect = false) {
+    Kind = k_Mem;
+    Mem = {Base, Disp};
+    IsRegDirect = regDirect;
+  }
+
+  bool isRegDirectMem() const { return Kind == k_Mem && IsRegDirect; }
+
   const MCExpr *getImm() const {
     assert(Kind == k_Imm);
     return Imm;
@@ -106,8 +117,16 @@ public:
 
   void addMemOperands(MCInst &Inst, unsigned N) const {
     assert(N == 2 && "Invalid number of operands!");
-    Inst.addOperand(MCOperand::createReg(Mem.Base));
-    addExprOperand(Inst, Mem.Disp);
+    if (IsRegDirect) {
+      // Bare register morphed to Mem — encode as register direct.
+      // Use sentinel displacement to tell MCCodeEmitter this is register
+      // direct mode, not register deferred.
+      Inst.addOperand(MCOperand::createReg(Mem.Base));
+      Inst.addOperand(MCOperand::createImm(INT32_MIN));
+    } else {
+      Inst.addOperand(MCOperand::createReg(Mem.Base));
+      addExprOperand(Inst, Mem.Disp);
+    }
   }
 
   void print(raw_ostream &O, const MCAsmInfo &MAI) const override {
@@ -501,6 +520,8 @@ ParseStatus VAXAsmParser::parseMemOperand(OperandVector &Operands) {
     return ParseStatus::Failure;
 
   // Verify the last operand is a memory operand.
+  // Note: bare registers and immediates that should be VAXMemOp are handled
+  // by validateTargetOperandClass during matching, not here.
   auto &Last = static_cast<VAXOperand &>(*Operands.back());
   if (!Last.isMem())
     return ParseStatus::NoMatch;
@@ -558,6 +579,22 @@ extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXAsmParser() {
 unsigned VAXAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
                                                   unsigned Kind) {
   VAXOperand &Op = static_cast<VAXOperand &>(AsmOp);
+
+  // The matcher expects MCK_Mem (VAXMemOp) but we may have parsed a bare
+  // register or immediate. VAX operand specifiers are uniform — convert:
+  //   %reg  → Mem{Base=reg, Disp=0}   (register direct)
+  //   $imm  → Mem{Base=NoReg, Disp=imm} (immediate/literal)
+  if (Kind == MCK_Mem) {
+    if (Op.isReg()) {
+      Op.morphToMem(Op.getReg(), nullptr, /*regDirect=*/true);
+      return Match_Success;
+    }
+    if (Op.isImm()) {
+      Op.morphToMem(MCRegister(), Op.getImm());
+      return Match_Success;
+    }
+  }
+
   if (!Op.isReg())
     return Match_InvalidOperand;
 

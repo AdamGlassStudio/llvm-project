@@ -13,6 +13,7 @@
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/raw_ostream.h"
+#include <climits>
 
 using namespace llvm;
 
@@ -54,6 +55,25 @@ void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo + 1);
+
+  // No base register: immediate mode ($value).
+  if (Base.isReg() && Base.getReg() == 0) {
+    O << '$';
+    if (Disp.isImm())
+      O << Disp.getImm();
+    else if (Disp.isExpr())
+      MAI.printExpr(O, *Disp.getExpr());
+    else
+      O << '0';
+    return;
+  }
+
+  // Register direct (sentinel INT32_MIN): bare register.
+  if (Disp.isImm() && Disp.getImm() == INT32_MIN) {
+    assert(Base.isReg() && "Register direct must have a register base");
+    printRegName(O, Base.getReg());
+    return;
+  }
 
   // Displacement: may be immediate or an expression (e.g. frame index fixup).
   if (Disp.isImm() && Disp.getImm() != 0)

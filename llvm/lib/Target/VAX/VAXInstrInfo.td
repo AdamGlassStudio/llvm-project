@@ -894,3 +894,81 @@ def SELECT_CC_D_Pseudo : Pseudo<(outs QPR:$dst),
     [(set (f64 QPR:$dst), (vax_select_cc (f64 QPR:$truev),
                                           (f64 QPR:$falsev),
                                           (i32 imm:$cc)))]>;
+
+//===----------------------------------------------------------------------===//
+// MC-only instructions — used exclusively in inline assembly (kernel headers).
+// No ISel patterns; only need AsmParser + MCCodeEmitter support.
+//===----------------------------------------------------------------------===//
+
+// HALT (0x00): stop processor execution.
+let isBarrier = 1, isTerminator = 1 in
+def HALT : InstVAX<0x00, (outs), (ins), "halt", []>;
+
+let HasMemOp = 1 in {
+
+// MOVPSL (0xDC): move processor status longword to destination.
+def MOVPSL : InstVAX<0xDC, (outs), (ins VAXMemOp:$dst),
+    "movpsl\t$dst", []>;
+
+// MTPR (0xDA): move to processor register. src.rl, procreg.rl
+def MTPR : InstVAX<0xDA, (outs), (ins VAXMemOp:$src, VAXMemOp:$procreg),
+    "mtpr\t$src, $procreg", []>;
+
+// MFPR (0xDB): move from processor register. procreg.rl, dst.wl
+def MFPR : InstVAX<0xDB, (outs), (ins VAXMemOp:$procreg, VAXMemOp:$dst),
+    "mfpr\t$procreg, $dst", []>;
+
+// FFS (0xEA): find first set bit. startpos.rl, size.rb, base.rl, dst.wl
+let Defs = [PSW] in
+def FFS : InstVAX<0xEA, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
+    "ffs\t$pos, $size, $base, $dst", []>;
+
+// FFC (0xEB): find first clear bit. startpos.rl, size.rb, base.rl, dst.wl
+let Defs = [PSW] in
+def FFC : InstVAX<0xEB, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
+    "ffc\t$pos, $size, $base, $dst", []>;
+
+// INSQUE (0x0E): insert entry into queue. entry.ab, pred.ab
+def INSQUE : InstVAX<0x0E, (outs), (ins VAXMemOp:$entry, VAXMemOp:$pred),
+    "insque\t$entry, $pred", []>;
+
+// REMQUE (0x0F): remove entry from queue. entry.ab, addr.wl
+let Defs = [PSW] in
+def REMQUE : InstVAX<0x0F, (outs), (ins VAXMemOp:$entry, VAXMemOp:$addr),
+    "remque\t$entry, $addr", []>;
+
+// MOVC3 (0x28): move character 3-operand. len.rw, srcaddr.ab, dstaddr.ab
+let Defs = [R0, R1, R2, R3, R4, R5] in
+def MOVC3 : InstVAX<0x28, (outs),
+    (ins VAXMemOp:$len, VAXMemOp:$src, VAXMemOp:$dst),
+    "movc3\t$len, $src, $dst", []>;
+
+// MOVC5 (0x2C): move character 5-operand.
+// srclen.rw, srcaddr.ab, fill.rb, dstlen.rw, dstaddr.ab
+let Defs = [R0, R1, R2, R3, R4, R5] in
+def MOVC5 : InstVAX<0x2C, (outs),
+    (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
+         VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
+    "movc5\t$srclen, $srcaddr, $fill, $dstlen, $dstaddr", []>;
+
+// SCANC (0x2A): scan characters. len.rw, addr.ab, tbladdr.ab, mask.rb
+let Defs = [R0, R1, R2, R3] in
+def SCANC : InstVAX<0x2A, (outs),
+    (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
+    "scanc\t$len, $addr, $tbl, $mask", []>;
+
+// LOCC (0x3A): locate character. char.rb, len.rw, addr.ab
+let Defs = [R0, R1] in
+def LOCC : InstVAX<0x3A, (outs),
+    (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
+    "locc\t$char, $len, $addr", []>;
+
+// SKPC (0x3B): skip character. char.rb, len.rw, addr.ab
+let Defs = [R0, R1] in
+def SKPC : InstVAX<0x3B, (outs),
+    (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
+    "skpc\t$char, $len, $addr", []>;
+
+} // let HasMemOp = 1

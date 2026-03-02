@@ -27,6 +27,7 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <climits>
 
 using namespace llvm;
 
@@ -140,7 +141,24 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
                                       SmallVectorImpl<MCFixup> &Fixups,
                                       unsigned StartByte) const {
   assert(Base.isReg() && "Memory base must be a register");
-  unsigned BaseReg = getRegEncoding(Base.getReg());
+  unsigned BaseReg = Base.getReg() ? getRegEncoding(Base.getReg()) : 0;
+
+  // No base register: this was a bare immediate ($value) morphed to Mem.
+  // Encode as immediate mode (literal or immediate operand specifier).
+  if (!Base.getReg()) {
+    if (Disp.isImm()) {
+      emitImmOperand(Disp.getImm(), CB);
+      return;
+    }
+    if (Disp.isExpr()) {
+      // PC-relative or absolute expression.
+      emitExprOperand(Disp.getExpr(), CB, Fixups, StartByte);
+      return;
+    }
+    // Null displacement (bare $0 case).
+    emitImmOperand(0, CB);
+    return;
+  }
 
   if (Disp.isExpr()) {
     // Expression displacement — emit as longword displacement + fixup.
@@ -161,6 +179,13 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
 
   assert(Disp.isImm() && "Memory displacement must be immediate or expression");
   int64_t DispVal = Disp.getImm();
+
+  // Sentinel value INT32_MIN means "register direct mode" — a bare register
+  // that was morphed to a Mem pair by the AsmParser.
+  if (DispVal == INT32_MIN) {
+    CB.push_back(static_cast<char>(0x50 | BaseReg));
+    return;
+  }
 
   if (DispVal == 0) {
     // Zero displacement → register deferred mode (0x60 | reg).
@@ -239,9 +264,29 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   // Extract hardware opcode and flags from TSFlags.
   // Bit 0: HasMemOp, Bits 1-16: HWOpcode.
   uint64_t TSFlags = Desc.TSFlags;
-  bool HasMemOp = TSFlags & 1;
   uint16_t OpcodeVal = (TSFlags >> 1) & 0xFFFF;
-  unsigned MemOpIdx = HasMemOp ? 1 : ~0u;
+
+  // Build a set of MCInst operand indices that start memory pairs.
+  // A VAXMemOp in TableGen expands to 2 MCInst slots: (GPR, i32imm).
+  // We detect memory pairs by looking for a register operand immediately
+  // followed by an immediate operand in the MCInstrDesc.
+  bool HasMemOp = TSFlags & 1;
+  SmallVector<unsigned, 6> MemOpIndices;
+  if (HasMemOp) {
+    unsigned NumDescOps = Desc.getNumOperands();
+    for (unsigned i = 0; i + 1 < NumDescOps; ++i) {
+      // Memory pair: register sub-operand (has RegClass) followed by
+      // immediate sub-operand (no RegClass, rc == -1).
+      if (Desc.operands()[i].RegClass >= 0 &&
+          Desc.operands()[i + 1].RegClass < 0) {
+        MemOpIndices.push_back(i);
+        ++i; // skip the immediate sub-operand
+      }
+    }
+  }
+  auto isMemOpStart = [&](unsigned Idx) {
+    return llvm::is_contained(MemOpIndices, Idx);
+  };
 
   LLVM_DEBUG(dbgs() << "VAXMCCodeEmitter: encoding opcode=" << Opcode
                     << " HWOpcode=0x" << Twine::utohexstr(OpcodeVal)
@@ -283,7 +328,7 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   // consumed (2 for memory, 1 otherwise).
   auto emitOperand = [&](unsigned OpIdx) -> unsigned {
     // Check if this is the start of a memory operand pair.
-    if (OpIdx == MemOpIdx) {
+    if (isMemOpStart(OpIdx)) {
       emitMemOperand(MI.getOperand(OpIdx), MI.getOperand(OpIdx + 1), CB,
                      Fixups, StartByte);
       return 2;
