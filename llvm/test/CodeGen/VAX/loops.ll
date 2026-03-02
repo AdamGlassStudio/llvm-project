@@ -5,10 +5,10 @@
 ; Sum array elements
 define i32 @sum_array(ptr %arr, i32 %n) {
 ; CHECK-LABEL: sum_array:
-; CHECK: .LBB0_2:
+; CHECK: .LBB0_3:
 ; CHECK: addl2
 ; CHECK: decl
-; CHECK: bneq .LBB0_2
+; CHECK: bneq .LBB0_3
 entry:
   %cmp = icmp sgt i32 %n, 0
   br i1 %cmp, label %loop, label %exit
@@ -29,8 +29,8 @@ exit:
 ; Count nonzero elements
 define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK-LABEL: count_nonzero:
-; CHECK: tstl
 ; CHECK: decl
+; CHECK: tstl
 entry:
   %cmp = icmp sgt i32 %n, 0
   br i1 %cmp, label %loop, label %exit
