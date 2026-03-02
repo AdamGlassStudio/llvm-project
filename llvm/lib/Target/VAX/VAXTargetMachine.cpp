@@ -111,6 +111,7 @@ void VAXPassConfig::addPostRegAlloc() {
 
 void VAXPassConfig::addPreEmitPass() {
   addPass(createVAXPeepholePass());
+  addPass(&BranchRelaxationPassID);
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
