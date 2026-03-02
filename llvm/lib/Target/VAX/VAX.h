@@ -23,10 +23,12 @@ FunctionPass *createVAXISelDag(VAXTargetMachine &TM,
 FunctionPass *createVAXFixupPSWPass();
 FunctionPass *createVAXFuseCmpBranchPass();
 FunctionPass *createVAXExpandCmpBranchPass();
+FunctionPass *createVAXPeepholePass();
 void initializeVAXDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeVAXFixupPSWPass(PassRegistry &);
 void initializeVAXFuseCmpBranchPass(PassRegistry &);
 void initializeVAXExpandCmpBranchPass(PassRegistry &);
+void initializeVAXPeepholePass(PassRegistry &);
 
 } // namespace llvm
 

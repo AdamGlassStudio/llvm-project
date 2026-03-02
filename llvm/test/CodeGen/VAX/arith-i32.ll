@@ -4,7 +4,7 @@
 @y = global i32 3
 
 ; CHECK-LABEL: test_add_rr:
-; CHECK: addl3
+; CHECK: addl2
 ; CHECK: ret
 define i32 @test_add_rr() {
   %a = load i32, ptr @x
@@ -14,7 +14,7 @@ define i32 @test_add_rr() {
 }
 
 ; CHECK-LABEL: test_add_ri:
-; CHECK: addl3 $42
+; CHECK: addl2 $42
 ; CHECK: ret
 define i32 @test_add_ri() {
   %a = load i32, ptr @x
@@ -23,7 +23,7 @@ define i32 @test_add_ri() {
 }
 
 ; CHECK-LABEL: test_sub_rr:
-; CHECK: subl3
+; CHECK: subl2
 ; CHECK: ret
 define i32 @test_sub_rr() {
   %a = load i32, ptr @x
@@ -33,7 +33,7 @@ define i32 @test_sub_rr() {
 }
 
 ; CHECK-LABEL: test_mul_rr:
-; CHECK: mull3
+; CHECK: mull2
 ; CHECK: ret
 define i32 @test_mul_rr() {
   %a = load i32, ptr @x
@@ -53,7 +53,7 @@ define i32 @test_sdiv_rr() {
 }
 
 ; CHECK-LABEL: test_or_rr:
-; CHECK: bisl3
+; CHECK: bisl2
 ; CHECK: ret
 define i32 @test_or_rr() {
   %a = load i32, ptr @x
@@ -63,7 +63,7 @@ define i32 @test_or_rr() {
 }
 
 ; CHECK-LABEL: test_xor_rr:
-; CHECK: xorl3
+; CHECK: xorl2
 ; CHECK: ret
 define i32 @test_xor_rr() {
   %a = load i32, ptr @x

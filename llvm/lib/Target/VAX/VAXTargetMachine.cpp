@@ -87,6 +87,7 @@ public:
   bool addInstSelector() override;
   void addPreRegAlloc() override;
   void addPostRegAlloc() override;
+  void addPreEmitPass() override;
 };
 
 } // end anonymous namespace
@@ -108,10 +109,15 @@ void VAXPassConfig::addPostRegAlloc() {
   addPass(createVAXExpandCmpBranchPass());
 }
 
+void VAXPassConfig::addPreEmitPass() {
+  addPass(createVAXPeepholePass());
+}
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
   RegisterTargetMachine<VAXTargetMachine> X(getTheVAXTarget());
   PassRegistry &PR = *PassRegistry::getPassRegistry();
   initializeVAXDAGToDAGISelLegacyPass(PR);
   initializeVAXFuseCmpBranchPass(PR);
   initializeVAXExpandCmpBranchPass(PR);
+  initializeVAXPeepholePass(PR);
 }

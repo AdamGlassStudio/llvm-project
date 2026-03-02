@@ -7,7 +7,7 @@ declare float @llvm.fabs.f32(float)
 
 define float @fabs_f32(float %a) {
 ; CHECK-LABEL: fabs_f32:
-; CHECK: bicl3 $-2147483648
+; CHECK: bicl2 $-2147483648
 ; CHECK: ret
   %r = call float @llvm.fabs.f32(float %a)
   ret float %r

@@ -30,8 +30,8 @@ define i64 @test_and64(i64 %a, i64 %b) {
 ; i64 bitwise OR
 define i64 @test_or64(i64 %a, i64 %b) {
 ; CHECK-LABEL: test_or64:
-; CHECK: bisl3
-; CHECK: bisl3
+; CHECK: bisl2
+; CHECK: bisl2
   %r = or i64 %a, %b
   ret i64 %r
 }

@@ -26,8 +26,8 @@ define i32 @sdiv_by_const(i32 %a) {
 define i32 @srem(i32 %a, i32 %b) {
 ; CHECK-LABEL: srem:
 ; CHECK: divl3
-; CHECK: mull3
-; CHECK: subl3
+; CHECK: mull2
+; CHECK: subl2
   %r = srem i32 %a, %b
   ret i32 %r
 }

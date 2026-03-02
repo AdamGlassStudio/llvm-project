@@ -7,7 +7,7 @@ define i32 @add_i8_promoted(i8 %a, i8 %b) {
 ; CHECK-LABEL: add_i8_promoted:
 ; CHECK: movzbl
 ; CHECK: movzbl
-; CHECK: addl3
+; CHECK: addl2
   %ea = zext i8 %a to i32
   %eb = zext i8 %b to i32
   %r = add i32 %ea, %eb
@@ -33,7 +33,7 @@ define i32 @mul_power_of_2(i32 %a) {
 ; Add constant
 define i32 @add_constant(i32 %a) {
 ; CHECK-LABEL: add_constant:
-; CHECK: addl3 $42
+; CHECK: addl2 $42
   %r = add i32 %a, 42
   ret i32 %r
 }
@@ -41,7 +41,7 @@ define i32 @add_constant(i32 %a) {
 ; Sub constant — lowered as addl3 with negative immediate
 define i32 @sub_constant(i32 %a) {
 ; CHECK-LABEL: sub_constant:
-; CHECK: addl3 $-42
+; CHECK: addl2 $-42
   %r = sub i32 %a, 42
   ret i32 %r
 }
@@ -64,8 +64,8 @@ define void @nop() {
 ; Three-operand add chain
 define i32 @add3(i32 %a, i32 %b, i32 %c) {
 ; CHECK-LABEL: add3:
-; CHECK: addl3
-; CHECK: addl3
+; CHECK: addl2
+; CHECK: addl2
   %ab = add i32 %a, %b
   %r = add i32 %ab, %c
   ret i32 %r
