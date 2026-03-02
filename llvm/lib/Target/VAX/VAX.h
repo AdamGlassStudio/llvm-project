@@ -20,7 +20,13 @@ class VAXTargetMachine;
 
 FunctionPass *createVAXISelDag(VAXTargetMachine &TM,
                                 CodeGenOptLevel OptLevel);
+FunctionPass *createVAXFixupPSWPass();
+FunctionPass *createVAXFuseCmpBranchPass();
+FunctionPass *createVAXExpandCmpBranchPass();
 void initializeVAXDAGToDAGISelLegacyPass(PassRegistry &);
+void initializeVAXFixupPSWPass(PassRegistry &);
+void initializeVAXFuseCmpBranchPass(PassRegistry &);
+void initializeVAXExpandCmpBranchPass(PassRegistry &);
 
 } // namespace llvm
 
