@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXFixupKinds.h"
+#include "VAXMCAsmInfo.h"
 #include "VAXMCTargetDesc.h"
 #include "VAX.h"
 #include "llvm/ADT/SmallVector.h"
@@ -127,9 +128,17 @@ void VAXMCCodeEmitter::emitExprOperand(const MCExpr *Expr,
   // PC-relative longword displacement: 0xEF + 4-byte displacement.
   CB.push_back(static_cast<char>(0xEF));
   unsigned FixOff = CB.size() - StartByte;
+  // Check for PLT/GOT specifier on call/data targets.
+  MCFixupKind Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
+  if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Expr)) {
+    unsigned Spec = SRE->getSpecifier();
+    if (Spec == VAX::S_PLT)
+      Kind = MCFixupKind(VAX::fixup_vax_plt_32);
+    else if (Spec == VAX::S_GOT)
+      Kind = MCFixupKind(VAX::fixup_vax_got_32);
+  }
   Fixups.push_back(
-      MCFixup::create(FixOff, Expr, MCFixupKind(VAX::fixup_vax_pcrel_32),
-                      /*PCRel=*/true));
+      MCFixup::create(FixOff, Expr, Kind, /*PCRel=*/true));
   // Emit 4 placeholder bytes for the fixup.
   CB.push_back(0);
   CB.push_back(0);
@@ -164,10 +173,24 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
       CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
       unsigned FixOff = CB.size() - StartByte;
       CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
-      MCFixupKind Kind = (BaseRegNum == 0xF)
-                             ? MCFixupKind(VAX::fixup_vax_pcrel_32)
-                             : MCFixupKind(FK_Data_4);
-      bool IsPCRel = (BaseRegNum == 0xF);
+      MCFixupKind Kind;
+      bool IsPCRel;
+      if (BaseRegNum == 0xF) {
+        // PC-relative: check for GOT/PLT specifier.
+        IsPCRel = true;
+        unsigned Spec = 0;
+        if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Disp.getExpr()))
+          Spec = SRE->getSpecifier();
+        if (Spec == VAX::S_GOT)
+          Kind = MCFixupKind(VAX::fixup_vax_got_32);
+        else if (Spec == VAX::S_PLT)
+          Kind = MCFixupKind(VAX::fixup_vax_plt_32);
+        else
+          Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
+      } else {
+        IsPCRel = false;
+        Kind = MCFixupKind(FK_Data_4);
+      }
       Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
       return;
     }
