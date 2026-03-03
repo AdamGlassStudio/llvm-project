@@ -180,6 +180,12 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
   assert(Disp.isImm() && "Memory displacement must be immediate or expression");
   int64_t DispVal = Disp.getImm();
 
+  // Sentinel value INT64_MIN means "autodecrement mode" -(Rn).
+  if (DispVal == INT64_MIN) {
+    CB.push_back(static_cast<char>(0x70 | BaseReg));
+    return;
+  }
+
   // Sentinel value INT32_MIN means "register direct mode" — a bare register
   // that was morphed to a Mem pair by the AsmParser.
   if (DispVal == INT32_MIN) {

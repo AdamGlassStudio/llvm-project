@@ -75,6 +75,15 @@ void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
     return;
   }
 
+  // Autodecrement (sentinel INT64_MIN): -(Rn).
+  if (Disp.isImm() && Disp.getImm() == INT64_MIN) {
+    assert(Base.isReg() && "Autodecrement must have a register base");
+    O << "-(";
+    printRegName(O, Base.getReg());
+    O << ')';
+    return;
+  }
+
   // Displacement: may be immediate or an expression (e.g. frame index fixup).
   if (Disp.isImm() && Disp.getImm() != 0)
     O << Disp.getImm();
