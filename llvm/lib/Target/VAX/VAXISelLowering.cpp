@@ -816,11 +816,13 @@ SDValue VAXTargetLowering::LowerFormalArguments(
   }
 
   // For variadic functions, record where the first variadic arg starts.
-  // AP+0 = arg count, AP+4 = first arg. Fixed args occupy ArgLocs.size() slots.
+  // AP+0 = arg count, AP+4.. = fixed args. CCState tracks the total stack
+  // bytes consumed by fixed args, accounting for their actual sizes (e.g.
+  // doubles use 8 bytes, not 4).
   if (isVarArg) {
     VAXMachineFunctionInfo *FuncInfo =
         MF.getInfo<VAXMachineFunctionInfo>();
-    FuncInfo->setVarArgsOffset(4 + ArgLocs.size() * 4);
+    FuncInfo->setVarArgsOffset(4 + CCInfo.getStackSize());
   }
 
   return Chain;
