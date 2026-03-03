@@ -95,6 +95,7 @@ private:
   SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerUINT_TO_FP(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
