@@ -13,7 +13,7 @@ define i32 @bitcast_f32_to_i32(float %a) {
 
 define float @bitcast_i32_to_f32(i32 %a) {
 ; CHECK-LABEL: bitcast_i32_to_f32:
-; CHECK: movl {{.*}}(%ap), %r0
+; CHECK: movf {{.*}}(%ap), %r0
 ; CHECK: ret
   %r = bitcast i32 %a to float
   ret float %r

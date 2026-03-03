@@ -7,14 +7,14 @@
 
 define float @load_global_f32() {
 ; CHECK-LABEL: load_global_f32:
-; CHECK: movl gf
+; CHECK: movf gf
   %v = load float, ptr @gf
   ret float %v
 }
 
 define void @store_global_f32(float %v) {
 ; CHECK-LABEL: store_global_f32:
-; CHECK: movl {{.*}}, gf
+; CHECK: movf {{.*}}, gf
   store float %v, ptr @gf
   ret void
 }
