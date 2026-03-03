@@ -200,7 +200,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FNEG,       MVT::f32, Legal);   // MNEGF
   setOperationAction(ISD::FABS,       MVT::f32, Expand);
   setOperationAction(ISD::FSQRT,      MVT::f32, Expand);
-  setOperationAction(ISD::FREM,       MVT::f32, Expand);
+  setOperationAction(ISD::FREM,       MVT::f32, LibCall);  // fmodf
   setOperationAction(ISD::FCOPYSIGN,  MVT::f32, Expand);
   setOperationAction(ISD::FSIN,       MVT::f32, Expand);
   setOperationAction(ISD::FCOS,       MVT::f32, Expand);
@@ -219,7 +219,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FNEG,       MVT::f64, Legal);   // MNEGD
   setOperationAction(ISD::FABS,       MVT::f64, Expand);
   setOperationAction(ISD::FSQRT,      MVT::f64, Expand);
-  setOperationAction(ISD::FREM,       MVT::f64, Expand);
+  setOperationAction(ISD::FREM,       MVT::f64, LibCall);  // fmod
   setOperationAction(ISD::FCOPYSIGN,  MVT::f64, Expand);
   setOperationAction(ISD::FSIN,       MVT::f64, Expand);
   setOperationAction(ISD::FCOS,       MVT::f64, Expand);
