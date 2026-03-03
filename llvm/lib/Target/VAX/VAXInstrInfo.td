@@ -524,15 +524,15 @@ def ADJCALLSTACKUP : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
     "#ADJCALLSTACKUP", [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
-// SUBL2_ri — subl2 $imm, $dst  (dst -= imm)  opcode 0xA2
+// SUBL2_ri — subl2 $imm, $dst  (dst -= imm)  opcode 0xC2
 let Defs = [PSW] in {
-def SUBL2_ri : InstVAX<0xA2, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
+def SUBL2_ri : InstVAX<0xC2, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
     "subl2\t$imm, $dst", []> {
   let Constraints = "$src = $dst";
 }
 
-// ADDL2_ri — addl2 $imm, $dst  (dst += imm)  opcode 0xA0
-def ADDL2_ri : InstVAX<0xA0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
+// ADDL2_ri — addl2 $imm, $dst  (dst += imm)  opcode 0xC0
+def ADDL2_ri : InstVAX<0xC0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
     "addl2\t$imm, $dst", []> {
   let Constraints = "$src = $dst";
 }
@@ -739,27 +739,27 @@ def VAXFMemOp : Operand<iPTR> {
 let Defs = [PSW] in {
 // MOVL for f32: load/store (reuse i32 move opcode, different type).
 let HasMemOp = 1 in
-def MOVF_rm : InstVAX<0xD0, (outs GPRI:$dst), (ins VAXFMemOp:$src),
-    "movl\t$src, $dst",
+def MOVF_rm : InstVAX<0x50, (outs GPRI:$dst), (ins VAXFMemOp:$src),
+    "movf\t$src, $dst",
     [(set GPRI:$dst, (f32 (load VAXMem:$src)))]>;
 // f32 load from constant pool
-def MOVF_rcp : InstVAX<0xD0, (outs GPRI:$dst), (ins i32imm:$sym),
-    "movl\t$sym, $dst",
+def MOVF_rcp : InstVAX<0x50, (outs GPRI:$dst), (ins i32imm:$sym),
+    "movf\t$sym, $dst",
     [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
 // f32 load from global address
-def MOVF_rga : InstVAX<0xD0, (outs GPRI:$dst), (ins i32imm:$sym),
-    "movl\t$sym, $dst",
+def MOVF_rga : InstVAX<0x50, (outs GPRI:$dst), (ins i32imm:$sym),
+    "movf\t$sym, $dst",
     [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
 let HasMemOp = 1 in
-def MOVF_mr : InstVAX<0xD0, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
-    "movl\t$src, $dst",
+def MOVF_mr : InstVAX<0x50, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
+    "movf\t$src, $dst",
     [(store (f32 GPRI:$src), VAXMem:$dst)]>;
 // f32 store to global address
-def MOVF_mga : InstVAX<0xD0, (outs), (ins GPRI:$src, i32imm:$sym),
-    "movl\t$src, $sym",
+def MOVF_mga : InstVAX<0x50, (outs), (ins GPRI:$src, i32imm:$sym),
+    "movf\t$src, $sym",
     [(store (f32 GPRI:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
-def MOVF_rr : InstVAX<0xD0, (outs GPRI:$dst), (ins GPRI:$src),
-    "movl\t$src, $dst", []>;
+def MOVF_rr : InstVAX<0x50, (outs GPRI:$dst), (ins GPRI:$src),
+    "movf\t$src, $dst", []>;
 
 // ADDF3 (0x41) — Add F_float: dst = src1 + src2.
 def ADDF3_rr : InstVAX<0x41, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
@@ -783,8 +783,8 @@ def MNEGF : InstVAX<0x52, (outs GPRI:$dst), (ins GPRI:$src),
     "mnegf\t$src, $dst",
     [(set GPRI:$dst, (fneg GPRI:$src))]>;
 
-// CVTFL (0x56) — Convert F_float to Longword (float→int truncation).
-def CVTFL : InstVAX<0x56, (outs GPRnoPC:$dst), (ins GPRI:$src),
+// CVTFL (0x4A) — Convert F_float to Longword (float→int truncation).
+def CVTFL : InstVAX<0x4A, (outs GPRnoPC:$dst), (ins GPRI:$src),
     "cvtfl\t$src, $dst",
     [(set GPRnoPC:$dst, (fp_to_sint GPRI:$src))]>;
 // CVTLF (0x4E) — Convert Longword to F_float (int→float).
