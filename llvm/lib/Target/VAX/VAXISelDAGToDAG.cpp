@@ -11,6 +11,7 @@
 #include "VAXTargetMachine.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -72,6 +73,22 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     SDNode *Lea = CurDAG->getMachineNode(
         VAX::LEA_FI, SDLoc(N), MVT::i32, Ops);
     ReplaceNode(N, Lea);
+    return;
+  }
+
+  // ConstantFP f64: materialize as a constant pool load. isFPImmLegal(f64)
+  // returns true to prevent DAGCombiner from splitting into IEEE i32 stores.
+  // We must handle the surviving ConstantFP here by creating a MOVD from CP.
+  if (N->getOpcode() == ISD::ConstantFP && N->getValueType(0) == MVT::f64) {
+    SDLoc DL(N);
+    auto *CFP = cast<ConstantFPSDNode>(N);
+    const Constant *C = ConstantFP::get(*CurDAG->getContext(),
+                                         CFP->getValueAPF());
+    SDValue CPI = CurDAG->getTargetConstantPool(C, MVT::i32, Align(4));
+    // MOVD_rcp takes a single i32imm operand (the constant pool symbol).
+    SDNode *Load = CurDAG->getMachineNode(
+        VAX::MOVD_rcp, DL, MVT::f64, {CPI});
+    ReplaceNode(N, Load);
     return;
   }
 
