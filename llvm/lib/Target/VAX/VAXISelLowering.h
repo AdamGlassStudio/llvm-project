@@ -47,6 +47,9 @@ enum NodeType : unsigned {
   // EMUL: extended multiply. (a:i32, b:i32, add:i32) →
   // (lo:i32, hi:i32). Result = a*b + sign_extend(add).
   EMUL,
+  // EDIV: extended divide. (divisor:i32, dividend_lo:i32, dividend_hi:i32) →
+  // (quotient:i32, remainder:i32). dividend_quad / divisor.
+  EDIV,
 };
 } // namespace VAXISD
 
@@ -84,6 +87,9 @@ private:
   SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerUREM(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
