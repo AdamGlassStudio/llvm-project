@@ -13,7 +13,7 @@ define float @test_fremf(float %a, float %b) {
 
 define double @test_fremd(double %a, double %b) {
 ; CHECK-LABEL: test_fremd:
-; CHECK: calls $2, fmod
+; CHECK: calls $4, fmod
 ; CHECK-NOT: fma
   %r = frem double %a, %b
   ret double %r
