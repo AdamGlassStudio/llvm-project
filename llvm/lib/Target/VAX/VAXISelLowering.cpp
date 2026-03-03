@@ -225,7 +225,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::FP_TO_SINT, MVT::i32, Legal);  // CVTFL
   setOperationAction(ISD::SINT_TO_FP, MVT::i32, Legal);  // CVTLF
   setOperationAction(ISD::FP_TO_UINT, MVT::i32, Expand);
-  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Expand);
+  setOperationAction(ISD::UINT_TO_FP, MVT::i32, Custom);
   // FP operations VAX doesn't have natively.
   setOperationAction(ISD::FNEG,       MVT::f32, Legal);   // MNEGF
   setOperationAction(ISD::FABS,       MVT::f32, Expand);
@@ -315,6 +315,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
   case ISD::VASTART:       return LowerVASTART(Op, DAG);
+  case ISD::UINT_TO_FP:    return LowerUINT_TO_FP(Op, DAG);
   case ISD::STORE:       return LowerSTORE(Op, DAG);
   case ISD::FRAMEADDR:     return LowerFRAMEADDR(Op, DAG);
   case ISD::RETURNADDR:    return LowerRETURNADDR(Op, DAG);
@@ -327,6 +328,36 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
 }
 
 // Custom-lower truncating f64→f32 store: FP_ROUND + store.
+// Lower unsigned int → float/double.
+// VAX has CVTLF/CVTLD for signed int, but no unsigned variant.
+// Strategy: do signed conversion, then add 2^32 if the input was negative
+// (i.e., bit 31 was set, meaning the unsigned value was >= 2^31).
+SDValue VAXTargetLowering::LowerUINT_TO_FP(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  SDLoc DL(Op);
+  SDValue Src = Op.getOperand(0);
+  EVT DstVT = Op.getValueType();
+
+  // signed_result = (sint_to_fp src)
+  SDValue Signed = DAG.getNode(ISD::SINT_TO_FP, DL, DstVT, Src);
+
+  // correction = (DstVT) 4294967296.0  (2^32)
+  APFloat Correction(DstVT == MVT::f32 ? APFloat::IEEEsingle()
+                                       : APFloat::IEEEdouble());
+  Correction.convertFromAPInt(APInt(64, 1ULL << 32), /*isSigned=*/false,
+                              APFloat::rmNearestTiesToEven);
+  SDValue CorrVal = DAG.getConstantFP(Correction, DL, DstVT);
+
+  // add = signed_result + correction
+  SDValue Adjusted = DAG.getNode(ISD::FADD, DL, DstVT, Signed, CorrVal);
+
+  // select: if src < 0 (as signed), use adjusted, else use signed result
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
+  SDValue Result = DAG.getSelectCC(DL, Src, Zero, Adjusted, Signed,
+                                   ISD::SETLT);
+  return Result;
+}
+
 SDValue VAXTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
   StoreSDNode *ST = cast<StoreSDNode>(Op.getNode());
   SDLoc DL(Op);
