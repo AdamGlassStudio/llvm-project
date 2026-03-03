@@ -14,6 +14,7 @@
 #include "MCTargetDesc/VAXMCAsmInfo.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -25,10 +26,59 @@
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/GlobalVariable.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetLoweringObjectFile.h"
 
 using namespace llvm;
+
+// IEEE 754 single → VAX F_float (32-bit) conversion.
+// Both formats: sign(1) + exp(8) + frac(23). Differences:
+//   IEEE bias=127, VAX bias=128; VAX stores with 16-bit word swap.
+//   VAX value = 0.1{frac} × 2^(exp-128), IEEE = 1.{frac} × 2^(exp-127)
+//   So VAX_exp = IEEE_exp + 2, then swap the two 16-bit halves.
+static uint32_t convertIEEEToVAXF(uint32_t IEEE) {
+  uint32_t Sign = (IEEE >> 31) & 1;
+  uint32_t Exp = (IEEE >> 23) & 0xFF;
+  uint32_t Frac = IEEE & 0x7FFFFF;
+
+  if (Exp == 0) return 0;    // zero or denorm → VAX zero
+  if (Exp == 0xFF) return 0; // inf/nan → no VAX equivalent
+
+  uint32_t VaxExp = Exp + 2;
+  if (VaxExp > 255) return 0;
+
+  uint16_t W0 = (Sign << 15) | (VaxExp << 7) | ((Frac >> 16) & 0x7F);
+  uint16_t W1 = Frac & 0xFFFF;
+  return (uint32_t(W1) << 16) | W0;
+}
+
+// IEEE 754 double → VAX D_float (64-bit) conversion.
+// IEEE: sign(1) + exp(11, bias 1023) + frac(52).
+// D_float: sign(1) + exp(8, bias 128) + frac(55), 16-bit word-swapped.
+static uint64_t convertIEEEToVAXD(uint64_t IEEE) {
+  uint64_t Sign = (IEEE >> 63) & 1;
+  uint64_t Exp = (IEEE >> 52) & 0x7FF;
+  uint64_t Frac = IEEE & 0xFFFFFFFFFFFFFULL;
+
+  if (Exp == 0) return 0;
+  if (Exp == 0x7FF) return 0;
+
+  int VaxExp = (int)Exp - 894; // IEEE bias 1023 → VAX bias 128, +1 for 0.1 form
+  if (VaxExp <= 0 || VaxExp > 255) return 0;
+
+  uint64_t VaxFrac = Frac << 3; // 52 → 55 bits, zero-fill bottom 3
+
+  uint16_t W0 = (Sign << 15) | (VaxExp << 7) | ((VaxFrac >> 48) & 0x7F);
+  uint16_t W1 = (VaxFrac >> 32) & 0xFFFF;
+  uint16_t W2 = (VaxFrac >> 16) & 0xFFFF;
+  uint16_t W3 = VaxFrac & 0xFFFF;
+
+  return (uint64_t(W3) << 48) | (uint64_t(W2) << 32) |
+         (uint64_t(W1) << 16) | W0;
+}
 
 #define DEBUG_TYPE "asm-printer"
 
@@ -44,6 +94,8 @@ public:
 
   void emitFunctionBodyStart() override;
   void emitInstruction(const MachineInstr *MI) override;
+  void emitGlobalVariable(const GlobalVariable *GV) override;
+  void emitConstantPool() override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
                        const char *ExtraCode, raw_ostream &OS) override;
@@ -52,6 +104,7 @@ public:
 
 private:
   void printOperand(const MachineInstr *MI, unsigned OpNo, raw_ostream &OS);
+  void emitVAXGlobalConstant(const DataLayout &DL, const Constant *CV);
 };
 
 } // end anonymous namespace
@@ -193,6 +246,169 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     }
   }
   EmitToStreamer(*OutStreamer, Inst);
+}
+
+// Emit a Constant, converting any FP values from IEEE to VAX format.
+// For non-FP constants, delegates to the standard emitGlobalConstant.
+void VAXAsmPrinter::emitVAXGlobalConstant(const DataLayout &DL,
+                                           const Constant *CV) {
+  if (const auto *CFP = dyn_cast<ConstantFP>(CV)) {
+    APFloat APF = CFP->getValueAPF();
+    APInt API = APF.bitcastToAPInt();
+
+    if (isVerbose()) {
+      SmallString<8> StrVal;
+      APF.toString(StrVal);
+      OutStreamer->getCommentOS() << (API.getBitWidth() == 32 ? "F_float "
+                                                              : "D_float ")
+                                  << StrVal << '\n';
+    }
+
+    if (API.getBitWidth() == 32) {
+      uint32_t VaxBits = convertIEEEToVAXF(API.getZExtValue());
+      OutStreamer->emitIntValue(VaxBits, 4);
+    } else if (API.getBitWidth() == 64) {
+      uint64_t VaxBits = convertIEEEToVAXD(API.getZExtValue());
+      OutStreamer->emitIntValue(VaxBits & 0xFFFFFFFF, 4);
+      OutStreamer->emitIntValue(VaxBits >> 32, 4);
+    } else {
+      // Unsupported FP width — fall back to generic emission.
+      emitGlobalConstant(DL, CV);
+    }
+    return;
+  }
+
+  // For aggregates (arrays, structs), recurse into elements.
+  if (const auto *CA = dyn_cast<ConstantAggregate>(CV)) {
+    for (unsigned I = 0, E = CA->getNumOperands(); I != E; ++I)
+      emitVAXGlobalConstant(DL, CA->getOperand(I));
+    // Emit tail padding if needed.
+    uint64_t Size = DL.getTypeAllocSize(CV->getType());
+    uint64_t EmittedSize = 0;
+    for (unsigned I = 0, E = CA->getNumOperands(); I != E; ++I)
+      EmittedSize += DL.getTypeAllocSize(CA->getOperand(I)->getType());
+    if (Size > EmittedSize)
+      OutStreamer->emitZeros(Size - EmittedSize);
+    return;
+  }
+
+  if (const auto *CDS = dyn_cast<ConstantDataSequential>(CV)) {
+    // ConstantDataArray/ConstantDataVector of float/double elements.
+    Type *EltTy = CDS->getElementType();
+    if (EltTy->isFloatTy()) {
+      for (unsigned I = 0, E = CDS->getNumElements(); I != E; ++I) {
+        APFloat APF = CDS->getElementAsAPFloat(I);
+        uint32_t VaxBits = convertIEEEToVAXF(
+            APF.bitcastToAPInt().getZExtValue());
+        OutStreamer->emitIntValue(VaxBits, 4);
+      }
+      return;
+    }
+    if (EltTy->isDoubleTy()) {
+      for (unsigned I = 0, E = CDS->getNumElements(); I != E; ++I) {
+        APFloat APF = CDS->getElementAsAPFloat(I);
+        uint64_t VaxBits = convertIEEEToVAXD(
+            APF.bitcastToAPInt().getZExtValue());
+        OutStreamer->emitIntValue(VaxBits & 0xFFFFFFFF, 4);
+        OutStreamer->emitIntValue(VaxBits >> 32, 4);
+      }
+      return;
+    }
+    // Non-FP data sequences: fall through to generic.
+  }
+
+  // Non-FP constant: use default emission.
+  emitGlobalConstant(DL, CV);
+}
+
+void VAXAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
+  if (!GV->hasInitializer()) {
+    AsmPrinter::emitGlobalVariable(GV);
+    return;
+  }
+
+  // Check if the initializer contains any FP constants.
+  Type *Ty = GV->getValueType();
+  bool HasFP = Ty->isFloatingPointTy();
+  if (!HasFP) {
+    // Check aggregate types for FP elements.
+    if (auto *AT = dyn_cast<ArrayType>(Ty))
+      HasFP = AT->getElementType()->isFloatingPointTy();
+    else if (auto *ST = dyn_cast<StructType>(Ty)) {
+      for (Type *EltTy : ST->elements())
+        if (EltTy->isFloatingPointTy()) { HasFP = true; break; }
+    }
+  }
+
+  if (!HasFP) {
+    AsmPrinter::emitGlobalVariable(GV);
+    return;
+  }
+
+  // FP global: emit everything the base does except the constant data,
+  // then emit the data ourselves with VAX FP conversion.
+  // We replicate the essential parts of AsmPrinter::emitGlobalVariable.
+  MCSymbol *GVSym = getSymbol(GV);
+  emitVisibility(GVSym, GV->getVisibility(), !GV->isDeclaration());
+
+  GVSym->redefineIfPossible();
+
+  const DataLayout &DL = GV->getDataLayout();
+  uint64_t Size = DL.getTypeAllocSize(GV->getValueType());
+  Align Alignment = GV->getAlign().value_or(DL.getPreferredAlign(GV));
+
+  MCSection *TheSection =
+      getObjFileLowering().SectionForGlobal(GV, TM);
+  OutStreamer->switchSection(TheSection);
+
+  emitAlignment(Alignment, GV);
+  OutStreamer->emitLabel(GVSym);
+
+  if (GV->hasLocalLinkage())
+    OutStreamer->emitSymbolAttribute(GVSym, MCSA_Local);
+  if (GV->getLinkage() == GlobalValue::ExternalLinkage ||
+      GV->getLinkage() == GlobalValue::WeakAnyLinkage ||
+      GV->getLinkage() == GlobalValue::WeakODRLinkage)
+    OutStreamer->emitSymbolAttribute(GVSym, MCSA_Global);
+
+  emitVAXGlobalConstant(DL, GV->getInitializer());
+
+  OutStreamer->emitELFSize(GVSym,
+                           MCConstantExpr::create(Size, OutContext));
+}
+
+void VAXAsmPrinter::emitConstantPool() {
+  const MachineConstantPool *MCP = MF->getConstantPool();
+  const std::vector<MachineConstantPoolEntry> &CP = MCP->getConstants();
+  if (CP.empty()) return;
+
+  const DataLayout &DL = getDataLayout();
+
+  for (unsigned i = 0, e = CP.size(); i != e; ++i) {
+    const MachineConstantPoolEntry &CPE = CP[i];
+    MCSymbol *Sym = GetCPISymbol(i);
+    if (!Sym->isUndefined())
+      continue;
+
+    Align Alignment = CPE.getAlign();
+    SectionKind Kind = CPE.getSectionKind(&DL);
+
+    const Constant *C = nullptr;
+    if (!CPE.isMachineConstantPoolEntry())
+      C = CPE.Val.ConstVal;
+
+    MCSection *S = getObjFileLowering().getSectionForConstant(
+        DL, Kind, C, Alignment);
+    OutStreamer->switchSection(S);
+    emitAlignment(Alignment);
+    OutStreamer->emitLabel(Sym);
+
+    if (CPE.isMachineConstantPoolEntry()) {
+      emitMachineConstantPoolValue(CPE.Val.MachineCPVal);
+    } else {
+      emitVAXGlobalConstant(DL, CPE.Val.ConstVal);
+    }
+  }
 }
 
 void VAXAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,

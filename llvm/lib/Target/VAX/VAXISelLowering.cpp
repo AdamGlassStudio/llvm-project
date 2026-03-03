@@ -29,6 +29,36 @@ using namespace llvm;
 
 #define DEBUG_TYPE "vax-lower"
 
+// IEEE 754 single → VAX F_float conversion (same as in VAXAsmPrinter.cpp).
+static uint32_t convertIEEEToVAXF(uint32_t IEEE) {
+  uint32_t Sign = (IEEE >> 31) & 1;
+  uint32_t Exp = (IEEE >> 23) & 0xFF;
+  uint32_t Frac = IEEE & 0x7FFFFF;
+  if (Exp == 0 || Exp == 0xFF) return 0;
+  uint32_t VaxExp = Exp + 2;
+  if (VaxExp > 255) return 0;
+  uint16_t W0 = (Sign << 15) | (VaxExp << 7) | ((Frac >> 16) & 0x7F);
+  uint16_t W1 = Frac & 0xFFFF;
+  return (uint32_t(W1) << 16) | W0;
+}
+
+// IEEE 754 double → VAX D_float conversion (same as in VAXAsmPrinter.cpp).
+static uint64_t convertIEEEToVAXD(uint64_t IEEE) {
+  uint64_t Sign = (IEEE >> 63) & 1;
+  uint64_t Exp = (IEEE >> 52) & 0x7FF;
+  uint64_t Frac = IEEE & 0xFFFFFFFFFFFFFULL;
+  if (Exp == 0 || Exp == 0x7FF) return 0;
+  int VaxExp = (int)Exp - 894;
+  if (VaxExp <= 0 || VaxExp > 255) return 0;
+  uint64_t VaxFrac = Frac << 3;
+  uint16_t W0 = (Sign << 15) | (VaxExp << 7) | ((VaxFrac >> 48) & 0x7F);
+  uint16_t W1 = (VaxFrac >> 32) & 0xFFFF;
+  uint16_t W2 = (VaxFrac >> 16) & 0xFFFF;
+  uint16_t W3 = VaxFrac & 0xFFFF;
+  return (uint64_t(W3) << 48) | (uint64_t(W2) << 32) |
+         (uint64_t(W1) << 16) | W0;
+}
+
 #define GET_CALLINGCONV_IMPL
 #include "VAXGenCallingConv.inc"
 
@@ -816,27 +846,50 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
     SDValue Arg = CLI.OutVals[i];
     if (Arg.getValueType() == MVT::f64) {
-      // f64 (D_float): store to temp stack slot, load as two i32, push both.
-      SDValue StackSlot = DAG.CreateStackTemporary(MVT::f64);
-      Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
-                           MachinePointerInfo());
-      SDValue HiPtr = DAG.getNode(ISD::ADD, DL, MVT::i32, StackSlot,
-                                  DAG.getConstant(4, DL, MVT::i32));
-      SDValue Hi = DAG.getLoad(MVT::i32, DL, Chain, HiPtr,
-                               MachinePointerInfo());
-      SDValue Lo = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
-                               MachinePointerInfo());
-      // Push high word first (higher address on stack), then low word.
-      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Hi.getValue(1), Hi);
-      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Lo);
+      // f64 (D_float): convert to VAX format and push as two i32 words.
+      // For constants, convert IEEE→VAX D_float at compile time to avoid
+      // the DAG optimizer folding store-load into IEEE integer immediates.
+      if (auto *CFP = dyn_cast<ConstantFPSDNode>(Arg)) {
+        uint64_t VaxBits = convertIEEEToVAXD(
+            CFP->getValueAPF().bitcastToAPInt().getZExtValue());
+        uint32_t Lo32 = VaxBits & 0xFFFFFFFF;
+        uint32_t Hi32 = (VaxBits >> 32) & 0xFFFFFFFF;
+        SDValue Hi = DAG.getConstant(Hi32, DL, MVT::i32);
+        SDValue Lo = DAG.getConstant(Lo32, DL, MVT::i32);
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Hi);
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Lo);
+      } else {
+        // Non-constant: store to temp stack slot, load as two i32, push both.
+        // The MOVD store writes VAX D_float bytes (hardware format), so the
+        // i32 loads read back correct VAX-format words.
+        SDValue StackSlot = DAG.CreateStackTemporary(MVT::f64);
+        Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
+                             MachinePointerInfo());
+        SDValue HiPtr = DAG.getNode(ISD::ADD, DL, MVT::i32, StackSlot,
+                                    DAG.getConstant(4, DL, MVT::i32));
+        SDValue Hi = DAG.getLoad(MVT::i32, DL, Chain, HiPtr,
+                                 MachinePointerInfo());
+        SDValue Lo = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
+                                 MachinePointerInfo());
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Hi.getValue(1), Hi);
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Lo);
+      }
     } else if (Arg.getValueType() == MVT::f32) {
-      // f32 (F_float): bitcast to i32 via stack temp, then push.
-      SDValue StackSlot = DAG.CreateStackTemporary(MVT::f32);
-      Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
-                           MachinePointerInfo());
-      SDValue AsInt = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
-                                  MachinePointerInfo());
-      Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, AsInt.getValue(1), AsInt);
+      // f32 (F_float): convert to VAX format and push as i32.
+      if (auto *CFP = dyn_cast<ConstantFPSDNode>(Arg)) {
+        uint32_t VaxBits = convertIEEEToVAXF(
+            CFP->getValueAPF().bitcastToAPInt().getZExtValue());
+        SDValue AsInt = DAG.getConstant(VaxBits, DL, MVT::i32);
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, AsInt);
+      } else {
+        // Non-constant: store to temp, load as i32, push.
+        SDValue StackSlot = DAG.CreateStackTemporary(MVT::f32);
+        Chain = DAG.getStore(Chain, DL, Arg, StackSlot,
+                             MachinePointerInfo());
+        SDValue AsInt = DAG.getLoad(MVT::i32, DL, Chain, StackSlot,
+                                    MachinePointerInfo());
+        Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, AsInt.getValue(1), AsInt);
+      }
     } else {
       Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Arg);
     }
@@ -859,7 +912,7 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
   SmallVector<SDValue, 6> Ops = {
       Chain,
-      DAG.getConstant(NumArgs, DL, MVT::i32),
+      DAG.getConstant(StackBytes / 4, DL, MVT::i32),
       Callee,
       DAG.getRegisterMask(Mask),
   };
