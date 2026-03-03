@@ -35,6 +35,9 @@ static const char *VAXDataLayout =
     "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32";
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
+  // VAX uses PC-relative addressing for all globals, which is inherently
+  // position-independent for local symbols. Accept PIC mode but note that
+  // GOT-based addressing for external symbols is not yet implemented.
   return RM.value_or(Reloc::Static);
 }
 
