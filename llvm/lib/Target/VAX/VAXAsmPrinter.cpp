@@ -173,6 +173,36 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
   }
 
+  // Expand CALLS_indir: the callee register must be encoded as register
+  // deferred (mode 6, 0x60|Rn) for the CALLS "ab" address operand.
+  // Convert to CALLS_mem with a RegDeferred memory operand.
+  if (MI->getOpcode() == VAX::CALLS_indir) {
+    MCInst Inst;
+    Inst.setOpcode(VAX::CALLS_mem);
+    // Op0 = arg count (immediate)
+    Inst.addOperand(MCOperand::createImm(MI->getOperand(0).getImm()));
+    // Op1-4 = memory operand: (base=callee, disp=0, index=NoReg, flags=RegDeferred)
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg()));
+    Inst.addOperand(MCOperand::createImm(0));
+    Inst.addOperand(MCOperand::createReg(0));
+    Inst.addOperand(MCOperand::createImm(VAXAM::RegDeferred));
+    EmitToStreamer(*OutStreamer, Inst);
+    return;
+  }
+
+  // Expand JMP: register operand must be encoded as register deferred
+  // (mode 6, 0x60|Rn) — JMP takes an "ab" address operand.
+  if (MI->getOpcode() == VAX::JMP) {
+    MCInst Inst;
+    Inst.setOpcode(VAX::JMP_mem);
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));
+    Inst.addOperand(MCOperand::createImm(0));
+    Inst.addOperand(MCOperand::createReg(0));
+    Inst.addOperand(MCOperand::createImm(VAXAM::RegDeferred));
+    EmitToStreamer(*OutStreamer, Inst);
+    return;
+  }
+
   MCInst Inst;
   Inst.setOpcode(MI->getOpcode());
   for (const MachineOperand &MO : MI->explicit_operands()) {
