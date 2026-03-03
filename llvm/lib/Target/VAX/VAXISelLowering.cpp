@@ -22,8 +22,11 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Debug.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "vax-lower"
 
 #define GET_CALLINGCONV_IMPL
 #include "VAXGenCallingConv.inc"
@@ -126,6 +129,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Truncating stores: MOVB (i8) and MOVW (i16).
   setTruncStoreAction(MVT::i32, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i32, MVT::i16, Legal);
+
+  // Truncating f64→f32 store: custom-lower to CVTDF + MOVF.
+  setTruncStoreAction(MVT::f64, MVT::f32, Custom);
+
+  // Extending f32→f64 load: expand to MOVF + CVTFD.
+  setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
 
   // Scalar integer types are all legal at i32; narrower types will be
   // promoted/expanded in later phases as instructions are added.
@@ -265,6 +274,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
   case ISD::VASTART:       return LowerVASTART(Op, DAG);
+  case ISD::STORE:       return LowerSTORE(Op, DAG);
   case ISD::FRAMEADDR:     return LowerFRAMEADDR(Op, DAG);
   case ISD::RETURNADDR:    return LowerRETURNADDR(Op, DAG);
   case ISD::EH_RETURN:     return LowerEH_RETURN(Op, DAG);
@@ -273,6 +283,33 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
                              "opcode ") +
                        Twine(Op.getOpcode()));
   }
+}
+
+// Custom-lower truncating f64→f32 store: FP_ROUND + store.
+SDValue VAXTargetLowering::LowerSTORE(SDValue Op, SelectionDAG &DAG) const {
+  StoreSDNode *ST = cast<StoreSDNode>(Op.getNode());
+  SDLoc DL(Op);
+
+  LLVM_DEBUG(dbgs() << "VAX LowerSTORE called, isTrunc="
+             << ST->isTruncatingStore() << "\n");
+
+  // Only handle truncating FP stores.
+  if (!ST->isTruncatingStore())
+    return Op;
+
+  SDValue Value = ST->getValue();
+  EVT StVT = ST->getMemoryVT();
+
+  // f64 → f32 truncating store: emit FP_ROUND + normal store.
+  if (Value.getValueType() == MVT::f64 && StVT == MVT::f32) {
+    SDValue Rounded = DAG.getNode(ISD::FP_ROUND, DL, MVT::f32, Value,
+                                  DAG.getTargetConstant(0, DL, MVT::i32));
+    return DAG.getStore(ST->getChain(), DL, Rounded, ST->getBasePtr(),
+                        ST->getPointerInfo(), ST->getBaseAlign(),
+                        ST->getMemOperand()->getFlags());
+  }
+
+  return Op;
 }
 
 SDValue VAXTargetLowering::LowerBR_CC(SDValue Op, SelectionDAG &DAG) const {

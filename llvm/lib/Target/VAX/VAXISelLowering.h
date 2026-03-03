@@ -84,6 +84,7 @@ private:
   SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_CC(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerBR_JT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSELECT_CC(SDValue Op, SelectionDAG &DAG) const;

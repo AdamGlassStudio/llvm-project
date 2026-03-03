@@ -878,12 +878,6 @@ def CVTFD : InstVAX<0x56, (outs QPR:$dst), (ins GPRI:$src),
     [(set QPR:$dst, (fpextend GPRI:$src))]>;
 } // let Defs = [PSW] — end of D_float data block
 
-// Truncating f64→f32 store: convert D_float to F_float then store.
-def : Pat<(truncstoref32 (f64 QPR:$src), VAXMem:$dst),
-          (MOVF_mr (CVTDF QPR:$src), VAXMem:$dst)>;
-def : Pat<(truncstoref32 (f64 QPR:$src), (vax_pcrelwrapper tglobaladdr:$sym)),
-          (MOVF_mga (CVTDF QPR:$src), tglobaladdr:$sym)>;
-
 // D_float compare: CMPD sets PSW.
 let Defs = [PSW] in {
 def CMPD : InstVAX<0x71, (outs), (ins QPR:$a, QPR:$b),
