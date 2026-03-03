@@ -56,8 +56,10 @@ private:
   void emitRegOperand(MCRegister Reg, SmallVectorImpl<char> &CB) const;
 
   /// Emit an operand specifier for an immediate operand (literal or immediate
-  /// mode depending on value).
-  void emitImmOperand(int64_t Imm, SmallVectorImpl<char> &CB) const;
+  /// mode depending on value). DataSize is the operand context in bytes:
+  /// 1 for .rb, 2 for .rw, 4 for .rl (default).
+  void emitImmOperand(int64_t Imm, unsigned DataSize,
+                      SmallVectorImpl<char> &CB) const;
 
   /// Emit an operand specifier for an expression operand (PC-relative).
   void emitExprOperand(const MCExpr *Expr, SmallVectorImpl<char> &CB,
@@ -104,7 +106,7 @@ void VAXMCCodeEmitter::emitRegOperand(MCRegister Reg,
   CB.push_back(0x50 | getRegEncoding(Reg));
 }
 
-void VAXMCCodeEmitter::emitImmOperand(int64_t Imm,
+void VAXMCCodeEmitter::emitImmOperand(int64_t Imm, unsigned DataSize,
                                       SmallVectorImpl<char> &CB) const {
   // Short literal mode: values 0-63 encode in a single specifier byte.
   if (Imm >= 0 && Imm <= 63) {
@@ -112,13 +114,11 @@ void VAXMCCodeEmitter::emitImmOperand(int64_t Imm,
     return;
   }
 
-  // Longword immediate mode: 0x8F (autoincrement PC) + 4-byte LE value.
+  // Immediate mode: 0x8F (autoincrement PC) + N bytes where N = DataSize.
   CB.push_back(static_cast<char>(0x8F));
-  uint32_t Val = static_cast<uint32_t>(Imm);
-  CB.push_back(static_cast<char>(Val & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 16) & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 24) & 0xFF));
+  uint64_t Val = static_cast<uint64_t>(Imm);
+  for (unsigned i = 0; i < DataSize; ++i)
+    CB.push_back(static_cast<char>((Val >> (i * 8)) & 0xFF));
 }
 
 void VAXMCCodeEmitter::emitExprOperand(const MCExpr *Expr,
@@ -252,14 +252,14 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
   case VAXAM::Imm:
     // Immediate mode (no base register).
     if (Disp.isImm()) {
-      emitImmOperand(Disp.getImm(), CB);
+      emitImmOperand(Disp.getImm(), 4, CB);
       return;
     }
     if (Disp.isExpr()) {
       emitExprOperand(Disp.getExpr(), CB, Fixups, StartByte);
       return;
     }
-    emitImmOperand(0, CB);
+    emitImmOperand(0, 4, CB);
     return;
 
   case VAXAM::Absolute:
@@ -423,7 +423,16 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
     }
 
     if (Op.isImm()) {
-      emitImmOperand(Op.getImm(), CB);
+      // Determine operand data size from MCInstrDesc OperandType.
+      unsigned DataSize = 4; // Default: longword
+      if (OpIdx < Desc.getNumOperands()) {
+        uint8_t OpType = Desc.operands()[OpIdx].OperandType;
+        if (OpType == VAXOp::OPERAND_BYTE_IMM)
+          DataSize = 1;
+        else if (OpType == VAXOp::OPERAND_WORD_IMM)
+          DataSize = 2;
+      }
+      emitImmOperand(Op.getImm(), DataSize, CB);
       return 1;
     }
 

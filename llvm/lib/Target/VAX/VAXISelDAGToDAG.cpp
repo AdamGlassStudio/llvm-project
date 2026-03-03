@@ -92,6 +92,20 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  // ConstantFP f32: same treatment — materialize via constant pool to get
+  // correct VAX F_float encoding (AsmPrinter converts IEEE to F_float).
+  if (N->getOpcode() == ISD::ConstantFP && N->getValueType(0) == MVT::f32) {
+    SDLoc DL(N);
+    auto *CFP = cast<ConstantFPSDNode>(N);
+    const Constant *C = ConstantFP::get(*CurDAG->getContext(),
+                                         CFP->getValueAPF());
+    SDValue CPI = CurDAG->getTargetConstantPool(C, MVT::i32, Align(4));
+    SDNode *Load = CurDAG->getMachineNode(
+        VAX::MOVF_rcp, DL, MVT::f32, {CPI});
+    ReplaceNode(N, Load);
+    return;
+  }
+
   if (N->getOpcode() == VAXISD::CALL) {
     SDValue Chain   = N->getOperand(0);
     SDValue NumArgs = N->getOperand(1);

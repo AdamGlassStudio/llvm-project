@@ -35,6 +35,19 @@ std::unique_ptr<MCObjectTargetWriter> createVAXELFObjectWriter();
 
 } // namespace llvm
 
+// Custom operand types for VAX. These encode the data context width of
+// operand specifiers (byte, word, longword) so the MC encoder emits the
+// correct number of bytes for immediate mode (0x8F + N bytes).
+#include "llvm/MC/MCInstrDesc.h"
+namespace llvm {
+namespace VAXOp {
+enum OperandType : unsigned {
+  OPERAND_BYTE_IMM = MCOI::OPERAND_FIRST_TARGET,
+  OPERAND_WORD_IMM,
+};
+} // namespace VAXOp
+} // namespace llvm
+
 // Defines symbolic names for VAX registers.
 #define GET_REGINFO_ENUM
 #include "VAXGenRegisterInfo.inc"

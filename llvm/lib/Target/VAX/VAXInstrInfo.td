@@ -46,6 +46,19 @@ def VAXMemOp : Operand<iPTR> {
   let ParserMatchClass = VAXMemAsmOperand;
 }
 
+// Byte-width immediate operand (.rb context). The MC encoder emits only 1 byte
+// for immediate mode instead of the default 4. Used by ASHL cnt, FFS/FFC size, etc.
+def ByteImm : Operand<i32> {
+  let OperandType = "OPERAND_BYTE_IMM";
+  let OperandNamespace = "VAXOp";
+}
+
+// Word-width immediate operand (.rw context). The MC encoder emits 2 bytes.
+def WordImm : Operand<i32> {
+  let OperandType = "OPERAND_WORD_IMM";
+  let OperandNamespace = "VAXOp";
+}
+
 // ComplexPattern that recognizes base + displacement + index + flags addressing.
 // Handles: FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
 // Index is always NoReg and flags is always 0 (Disp) from SelectionDAG.
@@ -484,7 +497,7 @@ def ASHL_rr : InstVAX<0x78, (outs GPRnoPC:$dst),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (shl GPRnoPC:$src, GPRnoPC:$cnt))]>;
 def ASHL_ir : InstVAX<0x78, (outs GPRnoPC:$dst),
-    (ins i32imm:$cnt, GPRnoPC:$src),
+    (ins ByteImm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>;
 
@@ -494,7 +507,7 @@ def ASHL_rr_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (vax_ashl GPRnoPC:$cnt, GPRnoPC:$src))]>;
 def ASHL_ir_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
-    (ins i32imm:$cnt, GPRnoPC:$src),
+    (ins ByteImm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (vax_ashl (i32 imm:$cnt), GPRnoPC:$src))]>;
 
@@ -504,7 +517,7 @@ def ROTL_rr : InstVAX<0x9C, (outs GPRnoPC:$dst),
     "rotl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, GPRnoPC:$cnt))]>;
 def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
-    (ins i32imm:$cnt, GPRnoPC:$src),
+    (ins ByteImm:$cnt, GPRnoPC:$src),
     "rotl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>;
 } // let Defs = [PSW] — end of shift/rotate block
