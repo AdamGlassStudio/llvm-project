@@ -446,7 +446,8 @@ SDValue SelectionDAGLegalize::OptimizeFloatStore(StoreSDNode* ST) {
 
   if (ConstantFPSDNode *CFP = dyn_cast<ConstantFPSDNode>(Value)) {
     if (CFP->getValueType(0) == MVT::f32 &&
-        TLI.isTypeLegal(MVT::i32)) {
+        TLI.isTypeLegal(MVT::i32) &&
+        !TLI.isFPImmLegal(CFP->getValueAPF(), MVT::f32)) {
       SDValue Con = DAG.getConstant(CFP->getValueAPF().
                                       bitcastToAPInt().zextOrTrunc(32),
                                     SDLoc(CFP), MVT::i32);

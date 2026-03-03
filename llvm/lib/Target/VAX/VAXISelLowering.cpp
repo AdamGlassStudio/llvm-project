@@ -268,13 +268,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
 bool VAXTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
                                       bool ForCodeSize) const {
-  // For f64: return true to prevent DAGCombiner from splitting ConstantFP
-  // stores into two i32 stores with IEEE bit patterns. VAX uses non-IEEE
-  // D_float format — IEEE bits in memory are wrong. The ConstantFP will
-  // be handled by ISel as a constant pool load (VAX format via AsmPrinter).
-  // For f32: the DAGCombiner fold has no isFPImmLegal check, so this
-  // has no effect. f32 stores of ConstantFP are handled in LowerCall.
-  return VT == MVT::f64;
+  // Return true to prevent DAGCombiner from replacing ConstantFP stores
+  // with integer stores using IEEE bit patterns. VAX uses non-IEEE
+  // F_float/D_float formats — IEEE bits in memory are wrong. The ConstantFP
+  // will be handled by ISel as a constant pool load (VAX format via AsmPrinter).
+  return VT == MVT::f64 || VT == MVT::f32;
 }
 
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
