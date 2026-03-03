@@ -24,6 +24,16 @@ enum Fixups {
   // PC as base — the standard operand-level PC-relative addressing).
   fixup_vax_pcrel_32,
 
+  // 32-bit PC-relative GOT entry reference. The linker resolves this to a
+  // displacement to the symbol's GOT entry and sets the deferred bit in the
+  // operand specifier byte, turning it into an indirect load through the GOT.
+  fixup_vax_got_32,
+
+  // 32-bit PC-relative PLT entry reference. Used for calls to external
+  // functions in PIC mode. The linker resolves this to a displacement to the
+  // PLT stub.
+  fixup_vax_plt_32,
+
   // Marker for the end of target-specific fixups.
   fixup_vax_invalid,
   NumTargetFixupKinds = fixup_vax_invalid - FirstTargetFixupKind

@@ -9,7 +9,9 @@
 #include "VAX.h"
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
+#include "MCTargetDesc/VAXBaseInfo.h"
 #include "MCTargetDesc/VAXInstPrinter.h"
+#include "MCTargetDesc/VAXMCAsmInfo.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -130,7 +132,13 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
       break;
     case MachineOperand::MO_GlobalAddress: {
       const MCSymbol *Sym = getSymbol(MO.getGlobal());
-      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+      unsigned TF = MO.getTargetFlags();
+      unsigned Spec = VAX::S_None;
+      if (TF == VAXII::MO_GOT)
+        Spec = VAX::S_GOT;
+      else if (TF == VAXII::MO_PLT)
+        Spec = VAX::S_PLT;
+      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, Spec, OutContext);
       if (MO.getOffset())
         Expr = MCBinaryExpr::createAdd(
             Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
@@ -140,8 +148,14 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     }
     case MachineOperand::MO_ExternalSymbol: {
       const MCSymbol *Sym = GetExternalSymbolSymbol(MO.getSymbolName());
+      unsigned TF = MO.getTargetFlags();
+      unsigned Spec = VAX::S_None;
+      if (TF == VAXII::MO_PLT)
+        Spec = VAX::S_PLT;
+      else if (TF == VAXII::MO_GOT)
+        Spec = VAX::S_GOT;
       Inst.addOperand(
-          MCOperand::createExpr(MCSymbolRefExpr::create(Sym, OutContext)));
+          MCOperand::createExpr(MCSymbolRefExpr::create(Sym, Spec, OutContext)));
       break;
     }
     case MachineOperand::MO_MachineBasicBlock: {

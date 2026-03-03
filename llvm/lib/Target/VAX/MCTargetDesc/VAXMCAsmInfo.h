@@ -14,6 +14,15 @@
 namespace llvm {
 class Triple;
 
+namespace VAX {
+/// Specifiers for MCSymbolRefExpr, used to encode PIC relocation types.
+enum Specifier {
+  S_None,
+  S_GOT,  /// @GOT — GOT-relative reference for data
+  S_PLT,  /// @PLT — PLT-relative reference for calls
+};
+} // namespace VAX
+
 class VAXMCAsmInfo : public MCAsmInfoELF {
   void anchor() override;
 

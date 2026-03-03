@@ -7,9 +7,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXMCAsmInfo.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
+
+static const MCAsmInfo::AtSpecifier atSpecifiers[] = {
+    {VAX::S_GOT, "GOT"},
+    {VAX::S_PLT, "PLT"},
+};
 
 void VAXMCAsmInfo::anchor() {}
 
@@ -29,4 +35,6 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   // Use external GAS assembler — the integrated assembler does not yet
   // support VAX instruction encoding.
   UseIntegratedAssembler = true;
+
+  initializeAtSpecifiers(atSpecifiers);
 }

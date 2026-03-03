@@ -30,6 +30,8 @@ public:
         {"fixup_vax_pcrel_8", 0, 8, 0},
         {"fixup_vax_pcrel_16", 0, 16, 0},
         {"fixup_vax_pcrel_32", 0, 32, 0},
+        {"fixup_vax_got_32", 0, 32, 0},
+        {"fixup_vax_plt_32", 0, 32, 0},
     };
     if (Kind < FirstTargetFixupKind)
       return MCAsmBackend::getFixupKindInfo(Kind);
@@ -57,6 +59,8 @@ public:
       NumBytes = 2;
       break;
     case VAX::fixup_vax_pcrel_32:
+    case VAX::fixup_vax_got_32:
+    case VAX::fixup_vax_plt_32:
     case FK_Data_4:
       NumBytes = 4;
       break;

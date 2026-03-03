@@ -40,6 +40,10 @@ public:
         return ELF::R_VAX_PC16;
       case VAX::fixup_vax_pcrel_32:
         return ELF::R_VAX_PC32;
+      case VAX::fixup_vax_got_32:
+        return ELF::R_VAX_GOT32;
+      case VAX::fixup_vax_plt_32:
+        return ELF::R_VAX_PLT32;
       }
     }
 

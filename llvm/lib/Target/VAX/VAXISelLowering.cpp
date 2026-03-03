@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXISelLowering.h"
+#include "MCTargetDesc/VAXBaseInfo.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "VAXMachineFunctionInfo.h"
 #include "VAXSubtarget.h"
@@ -522,8 +523,21 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   const GlobalAddressSDNode *GN = cast<GlobalAddressSDNode>(Op);
   const GlobalValue *GV = GN->getGlobal();
   SDLoc DL(GN);
-  SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset());
-  return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
+
+  unsigned TF = VAXII::MO_NO_FLAG;
+  if (isPositionIndependent() && !GV->isDSOLocal())
+    TF = VAXII::MO_GOT;
+
+  SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset(), TF);
+  SDValue Addr = DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
+
+  // GOT references are indirect: the PC-relative displacement points to a
+  // GOT entry containing the symbol's actual address. Load through it.
+  if (TF == VAXII::MO_GOT)
+    Addr = DAG.getLoad(MVT::i32, DL, DAG.getEntryNode(), Addr,
+                       MachinePointerInfo::getGOT(DAG.getMachineFunction()));
+
+  return Addr;
 }
 
 SDValue VAXTargetLowering::LowerGlobalTLSAddress(SDValue Op,
@@ -789,10 +803,15 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   // Wrap callee for direct calls.
-  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee))
-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32);
-  else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee))
-    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32);
+  if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    unsigned TF = VAXII::MO_NO_FLAG;
+    if (isPositionIndependent() && !G->getGlobal()->isDSOLocal())
+      TF = VAXII::MO_PLT;
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32, 0, TF);
+  } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
+    unsigned TF = isPositionIndependent() ? VAXII::MO_PLT : VAXII::MO_NO_FLAG;
+    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32, TF);
+  }
 
   // Build VAXISD::CALL node.
   const uint32_t *Mask =
