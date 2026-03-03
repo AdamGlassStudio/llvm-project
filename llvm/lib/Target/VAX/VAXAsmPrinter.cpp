@@ -44,8 +44,23 @@ static uint32_t convertIEEEToVAXF(uint32_t IEEE) {
   uint32_t Exp = (IEEE >> 23) & 0xFF;
   uint32_t Frac = IEEE & 0x7FFFFF;
 
-  if (Exp == 0) return 0;    // zero or denorm → VAX zero
+  if (Exp == 0 && Frac == 0) return 0; // true zero
   if (Exp == 0xFF) return 0; // inf/nan → no VAX equivalent
+
+  if (Exp == 0) {
+    // IEEE subnormal: value = 2^(-126) * Frac/2^23.
+    // Normalize: find leading 1 in Frac and shift up.
+    int Shift = llvm::countl_zero(Frac) - 8; // 8 = 32 - 24 mantissa bits
+    Frac = (Frac << (Shift + 1)) & 0x7FFFFF; // remove implicit 1
+    // IEEE unbiased exponent for this subnormal = -126 - Shift.
+    // VAX biased = (-126 - Shift) + 129 = 3 - Shift.
+    int VaxExp = 3 - Shift;
+    if (VaxExp <= 0) return 0; // too small for VAX
+    uint16_t W0 = (Sign << 15) | ((uint32_t)VaxExp << 7) |
+                  ((Frac >> 16) & 0x7F);
+    uint16_t W1 = Frac & 0xFFFF;
+    return (uint32_t(W1) << 16) | W0;
+  }
 
   uint32_t VaxExp = Exp + 2;
   if (VaxExp > 255) return 0;
