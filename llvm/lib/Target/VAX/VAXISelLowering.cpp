@@ -527,18 +527,15 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
     return DAG.getNode(ISD::AND, DL, MVT::i32, Rot,
                        DAG.getConstant(Mask, DL, MVT::i32));
   }
-  // Variable logical right shift: rotl(src, 32-cnt) & ((1 << (32-cnt)) - 1)
-  // mask = ASHL(1, 32-cnt) - 1 = ~0 srl cnt, but that's circular.
-  // Alternative: ASHL(-cnt, src) gives arithmetic right shift, then
-  // clear sign-extended bits: srl(x, n) = ashl(-n, x) & ((1u << (32-n)) - 1).
-  // Mask = ~((-1) << (32 - n)) = ~ashl(32-n, -1).
-  // Emit: neg_cnt = -cnt; shifted = ASHL(neg_cnt, src); 
-  //       mask_bits = ASHL(neg_cnt, -1); mask = NOT(mask_bits);
-  //       result = AND(shifted, mask)
+  // Variable logical right shift: ASHL(-n, x) gives arithmetic right shift,
+  // then mask off sign-extended bits.
+  // Mask = (1 << (32-n)) - 1 = ~((-1) << (32-n)) = ~ASHL(32-n, -1).
   SDValue NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
                                DAG.getConstant(0, DL, MVT::i32), Cnt);
   SDValue Shifted = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Src);
-  SDValue SignBits = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt,
+  SDValue MaskShift = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                                  DAG.getConstant(32, DL, MVT::i32), Cnt);
+  SDValue SignBits = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, MaskShift,
                                  DAG.getAllOnesConstant(DL, MVT::i32));
   SDValue Mask = DAG.getNOT(DL, SignBits, MVT::i32);
   return DAG.getNode(ISD::AND, DL, MVT::i32, Shifted, Mask);
