@@ -44,6 +44,11 @@ public:
     resetDataLayout(
         "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32");
 
+    // VAX BIGGEST_ALIGNMENT is 32 bits (GCC: BIGGEST_ALIGNMENT = 32).
+    // __attribute__((aligned)) without a value uses this.
+    SuitableAlign = 32;
+    DefaultAlignForAttributeAligned = 32;
+
     // VAX aligned longword (32-bit) accesses are atomic by architecture.
     // The bus interlock protocol guarantees atomicity even on SMP systems.
     MaxAtomicPromoteWidth = 32;
