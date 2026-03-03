@@ -79,11 +79,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Extend SELECT_CC_Pseudo to also handle f32 results.
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
 
-  // VAX DIVL is signed only; unsigned div/rem expand to libcalls.
-  setOperationAction(ISD::UDIV, MVT::i32, Expand);
-  setOperationAction(ISD::UREM, MVT::i32, Expand);
-  // Signed remainder also needs expansion (no REML instruction).
-  setOperationAction(ISD::SREM, MVT::i32, Expand);
+  // VAX DIVL is signed only; use EDIV for unsigned div/rem and signed rem.
+  setOperationAction(ISD::UDIV, MVT::i32, Custom);
+  setOperationAction(ISD::UREM, MVT::i32, Custom);
+  setOperationAction(ISD::SREM, MVT::i32, Custom);
 
   // i64 mul: EMUL (32×32→64) handles SMUL_LOHI directly.
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Custom);
@@ -144,9 +143,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // instruction that directly produces a 0/1 result from a comparison.
   setOperationAction(ISD::SETCC,      MVT::i32, Expand);
 
-  // Unsigned division/remainder: expand to libcalls.
-  setOperationAction(ISD::UDIV,       MVT::i32, Expand);
-  setOperationAction(ISD::UREM,       MVT::i32, Expand);
+  // UDIVREM/SDIVREM pairs: expand (individual udiv/urem/srem are Custom above).
   setOperationAction(ISD::UDIVREM,    MVT::i32, Expand);
   setOperationAction(ISD::SDIVREM,    MVT::i32, Expand);
 
@@ -254,6 +251,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::CASEL:        return "VAXISD::CASEL";
   case VAXISD::ASHQ:         return "VAXISD::ASHQ";
   case VAXISD::EMUL:         return "VAXISD::EMUL";
+  case VAXISD::EDIV:         return "VAXISD::EDIV";
   default:                   return nullptr;
   }
 }
@@ -271,6 +269,9 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
   case ISD::SRA_PARTS:     return LowerSRA_PARTS(Op, DAG);
   case ISD::SMUL_LOHI:     return LowerSMUL_LOHI(Op, DAG);
+  case ISD::UDIV:          return LowerUDIV(Op, DAG);
+  case ISD::UREM:          return LowerUREM(Op, DAG);
+  case ISD::SREM:          return LowerSREM(Op, DAG);
   case ISD::BR_CC:         return LowerBR_CC(Op, DAG);
   case ISD::BR_JT:         return LowerBR_JT(Op, DAG);
   case ISD::SELECT_CC:     return LowerSELECT_CC(Op, DAG);
@@ -516,6 +517,45 @@ SDValue VAXTargetLowering::LowerSMUL_LOHI(SDValue Op,
   SDValue EMUL = DAG.getNode(VAXISD::EMUL, DL,
                               DAG.getVTList(MVT::i32, MVT::i32), A, B, Zero);
   return DAG.getMergeValues({EMUL.getValue(0), EMUL.getValue(1)}, DL);
+}
+
+SDValue VAXTargetLowering::LowerUDIV(SDValue Op, SelectionDAG &DAG) const {
+  // udiv(a, b) → EDIV(b, a, 0).quotient
+  // Zero-extend dividend to 64-bit quadword for unsigned division.
+  SDLoc DL(Op);
+  SDValue Dividend = Op.getOperand(0);
+  SDValue Divisor = Op.getOperand(1);
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
+  SDValue EDIV = DAG.getNode(VAXISD::EDIV, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32),
+                              Divisor, Dividend, Zero);
+  return EDIV.getValue(0);
+}
+
+SDValue VAXTargetLowering::LowerUREM(SDValue Op, SelectionDAG &DAG) const {
+  // urem(a, b) → EDIV(b, a, 0).remainder
+  SDLoc DL(Op);
+  SDValue Dividend = Op.getOperand(0);
+  SDValue Divisor = Op.getOperand(1);
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
+  SDValue EDIV = DAG.getNode(VAXISD::EDIV, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32),
+                              Divisor, Dividend, Zero);
+  return EDIV.getValue(1);
+}
+
+SDValue VAXTargetLowering::LowerSREM(SDValue Op, SelectionDAG &DAG) const {
+  // srem(a, b) → EDIV(b, sign_extend(a)).remainder
+  // Sign-extend dividend to 64-bit: hi = ashr(a, 31).
+  SDLoc DL(Op);
+  SDValue Dividend = Op.getOperand(0);
+  SDValue Divisor = Op.getOperand(1);
+  SDValue Hi = DAG.getNode(ISD::SRA, DL, MVT::i32, Dividend,
+                           DAG.getConstant(31, DL, MVT::i32));
+  SDValue EDIV = DAG.getNode(VAXISD::EDIV, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32),
+                              Divisor, Dividend, Hi);
+  return EDIV.getValue(1);
 }
 
 SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,

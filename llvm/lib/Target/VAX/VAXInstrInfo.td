@@ -711,6 +711,19 @@ def EMUL : InstVAX<0x7A, (outs QPR:$dst),
     (ins GPRnoPC:$mulr, GPRnoPC:$muld, i32imm:$add),
     "emul\t$mulr, $muld, $add, $dst", []>;
 
+// EDIV (0x7B) — Extended Divide: dividend_quad / divisor → quotient, remainder
+// Selected via custom ISel in VAXISelDAGToDAG (builds QPR from i32 halves).
+def SDT_VAXEDIV : SDTypeProfile<2, 3,
+    [SDTCisVT<0, i32>, SDTCisVT<1, i32>,   // results: quotient, remainder
+     SDTCisVT<2, i32>,                       // divisor
+     SDTCisVT<3, i32>, SDTCisVT<4, i32>]>;  // dividend: lo, hi
+def vax_ediv : SDNode<"VAXISD::EDIV", SDT_VAXEDIV>;
+
+let Defs = [PSW], Constraints = "@earlyclobber $quo,@earlyclobber $rem" in
+def EDIV : InstVAX<0x7B, (outs GPRnoPC:$quo, GPRnoPC:$rem),
+    (ins GPRnoPC:$divisor, QPR:$dividend),
+    "ediv\t$divisor, $dividend, $quo, $rem", []>;
+
 //===----------------------------------------------------------------------===//
 // Phase 14B — F_float (32-bit floating point)
 //===----------------------------------------------------------------------===//
