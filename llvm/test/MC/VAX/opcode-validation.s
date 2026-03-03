@@ -8,6 +8,12 @@
 # VAXInstrInfo.td (e.g., ADDL2 encoded as ADDW2, MOVF as MOVL, CVTFL
 # as CVTFD). Every instruction defined in the backend should have an
 # encoding check here.
+#
+# MAINTAINER NOTE: When adding a new instruction to VAXInstrInfo.td,
+# add a corresponding encoding check here. To get the expected bytes,
+# assemble the instruction with GAS and objdump:
+#   echo "newinst %r0, %r1" | vax--netbsdelf-as -o /tmp/t.o -
+#   vax--netbsdelf-objdump -d /tmp/t.o
 
 # === Zero-operand instructions ===
 
