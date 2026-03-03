@@ -13,6 +13,7 @@
 
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "TargetInfo/VAXTargetInfo.h"
+#include "VAX.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
@@ -42,7 +43,7 @@ public:
     k_Token,
     k_Reg,
     k_Imm,
-    k_Mem, // disp(base) — 2-slot: register + displacement expression
+    k_Mem, // 4-slot: base, disp, index, flags (VAXAM::*)
   };
 
 private:
@@ -51,6 +52,8 @@ private:
   struct MemOp {
     MCRegister Base;
     const MCExpr *Disp;
+    MCRegister Index; // NoReg (0) = no indexing
+    unsigned Flags;   // VAXAM::Disp, VAXAM::RegDirect, etc.
   };
 
   union {
@@ -61,7 +64,6 @@ private:
   };
 
   SMLoc Start, End;
-  bool IsRegDirect = false; // Bare register morphed to Mem
 
 public:
   VAXOperand(KindTy K, SMLoc S, SMLoc E) : Kind(K), Start(S), End(E) {}
@@ -88,14 +90,10 @@ public:
   }
 
   // Morph this operand into a Mem operand (for validateTargetOperandClass).
-  // regDirect=true means this was a bare register, not register deferred.
-  void morphToMem(MCRegister Base, const MCExpr *Disp, bool regDirect = false) {
+  void morphToMem(MCRegister Base, const MCExpr *Disp, unsigned Flags) {
     Kind = k_Mem;
-    Mem = {Base, Disp};
-    IsRegDirect = regDirect;
+    Mem = {Base, Disp, MCRegister(), Flags};
   }
-
-  bool isRegDirectMem() const { return Kind == k_Mem && IsRegDirect; }
 
   const MCExpr *getImm() const {
     assert(Kind == k_Imm);
@@ -116,17 +114,11 @@ public:
   }
 
   void addMemOperands(MCInst &Inst, unsigned N) const {
-    assert(N == 2 && "Invalid number of operands!");
-    if (IsRegDirect) {
-      // Bare register morphed to Mem — encode as register direct.
-      // Use sentinel displacement to tell MCCodeEmitter this is register
-      // direct mode, not register deferred.
-      Inst.addOperand(MCOperand::createReg(Mem.Base));
-      Inst.addOperand(MCOperand::createImm(INT32_MIN));
-    } else {
-      Inst.addOperand(MCOperand::createReg(Mem.Base));
-      addExprOperand(Inst, Mem.Disp);
-    }
+    assert(N == 4 && "VAXMemOp requires 4 MCOperands");
+    Inst.addOperand(MCOperand::createReg(Mem.Base));
+    addExprOperand(Inst, Mem.Disp);
+    Inst.addOperand(MCOperand::createReg(Mem.Index));
+    Inst.addOperand(MCOperand::createImm(Mem.Flags));
   }
 
   void print(raw_ostream &O, const MCAsmInfo &MAI) const override {
@@ -142,8 +134,13 @@ public:
       MAI.printExpr(O, *Imm);
       break;
     case k_Mem:
-      O << "Mem: " << Mem.Base.id() << " + ";
-      MAI.printExpr(O, *Mem.Disp);
+      O << "Mem(flags=" << Mem.Flags << "): base=" << Mem.Base.id();
+      if (Mem.Disp) {
+        O << " disp=";
+        MAI.printExpr(O, *Mem.Disp);
+      }
+      if (Mem.Index)
+        O << " idx=" << Mem.Index.id();
       break;
     }
   }
@@ -169,10 +166,12 @@ public:
   }
 
   static std::unique_ptr<VAXOperand> createMem(MCRegister Base,
-                                               const MCExpr *Disp, SMLoc S,
-                                               SMLoc E) {
+                                               const MCExpr *Disp,
+                                               MCRegister Index,
+                                               unsigned Flags,
+                                               SMLoc S, SMLoc E) {
     auto Op = std::make_unique<VAXOperand>(k_Mem, S, E);
-    Op->Mem = {Base, Disp};
+    Op->Mem = {Base, Disp, Index, Flags};
     return Op;
   }
 
@@ -208,6 +207,7 @@ class VAXAsmParser : public MCTargetAsmParser {
   bool parseLiteralValues(unsigned Size, SMLoc L);
 
   bool parseOperand(OperandVector &Operands);
+  MCRegister tryParseIndexSuffix();
   ParseStatus parseMemOperand(OperandVector &Operands);
 
   unsigned validateTargetOperandClass(MCParsedAsmOperand &Op,
@@ -340,16 +340,42 @@ bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
   return false;
 }
 
+/// Try to parse an indexed suffix [%reg]. Returns the index register,
+/// or NoReg if no bracket follows. Consumes '[', '%reg', ']' on success.
+MCRegister VAXAsmParser::tryParseIndexSuffix() {
+  if (getLexer().isNot(AsmToken::LBrac))
+    return MCRegister();
+  // Speculatively consume '['
+  getLexer().Lex(); // eat '['
+  MCRegister Reg;
+  SMLoc RS, RE;
+  if (tryParseRegister(Reg, RS, RE).isFailure()) {
+    // Not a valid index — cannot put '[' back, but this shouldn't happen
+    // in valid VAX assembly.
+    Error(RS, "expected register in index");
+    return MCRegister();
+  }
+  if (getLexer().isNot(AsmToken::RBrac)) {
+    Error(getLexer().getLoc(), "expected ']'");
+    return MCRegister();
+  }
+  getLexer().Lex(); // eat ']'
+  return Reg;
+}
+
 /// Parse a single operand. VAX GAS syntax:
-///   $expr        — immediate
-///   %reg         — register
-///   (%reg)       — register deferred
-///   (%reg)+      — autoincrement
-///   -(%reg)      — autodecrement
-///   expr(%reg)   — displacement
-///   *expr        — deferred (absolute or displacement deferred)
-///   expr         — symbol/label (PC-relative)
-///   (expr)       — parenthesized expression (calls uses this)
+///   $expr          — immediate
+///   %reg           — register
+///   (%reg)         — register deferred
+///   (%reg)+        — autoincrement
+///   -(%reg)        — autodecrement
+///   expr(%reg)     — displacement
+///   *expr          — absolute deferred
+///   *(%reg)        — autoincrement deferred (same as reg deferred for now)
+///   *expr(%reg)    — displacement deferred
+///   expr           — symbol/label (PC-relative)
+///   (expr)         — parenthesized expression (calls uses this)
+///   ....[%reg]     — indexed suffix on any of the above
 bool VAXAsmParser::parseOperand(OperandVector &Operands) {
   SMLoc StartLoc = getLexer().getLoc();
 
@@ -389,21 +415,15 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
         return Error(getLexer().getLoc(), "expected ')'");
       SMLoc EndLoc = getLexer().getLoc();
       getLexer().Lex(); // eat ')'
-      // Encode autodecrement as Mem with base=Reg and magic displacement.
-      // The MCCodeEmitter recognizes this pattern.
-      // For now, use a register operand — the encoder handles autodecrement
-      // via the addressing mode specifier byte.
+      MCRegister Idx = tryParseIndexSuffix();
       Operands.push_back(VAXOperand::createMem(
-          Reg, MCConstantExpr::create(INT64_MIN, getContext()), MinusLoc,
-          EndLoc));
+          Reg, nullptr, Idx, VAXAM::AutoDec, MinusLoc, EndLoc));
       return false;
     }
-    // Not autodecrement — put '-' back and parse as expression
-    // Actually, we already consumed the '-'. Parse as negative expression.
+    // Not autodecrement — already consumed '-'. Parse as negative expression.
     const MCExpr *Expr;
     if (getParser().parseExpression(Expr))
       return true;
-    // Negate
     Expr = MCUnaryExpr::createMinus(Expr, getContext());
     // Check for (reg) suffix — displacement mode
     if (getLexer().is(AsmToken::LParen)) {
@@ -415,8 +435,9 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
       if (getLexer().isNot(AsmToken::RParen))
         return Error(getLexer().getLoc(), "expected ')'");
       getLexer().Lex(); // eat ')'
-      Operands.push_back(
-          VAXOperand::createMem(Reg, Expr, MinusLoc, getLexer().getLoc()));
+      MCRegister Idx = tryParseIndexSuffix();
+      Operands.push_back(VAXOperand::createMem(
+          Reg, Expr, Idx, VAXAM::Disp, MinusLoc, getLexer().getLoc()));
       return false;
     }
     // Bare negative expression — label/symbol
@@ -428,12 +449,76 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
   // Case 4: *... — deferred addressing
   if (getLexer().is(AsmToken::Star)) {
     getLexer().Lex(); // eat '*'
-    // Deferred can wrap any address mode — for now parse the inner operand
-    // and pass through. The encoder handles deferred via operand specifier.
-    // For the AsmParser, treat *(%reg) as register deferred,
-    // *expr(%reg) as displacement deferred, *expr as absolute deferred.
-    // TODO: Full deferred mode support.
-    return parseOperand(Operands);
+
+    // *(%reg) or *(%reg)+ — autoincrement deferred or register deferred
+    if (getLexer().is(AsmToken::LParen)) {
+      getLexer().Lex(); // eat '('
+      if (getLexer().is(AsmToken::Percent)) {
+        MCRegister Reg;
+        SMLoc RS, RE;
+        if (tryParseRegister(Reg, RS, RE).isFailure())
+          return Error(RS, "expected register");
+        if (getLexer().isNot(AsmToken::RParen))
+          return Error(getLexer().getLoc(), "expected ')'");
+        getLexer().Lex(); // eat ')'
+        if (getLexer().is(AsmToken::Plus)) {
+          getLexer().Lex(); // eat '+'
+          MCRegister Idx = tryParseIndexSuffix();
+          Operands.push_back(VAXOperand::createMem(
+              Reg, nullptr, Idx, VAXAM::AutoIncDef, StartLoc,
+              getLexer().getLoc()));
+          return false;
+        }
+        // *(%reg) = register deferred (same encoding as 0 displacement deferred)
+        MCRegister Idx = tryParseIndexSuffix();
+        Operands.push_back(VAXOperand::createMem(
+            Reg, MCConstantExpr::create(0, getContext()), Idx,
+            VAXAM::DispDeferred, StartLoc, getLexer().getLoc()));
+        return false;
+      }
+      // *(expr) — parenthesized deferred expression
+      const MCExpr *Expr;
+      if (getParser().parseExpression(Expr))
+        return true;
+      if (getLexer().isNot(AsmToken::RParen))
+        return Error(getLexer().getLoc(), "expected ')'");
+      getLexer().Lex(); // eat ')'
+      MCRegister Idx = tryParseIndexSuffix();
+      Operands.push_back(VAXOperand::createMem(
+          MCRegister(), Expr, Idx, VAXAM::Absolute, StartLoc,
+          getLexer().getLoc()));
+      return false;
+    }
+
+    // *expr or *expr(%reg) or *expr[%reg]
+    const MCExpr *Expr;
+    if (getParser().parseExpression(Expr))
+      return true;
+
+    // *expr(%reg) — displacement deferred
+    if (getLexer().is(AsmToken::LParen)) {
+      getLexer().Lex(); // eat '('
+      MCRegister Reg;
+      SMLoc RS, RE;
+      if (tryParseRegister(Reg, RS, RE).isFailure())
+        return Error(RS, "expected register");
+      if (getLexer().isNot(AsmToken::RParen))
+        return Error(getLexer().getLoc(), "expected ')'");
+      getLexer().Lex(); // eat ')'
+      MCRegister Idx = tryParseIndexSuffix();
+      Operands.push_back(VAXOperand::createMem(
+          Reg, Expr, Idx, VAXAM::DispDeferred, StartLoc,
+          getLexer().getLoc()));
+      return false;
+    }
+
+    // *expr[%reg] — absolute deferred, possibly indexed
+    MCRegister Idx = tryParseIndexSuffix();
+    // *expr = absolute deferred (0x9F + addr)
+    Operands.push_back(VAXOperand::createMem(
+        MCRegister(), Expr, Idx, VAXAM::Absolute, StartLoc,
+        getLexer().getLoc()));
+    return false;
   }
 
   // Case 5: (%reg) or (%reg)+ — register deferred or autoincrement
@@ -453,32 +538,28 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
       // Check for autoincrement '+'
       if (getLexer().is(AsmToken::Plus)) {
         getLexer().Lex(); // eat '+'
-        // Encode autoincrement as Mem with base=Reg and magic displacement.
+        MCRegister Idx = tryParseIndexSuffix();
         Operands.push_back(VAXOperand::createMem(
-            Reg, MCConstantExpr::create(INT64_MAX, getContext()), StartLoc,
+            Reg, nullptr, Idx, VAXAM::AutoInc, StartLoc,
             getLexer().getLoc()));
         return false;
       }
 
-      // Register deferred: (%reg) = 0(%reg)
+      // Register deferred: (%reg)
+      MCRegister Idx = tryParseIndexSuffix();
       Operands.push_back(VAXOperand::createMem(
-          Reg, MCConstantExpr::create(0, getContext()), StartLoc,
-          getLexer().getLoc()));
+          Reg, MCConstantExpr::create(0, getContext()), Idx,
+          VAXAM::RegDeferred, StartLoc, getLexer().getLoc()));
       return false;
     }
 
-    // Not a register — could be a parenthesized expression like (expr)
-    // used in e.g., "calls $2, (expr)" or "jmp (expr)".
-    // Parse as expression, then expect ')'
+    // Not a register — parenthesized expression like (expr) for CALLS indirect
     const MCExpr *Expr;
     if (getParser().parseExpression(Expr))
       return true;
     if (getLexer().isNot(AsmToken::RParen))
       return Error(getLexer().getLoc(), "expected ')'");
     getLexer().Lex(); // eat ')'
-    // This is either register deferred via expression or a parenthesized
-    // expression for CALLS indirect. Treat as immediate (the encoder
-    // determines the actual addressing mode).
     Operands.push_back(
         VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc()));
     return false;
@@ -500,8 +581,21 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
       if (getLexer().isNot(AsmToken::RParen))
         return Error(getLexer().getLoc(), "expected ')'");
       getLexer().Lex(); // eat ')'
-      Operands.push_back(
-          VAXOperand::createMem(Reg, Expr, StartLoc, getLexer().getLoc()));
+      MCRegister Idx = tryParseIndexSuffix();
+      Operands.push_back(VAXOperand::createMem(
+          Reg, Expr, Idx, VAXAM::Disp, StartLoc, getLexer().getLoc()));
+      return false;
+    }
+
+    // expr[%reg] — indexed with PC-relative base? Or bare expression.
+    // In VAX GAS, a bare symbol can be indexed: symbol[%reg].
+    // This is PC-relative displacement indexed.
+    MCRegister Idx = tryParseIndexSuffix();
+    if (Idx) {
+      // expr[Rx] = PC-relative displacement indexed
+      Operands.push_back(VAXOperand::createMem(
+          MCRegister(), Expr, Idx, VAXAM::Disp, StartLoc,
+          getLexer().getLoc()));
       return false;
     }
 
@@ -582,15 +676,15 @@ unsigned VAXAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
 
   // The matcher expects MCK_Mem (VAXMemOp) but we may have parsed a bare
   // register or immediate. VAX operand specifiers are uniform — convert:
-  //   %reg  → Mem{Base=reg, Disp=0}   (register direct)
-  //   $imm  → Mem{Base=NoReg, Disp=imm} (immediate/literal)
+  //   %reg  → Mem{Base=reg, Disp=null, Idx=0, Flags=RegDirect}
+  //   $imm  → Mem{Base=NoReg, Disp=imm, Idx=0, Flags=Imm}
   if (Kind == MCK_Mem) {
     if (Op.isReg()) {
-      Op.morphToMem(Op.getReg(), nullptr, /*regDirect=*/true);
+      Op.morphToMem(Op.getReg(), nullptr, VAXAM::RegDirect);
       return Match_Success;
     }
     if (Op.isImm()) {
-      Op.morphToMem(MCRegister(), Op.getImm());
+      Op.morphToMem(MCRegister(), Op.getImm(), VAXAM::Imm);
       return Match_Success;
     }
   }

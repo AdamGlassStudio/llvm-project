@@ -30,9 +30,12 @@ public:
   void Select(SDNode *N) override;
 
   // ComplexPattern selector for base+displacement memory operands.
-  // Returns true and sets Base/Offset when Addr matches a known form:
-  //   FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
-  bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset);
+  // Returns true and sets Base/Offset/Index/Flags when Addr matches a known
+  // form: FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
+  // Index is always NoReg and Flags is always 0 (VAXAM::Disp) from
+  // SelectionDAG — indexed and special modes are AsmParser-only.
+  bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset,
+                     SDValue &Index, SDValue &Flags);
 
   // Handle 'm' constraint for inline assembly memory operands.
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
@@ -64,8 +67,11 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     FrameIndexSDNode *FIN = cast<FrameIndexSDNode>(N);
     SDValue FI = CurDAG->getTargetFrameIndex(FIN->getIndex(), MVT::i32);
     SDValue Zero = CurDAG->getTargetConstant(0, SDLoc(N), MVT::i32);
+    SDValue NoReg = CurDAG->getRegister(0, MVT::i32);
+    SDValue Flags = CurDAG->getTargetConstant(VAXAM::Disp, SDLoc(N), MVT::i32);
+    SmallVector<SDValue, 4> Ops = {FI, Zero, NoReg, Flags};
     SDNode *Lea = CurDAG->getMachineNode(
-        VAX::LEA_FI, SDLoc(N), MVT::i32, FI, Zero);
+        VAX::LEA_FI, SDLoc(N), MVT::i32, Ops);
     ReplaceNode(N, Lea);
     return;
   }
@@ -168,9 +174,14 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
 }
 
 bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
-                                     SDValue &Offset) {
+                                     SDValue &Offset, SDValue &Index,
+                                     SDValue &Flags) {
   SDLoc DL(Addr);
   MVT PtrTy = MVT::i32;
+
+  // Index is always NoReg from SelectionDAG (indexed mode is AsmParser-only).
+  Index = CurDAG->getRegister(0, PtrTy);
+  Flags = CurDAG->getTargetConstant(0, DL, MVT::i32); // VAXAM::Disp
 
   // FrameIndex — stack slot, zero displacement.
   if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr)) {
@@ -214,11 +225,13 @@ bool VAXDAGToDAGISel::SelectInlineAsmMemoryOperand(
   case InlineAsm::ConstraintCode::m:
   case InlineAsm::ConstraintCode::o:
   case InlineAsm::ConstraintCode::p: {
-    SDValue Base, Offset;
-    if (!SelectVAXAddr(Op, Base, Offset))
+    SDValue Base, Offset, Index, Flags;
+    if (!SelectVAXAddr(Op, Base, Offset, Index, Flags))
       return true;
     OutOps.push_back(Base);
     OutOps.push_back(Offset);
+    OutOps.push_back(Index);
+    OutOps.push_back(Flags);
     return false;
   }
   }
