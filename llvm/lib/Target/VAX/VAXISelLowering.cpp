@@ -266,6 +266,17 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setLoadExtAction(ISD::EXTLOAD, MVT::f64, MVT::f32, Expand);
 }
 
+bool VAXTargetLowering::isFPImmLegal(const APFloat &Imm, EVT VT,
+                                      bool ForCodeSize) const {
+  // For f64: return true to prevent DAGCombiner from splitting ConstantFP
+  // stores into two i32 stores with IEEE bit patterns. VAX uses non-IEEE
+  // D_float format — IEEE bits in memory are wrong. The ConstantFP will
+  // be handled by ISel as a constant pool load (VAX format via AsmPrinter).
+  // For f32: the DAGCombiner fold has no isFPImmLegal check, so this
+  // has no effect. f32 stores of ConstantFP are handled in LowerCall.
+  return VT == MVT::f64;
+}
+
 const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   switch (Opcode) {
   case VAXISD::RET_FLAG:     return "VAXISD::RET_FLAG";
@@ -833,7 +844,7 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CLI.CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeCallOperands(CLI.Outs, CC_VAX);
-  unsigned NumArgs   = ArgLocs.size();
+  unsigned NumArgs   = CLI.OutVals.size();
   unsigned StackBytes = CCInfo.getStackSize();
 
   // CALLSEQ_START with 0: PUSHLs will adjust SP incrementally.

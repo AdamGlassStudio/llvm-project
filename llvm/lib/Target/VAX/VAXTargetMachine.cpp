@@ -89,7 +89,7 @@ public:
 
   bool addInstSelector() override;
   void addIRPasses() override;
-  void addPreRegAlloc() override;
+  bool addILPOpts() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
 };
@@ -110,8 +110,14 @@ bool VAXPassConfig::addInstSelector() {
   return false;
 }
 
-void VAXPassConfig::addPreRegAlloc() {
+bool VAXPassConfig::addILPOpts() {
+  // Fuse CMP/TST + Bcc into CMP_BRANCH/TST_BRANCH pseudos BEFORE Machine CSE.
+  // On VAX, MOVL (used by COPY for PHI resolution) clobbers PSW. If Machine
+  // CSE removes a "redundant" CMPL across basic blocks, a later PHI-resolution
+  // COPY can clobber the condition codes, producing wrong branches. Fusing
+  // prevents Machine CSE from seeing a separable CMPL to eliminate.
   addPass(createVAXFuseCmpBranchPass());
+  return true;
 }
 
 void VAXPassConfig::addPostRegAlloc() {

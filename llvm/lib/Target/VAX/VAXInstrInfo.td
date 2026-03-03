@@ -297,6 +297,12 @@ let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
 def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t(${target})",
     [(brind GPRnoPC:$target)]>;
 
+// JMP_mem — for AsmPrinter expansion: JMP with memory operand encoding.
+let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
+    HasMemOp = 1 in
+def JMP_mem : InstVAX<0x17, (outs), (ins VAXMemOp:$target), "jmp\t$target",
+    []>;
+
 // CASEL — hardware switch dispatch via inline word-displacement table.
 // Pseudo: lowered in AsmPrinter to CASEL_L MCInst + .word entries.
 let isPseudo = 1, isBranch = 1, isTerminator = 1, isBarrier = 1,

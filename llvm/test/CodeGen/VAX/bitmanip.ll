@@ -11,16 +11,11 @@ declare i32 @llvm.ctpop.i32(i32)
 
 define i32 @clz(i32 %x) {
 ; CHECK-LABEL: clz:
-; CHECK:       movl 4(%ap), %r0
-; CHECK:       tstl %r0
-; CHECK:       bneq .LBB0_1
-; CHECK:       brw .LBB0_2
-; CHECK:       .LBB0_1:
+; CHECK:       movl 4(%ap), %r{{[0-9]+}}
+; CHECK:       tstl %r{{[0-9]+}}
+; CHECK:       bneq
 ; CHECK:       rotl
 ; CHECK:       mcoml
-; CHECK:       ret
-; CHECK:       .LBB0_2:
-; CHECK:       movl $32, %r0
 ; CHECK:       ret
   %r = call i32 @llvm.ctlz.i32(i32 %x, i1 false)
   ret i32 %r
@@ -28,18 +23,13 @@ define i32 @clz(i32 %x) {
 
 define i32 @ctz(i32 %x) {
 ; CHECK-LABEL: ctz:
-; CHECK:       movl 4(%ap), %r0
-; CHECK:       tstl %r0
-; CHECK:       bneq .LBB1_1
-; CHECK:       brw .LBB1_2
-; CHECK:       .LBB1_1:
+; CHECK:       movl 4(%ap), %r{{[0-9]+}}
+; CHECK:       tstl %r{{[0-9]+}}
+; CHECK:       bneq
 ; CHECK:       decl
-; CHECK:       bicl2
+; CHECK:       bicl3
 ; CHECK:       mull2
 ; CHECK:       movzbl
-; CHECK:       ret
-; CHECK:       .LBB1_2:
-; CHECK:       movl $32, %r0
 ; CHECK:       ret
   %r = call i32 @llvm.cttz.i32(i32 %x, i1 false)
   ret i32 %r

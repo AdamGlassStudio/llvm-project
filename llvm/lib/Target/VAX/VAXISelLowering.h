@@ -60,6 +60,11 @@ public:
 
   const char *getTargetNodeName(unsigned Opcode) const override;
 
+  /// Prevent DAGCombiner from folding FP constant stores into integer stores.
+  /// VAX uses non-IEEE FP format, so IEEE bit patterns in memory are wrong.
+  bool isFPImmLegal(const APFloat &Imm, EVT VT,
+                    bool ForCodeSize) const override;
+
   SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 
   SDValue LowerReturn(SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
