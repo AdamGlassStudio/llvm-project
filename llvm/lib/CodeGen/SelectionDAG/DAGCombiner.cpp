@@ -24180,8 +24180,9 @@ SDValue DAGCombiner::replaceStoreOfFPConstant(StoreSDNode *ST) {
   case MVT::ppcf128:
     return SDValue();
   case MVT::f32:
-    if ((isTypeLegal(MVT::i32) && !LegalOperations && ST->isSimple()) ||
-        TLI.isOperationLegalOrCustom(ISD::STORE, MVT::i32)) {
+    if (((isTypeLegal(MVT::i32) && !LegalOperations && ST->isSimple()) ||
+         TLI.isOperationLegalOrCustom(ISD::STORE, MVT::i32)) &&
+        !TLI.isFPImmLegal(CFP->getValueAPF(), MVT::f32)) {
       Tmp = DAG.getConstant((uint32_t)CFP->getValueAPF().
                             bitcastToAPInt().getZExtValue(), SDLoc(CFP),
                             MVT::i32);
