@@ -972,3 +972,42 @@ def SKPC : InstVAX<0x3B, (outs),
     "skpc\t$char, $len, $addr", []>;
 
 } // let HasMemOp = 1
+
+// REI (0x02): return from exception/interrupt. No operands.
+let isReturn = 1, isBarrier = 1, isTerminator = 1 in
+def REI : InstVAX<0x02, (outs), (ins), "rei", []>;
+
+let HasMemOp = 1 in {
+
+// ASHL (0x78): arithmetic shift long. cnt.rb, src.rl, dst.wl
+def ASHL : InstVAX<0x78, (outs),
+    (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
+    "ashl\t$cnt, $src, $dst", []>;
+
+// MOVAB (0x9E): move address byte. src.ab, dst.wl
+def MOVAB : InstVAX<0x9E, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "movab\t$src, $dst", []>;
+
+// MOVAL (0xDE): move address long. src.al, dst.wl
+def MOVAL : InstVAX<0xDE, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "moval\t$src, $dst", []>;
+
+// EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
+def EXTZV : InstVAX<0xEF, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
+    "extzv\t$pos, $size, $base, $dst", []>;
+
+// INSV (0xF0): insert field. src.rl, pos.rl, size.rb, base.rl
+def INSV : InstVAX<0xF0, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base),
+    "insv\t$src, $pos, $size, $base", []>;
+
+// SOBGTR (0xF5): subtract one and branch if greater. index.ml, disp.bb
+// The index operand is modified (read-write). disp is a branch displacement.
+def SOBGTR : InstVAX<0xF5, (outs),
+    (ins VAXMemOp:$index, VAXMemOp:$disp),
+    "sobgtr\t$index, $disp", []>;
+
+} // let HasMemOp = 1
