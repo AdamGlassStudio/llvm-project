@@ -169,6 +169,34 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  // EDIV — extended divide. The VAXISD::EDIV node has i32 operands
+  // (divisor, dividend_lo, dividend_hi) and i32 results (quotient, remainder).
+  // The hardware EDIV reads a quadword register pair for the dividend.
+  if (N->getOpcode() == VAXISD::EDIV) {
+    SDLoc DL(N);
+    SDValue Divisor = N->getOperand(0);
+    SDValue DvdLo   = N->getOperand(1);
+    SDValue DvdHi   = N->getOperand(2);
+
+    // Build QPR from i32 halves via REG_SEQUENCE.
+    SDValue QprRC = CurDAG->getTargetConstant(VAX::QPRRegClassID, DL, MVT::i32);
+    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDNode *DvdPair = CurDAG->getMachineNode(
+        TargetOpcode::REG_SEQUENCE, DL, MVT::i64,
+        {QprRC, DvdLo, SubLoIdx, DvdHi, SubHiIdx});
+
+    // Emit EDIV: (GPRnoPC:$quo, GPRnoPC:$rem) = ediv divisor, QPR:$dividend.
+    SDNode *Ediv = CurDAG->getMachineNode(
+        VAX::EDIV, DL, MVT::i32, MVT::i32,
+        {Divisor, SDValue(DvdPair, 0)});
+
+    ReplaceUses(SDValue(N, 0), SDValue(Ediv, 0));
+    ReplaceUses(SDValue(N, 1), SDValue(Ediv, 1));
+    CurDAG->RemoveDeadNode(N);
+    return;
+  }
+
   SelectCode(N);
 }
 
