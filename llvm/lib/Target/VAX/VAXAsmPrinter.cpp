@@ -372,18 +372,19 @@ void VAXAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
     return;
   }
 
-  // Check if the initializer contains any FP constants.
+  // Check if the initializer contains any FP constants (recursive).
   Type *Ty = GV->getValueType();
-  bool HasFP = Ty->isFloatingPointTy();
-  if (!HasFP) {
-    // Check aggregate types for FP elements.
-    if (auto *AT = dyn_cast<ArrayType>(Ty))
-      HasFP = AT->getElementType()->isFloatingPointTy();
-    else if (auto *ST = dyn_cast<StructType>(Ty)) {
+  std::function<bool(Type *)> containsFP = [&](Type *T) -> bool {
+    if (T->isFloatingPointTy()) return true;
+    if (auto *AT = dyn_cast<ArrayType>(T))
+      return containsFP(AT->getElementType());
+    if (auto *ST = dyn_cast<StructType>(T)) {
       for (Type *EltTy : ST->elements())
-        if (EltTy->isFloatingPointTy()) { HasFP = true; break; }
+        if (containsFP(EltTy)) return true;
     }
-  }
+    return false;
+  };
+  bool HasFP = containsFP(Ty);
 
   if (!HasFP) {
     AsmPrinter::emitGlobalVariable(GV);
