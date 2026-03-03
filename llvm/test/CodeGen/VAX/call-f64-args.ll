@@ -11,7 +11,7 @@ define double @call_f64(double %a, double %b) {
 ; CHECK: pushl
 ; CHECK: pushl
 ; CHECK: pushl
-; CHECK: calls $2
+; CHECK: calls $4
 ; CHECK: ret
   %r = call double @bar(double %a, double %b)
   ret double %r
@@ -24,7 +24,7 @@ define double @call_mixed(i32 %x, double %d) {
 ; CHECK: pushl
 ; CHECK: pushl
 ; CHECK: pushl
-; CHECK: calls $2
+; CHECK: calls $3
 ; CHECK: ret
   %r = call double @baz(i32 %x, double %d)
   ret double %r
