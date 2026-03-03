@@ -50,11 +50,11 @@ define float @cvt_f64_to_f32(double %a) {
   ret float %r
 }
 
-; Truncating f64→f32 store: should emit cvtdf + movl (f32 store)
+; Truncating f64→f32 store: should emit cvtdf + movf (f32 store)
 define void @trunc_store_f32(ptr %p, double %d) {
 ; CHECK-LABEL: trunc_store_f32:
 ; CHECK: cvtdf
-; CHECK: movl
+; CHECK: movf
   %t = fptrunc double %d to float
   store float %t, ptr %p
   ret void
@@ -65,16 +65,16 @@ define void @trunc_store_f32(ptr %p, double %d) {
 define void @trunc_store_f32_global(double %d) {
 ; CHECK-LABEL: trunc_store_f32_global:
 ; CHECK: cvtdf
-; CHECK: movl
+; CHECK: movf
   %t = fptrunc double %d to float
   store float %t, ptr @gfloat
   ret void
 }
 
-; Extending load f32→f64: should emit movl (f32 load) + cvtfd
+; Extending load f32→f64: should emit movf (f32 load) + cvtfd
 define double @ext_load_f32(ptr %p) {
 ; CHECK-LABEL: ext_load_f32:
-; CHECK: movl
+; CHECK: movf
 ; CHECK: cvtfd
   %v = load float, ptr %p
   %r = fpext float %v to double
