@@ -7,13 +7,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXInstPrinter.h"
+#include "VAX.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Support/raw_ostream.h"
-#include <climits>
 
 using namespace llvm;
 
@@ -49,15 +49,67 @@ void VAXInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   MAI.printExpr(O, *Op.getExpr());
 }
 
-// Memory operand: OpNo+0 = base register, OpNo+1 = signed displacement.
-// Prints as: disp(base), or (base) when displacement is 0.
+// Memory operand: 4 MCOperands = (base, disp, index, flags).
+// Prints VAX GAS syntax based on flags (VAXAM::*).
 void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
                                      raw_ostream &O) {
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo + 1);
+  const MCOperand &Index = MI->getOperand(OpNo + 2);
+  const MCOperand &Flags = MI->getOperand(OpNo + 3);
 
-  // No base register: immediate mode ($value).
-  if (Base.isReg() && Base.getReg() == 0) {
+  unsigned Mode = Flags.getImm();
+
+  // Helper: print [Rx] index suffix if present.
+  auto printIndexSuffix = [&]() {
+    if (Index.isReg() && Index.getReg()) {
+      O << '[';
+      printRegName(O, Index.getReg());
+      O << ']';
+    }
+  };
+
+  switch (Mode) {
+  case VAXAM::RegDirect:
+    // Bare register: %Rn
+    printRegName(O, Base.getReg());
+    printIndexSuffix();
+    return;
+
+  case VAXAM::RegDeferred:
+    // (%Rn)
+    O << '(';
+    printRegName(O, Base.getReg());
+    O << ')';
+    printIndexSuffix();
+    return;
+
+  case VAXAM::AutoDec:
+    // -(%Rn)
+    O << "-(";
+    printRegName(O, Base.getReg());
+    O << ')';
+    printIndexSuffix();
+    return;
+
+  case VAXAM::AutoInc:
+    // (%Rn)+
+    O << '(';
+    printRegName(O, Base.getReg());
+    O << ")+";
+    printIndexSuffix();
+    return;
+
+  case VAXAM::AutoIncDef:
+    // *(%Rn)+
+    O << "*(";
+    printRegName(O, Base.getReg());
+    O << ")+";
+    printIndexSuffix();
+    return;
+
+  case VAXAM::Imm:
+    // $value (immediate)
     O << '$';
     if (Disp.isImm())
       O << Disp.getImm();
@@ -65,33 +117,55 @@ void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,
       MAI.printExpr(O, *Disp.getExpr());
     else
       O << '0';
+    printIndexSuffix();
     return;
-  }
 
-  // Register direct (sentinel INT32_MIN): bare register.
-  if (Disp.isImm() && Disp.getImm() == INT32_MIN) {
-    assert(Base.isReg() && "Register direct must have a register base");
-    printRegName(O, Base.getReg());
+  case VAXAM::Absolute:
+    // *$addr (absolute deferred) or *expr
+    O << '*';
+    if (Disp.isExpr())
+      MAI.printExpr(O, *Disp.getExpr());
+    else if (Disp.isImm())
+      O << '$' << Disp.getImm();
+    else
+      O << "$0";
+    printIndexSuffix();
     return;
-  }
 
-  // Autodecrement (sentinel INT64_MIN): -(Rn).
-  if (Disp.isImm() && Disp.getImm() == INT64_MIN) {
-    assert(Base.isReg() && "Autodecrement must have a register base");
-    O << "-(";
+  case VAXAM::DispDeferred:
+    // *disp(%Rn) — displacement deferred
+    O << '*';
+    if (Disp.isImm() && Disp.getImm() != 0)
+      O << Disp.getImm();
+    else if (Disp.isExpr())
+      MAI.printExpr(O, *Disp.getExpr());
+    O << '(';
     printRegName(O, Base.getReg());
     O << ')';
+    printIndexSuffix();
+    return;
+
+  case VAXAM::Disp:
+  default:
+    // disp(%Rn) or expr
+    if (!Base.getReg()) {
+      // No base: PC-relative expression or immediate
+      if (Disp.isExpr())
+        MAI.printExpr(O, *Disp.getExpr());
+      else if (Disp.isImm())
+        O << Disp.getImm();
+      printIndexSuffix();
+      return;
+    }
+    // Normal displacement
+    if (Disp.isImm() && Disp.getImm() != 0)
+      O << Disp.getImm();
+    else if (Disp.isExpr())
+      MAI.printExpr(O, *Disp.getExpr());
+    O << '(';
+    printRegName(O, Base.getReg());
+    O << ')';
+    printIndexSuffix();
     return;
   }
-
-  // Displacement: may be immediate or an expression (e.g. frame index fixup).
-  if (Disp.isImm() && Disp.getImm() != 0)
-    O << Disp.getImm();
-  else if (Disp.isExpr())
-    MAI.printExpr(O, *Disp.getExpr());
-
-  O << '(';
-  assert(Base.isReg() && "Memory base must be a register");
-  printRegName(O, Base.getReg());
-  O << ')';
 }

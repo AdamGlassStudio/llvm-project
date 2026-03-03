@@ -14,6 +14,7 @@
 
 #include "VAXFixupKinds.h"
 #include "VAXMCTargetDesc.h"
+#include "VAX.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/MC/MCCodeEmitter.h"
@@ -27,7 +28,6 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include <climits>
 
 using namespace llvm;
 
@@ -63,8 +63,10 @@ private:
                        SmallVectorImpl<MCFixup> &Fixups,
                        unsigned StartByte) const;
 
-  /// Emit an operand specifier for a memory operand (base + displacement).
+  /// Emit an operand specifier for a 4-slot memory operand
+  /// (base, disp, index, flags). Handles all VAX addressing modes.
   void emitMemOperand(const MCOperand &Base, const MCOperand &Disp,
+                      const MCOperand &Index, const MCOperand &Flags,
                       SmallVectorImpl<char> &CB,
                       SmallVectorImpl<MCFixup> &Fixups,
                       unsigned StartByte) const;
@@ -137,94 +139,136 @@ void VAXMCCodeEmitter::emitExprOperand(const MCExpr *Expr,
 
 void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
                                       const MCOperand &Disp,
+                                      const MCOperand &Index,
+                                      const MCOperand &Flags,
                                       SmallVectorImpl<char> &CB,
                                       SmallVectorImpl<MCFixup> &Fixups,
                                       unsigned StartByte) const {
   assert(Base.isReg() && "Memory base must be a register");
+  assert(Flags.isImm() && "Memory flags must be an immediate");
   unsigned BaseReg = Base.getReg() ? getRegEncoding(Base.getReg()) : 0;
+  unsigned Mode = Flags.getImm();
 
-  // No base register: this was a bare immediate ($value) morphed to Mem.
-  // Encode as immediate mode (literal or immediate operand specifier).
-  if (!Base.getReg()) {
+  // Emit index prefix byte if present: 0x40 | index_reg.
+  if (Index.isReg() && Index.getReg()) {
+    CB.push_back(static_cast<char>(0x40 | getRegEncoding(Index.getReg())));
+  }
+
+  // Helper: emit displacement-mode operand specifier.
+  // Deferred=false: 0x60 (reg deferred), 0xA0 (byte), 0xC0 (word), 0xE0 (long)
+  // Deferred=true:  0xB0 (byte), 0xD0 (word), 0xF0 (long) — no zero-disp form
+  auto emitDisplacement = [&](unsigned BaseRegNum, bool Deferred) {
+    unsigned DeferBit = Deferred ? 0x10 : 0x00;
+    if (Disp.isExpr()) {
+      // Expression — always longword displacement + fixup.
+      CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
+      unsigned FixOff = CB.size() - StartByte;
+      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+      MCFixupKind Kind = (BaseRegNum == 0xF)
+                             ? MCFixupKind(VAX::fixup_vax_pcrel_32)
+                             : MCFixupKind(FK_Data_4);
+      bool IsPCRel = (BaseRegNum == 0xF);
+      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
+      return;
+    }
+    int64_t DispVal = Disp.isImm() ? Disp.getImm() : 0;
+    if (DispVal == 0 && !Deferred) {
+      // Zero displacement → register deferred (0x60|Rn).
+      CB.push_back(static_cast<char>(0x60 | BaseRegNum));
+      return;
+    }
+    // For deferred with DispVal==0, use byte displacement deferred (0xB0)
+    // since there is no "register deferred deferred" mode.
+    if (DispVal >= -128 && DispVal <= 127) {
+      CB.push_back(static_cast<char>((0xA0 | DeferBit) | BaseRegNum));
+      CB.push_back(static_cast<char>(DispVal & 0xFF));
+      return;
+    }
+    if (DispVal >= -32768 && DispVal <= 32767) {
+      CB.push_back(static_cast<char>((0xC0 | DeferBit) | BaseRegNum));
+      uint16_t Val = static_cast<uint16_t>(DispVal);
+      CB.push_back(static_cast<char>(Val & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
+      return;
+    }
+    // Longword displacement.
+    CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
+    uint32_t Val = static_cast<uint32_t>(DispVal);
+    CB.push_back(static_cast<char>(Val & 0xFF));
+    CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
+    CB.push_back(static_cast<char>((Val >> 16) & 0xFF));
+    CB.push_back(static_cast<char>((Val >> 24) & 0xFF));
+  };
+
+  switch (Mode) {
+  case VAXAM::RegDirect:
+    // Register direct: 0x50 | reg
+    CB.push_back(static_cast<char>(0x50 | BaseReg));
+    return;
+
+  case VAXAM::RegDeferred:
+    // Register deferred: 0x60 | reg
+    CB.push_back(static_cast<char>(0x60 | BaseReg));
+    return;
+
+  case VAXAM::AutoDec:
+    // Autodecrement: 0x70 | reg
+    CB.push_back(static_cast<char>(0x70 | BaseReg));
+    return;
+
+  case VAXAM::AutoInc:
+    // Autoincrement: 0x80 | reg
+    CB.push_back(static_cast<char>(0x80 | BaseReg));
+    return;
+
+  case VAXAM::AutoIncDef:
+    // Autoincrement deferred: 0x90 | reg
+    CB.push_back(static_cast<char>(0x90 | BaseReg));
+    return;
+
+  case VAXAM::Imm:
+    // Immediate mode (no base register).
     if (Disp.isImm()) {
       emitImmOperand(Disp.getImm(), CB);
       return;
     }
     if (Disp.isExpr()) {
-      // PC-relative or absolute expression.
       emitExprOperand(Disp.getExpr(), CB, Fixups, StartByte);
       return;
     }
-    // Null displacement (bare $0 case).
     emitImmOperand(0, CB);
     return;
-  }
 
-  if (Disp.isExpr()) {
-    // Expression displacement — emit as longword displacement + fixup.
-    // If base is PC (0xF), this is PC-relative.
-    CB.push_back(static_cast<char>(0xE0 | BaseReg));
-    unsigned FixOff = CB.size() - StartByte;
-    CB.push_back(0);
-    CB.push_back(0);
-    CB.push_back(0);
-    CB.push_back(0);
-    MCFixupKind Kind = (BaseReg == 0xF)
-                           ? MCFixupKind(VAX::fixup_vax_pcrel_32)
-                           : MCFixupKind(FK_Data_4);
-    bool IsPCRel = (BaseReg == 0xF);
-    Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
+  case VAXAM::Absolute:
+    // Absolute deferred: 0x9F + 4-byte address.
+    CB.push_back(static_cast<char>(0x9F));
+    if (Disp.isExpr()) {
+      unsigned FixOff = CB.size() - StartByte;
+      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
+                                       MCFixupKind(FK_Data_4),
+                                       /*IsPCRel=*/false));
+    } else {
+      int64_t Addr = Disp.isImm() ? Disp.getImm() : 0;
+      uint32_t Val = static_cast<uint32_t>(Addr);
+      CB.push_back(static_cast<char>(Val & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 16) & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 24) & 0xFF));
+    }
+    return;
+
+  case VAXAM::DispDeferred:
+    // Displacement deferred: 0xB0/D0/F0 modes.
+    emitDisplacement(BaseReg, /*Deferred=*/true);
+    return;
+
+  case VAXAM::Disp:
+  default:
+    // Normal displacement mode (or zero disp → register deferred).
+    emitDisplacement(BaseReg, /*Deferred=*/false);
     return;
   }
-
-  assert(Disp.isImm() && "Memory displacement must be immediate or expression");
-  int64_t DispVal = Disp.getImm();
-
-  // Sentinel value INT64_MIN means "autodecrement mode" -(Rn).
-  if (DispVal == INT64_MIN) {
-    CB.push_back(static_cast<char>(0x70 | BaseReg));
-    return;
-  }
-
-  // Sentinel value INT32_MIN means "register direct mode" — a bare register
-  // that was morphed to a Mem pair by the AsmParser.
-  if (DispVal == INT32_MIN) {
-    CB.push_back(static_cast<char>(0x50 | BaseReg));
-    return;
-  }
-
-  if (DispVal == 0) {
-    // Zero displacement → register deferred mode (0x60 | reg).
-    // But if the base is FP/AP/SP, keep displacement form for clarity and to
-    // match GAS output. Actually for encoding correctness, register deferred
-    // IS valid and shorter.
-    CB.push_back(static_cast<char>(0x60 | BaseReg));
-    return;
-  }
-
-  if (DispVal >= -128 && DispVal <= 127) {
-    // Byte displacement: 0xA0 | reg + 1-byte signed.
-    CB.push_back(static_cast<char>(0xA0 | BaseReg));
-    CB.push_back(static_cast<char>(DispVal & 0xFF));
-    return;
-  }
-
-  if (DispVal >= -32768 && DispVal <= 32767) {
-    // Word displacement: 0xC0 | reg + 2-byte signed LE.
-    CB.push_back(static_cast<char>(0xC0 | BaseReg));
-    uint16_t Val = static_cast<uint16_t>(DispVal);
-    CB.push_back(static_cast<char>(Val & 0xFF));
-    CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
-    return;
-  }
-
-  // Longword displacement: 0xE0 | reg + 4-byte signed LE.
-  CB.push_back(static_cast<char>(0xE0 | BaseReg));
-  uint32_t Val = static_cast<uint32_t>(DispVal);
-  CB.push_back(static_cast<char>(Val & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 16) & 0xFF));
-  CB.push_back(static_cast<char>((Val >> 24) & 0xFF));
 }
 
 void VAXMCCodeEmitter::emitBranchDisp(const MCOperand &Target,
@@ -272,21 +316,22 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   uint64_t TSFlags = Desc.TSFlags;
   uint16_t OpcodeVal = (TSFlags >> 1) & 0xFFFF;
 
-  // Build a set of MCInst operand indices that start memory pairs.
-  // A VAXMemOp in TableGen expands to 2 MCInst slots: (GPR, i32imm).
-  // We detect memory pairs by looking for a register operand immediately
-  // followed by an immediate operand in the MCInstrDesc.
+  // Build a set of MCInst operand indices that start memory quads.
+  // A VAXMemOp in TableGen expands to 4 MCInst slots: (GPR, i32imm, GPR,
+  // i32imm) = (base, disp, index, flags). We detect memory quads by looking
+  // for the pattern: reg, imm, reg, imm in the MCInstrDesc operand list.
   bool HasMemOp = TSFlags & 1;
   SmallVector<unsigned, 6> MemOpIndices;
   if (HasMemOp) {
     unsigned NumDescOps = Desc.getNumOperands();
-    for (unsigned i = 0; i + 1 < NumDescOps; ++i) {
-      // Memory pair: register sub-operand (has RegClass) followed by
-      // immediate sub-operand (no RegClass, rc == -1).
+    for (unsigned i = 0; i + 3 < NumDescOps; ++i) {
+      // Memory quad: (RegClass>=0, RegClass<0, RegClass>=0, RegClass<0)
       if (Desc.operands()[i].RegClass >= 0 &&
-          Desc.operands()[i + 1].RegClass < 0) {
+          Desc.operands()[i + 1].RegClass < 0 &&
+          Desc.operands()[i + 2].RegClass >= 0 &&
+          Desc.operands()[i + 3].RegClass < 0) {
         MemOpIndices.push_back(i);
-        ++i; // skip the immediate sub-operand
+        i += 3; // skip the remaining 3 sub-operands
       }
     }
   }
@@ -331,13 +376,14 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   unsigned NumOps = MI.getNumOperands();
 
   // Helper: emit one MCInst operand. Returns the number of MCInst operands
-  // consumed (2 for memory, 1 otherwise).
+  // consumed (4 for memory, 1 otherwise).
   auto emitOperand = [&](unsigned OpIdx) -> unsigned {
-    // Check if this is the start of a memory operand pair.
+    // Check if this is the start of a 4-slot memory operand.
     if (isMemOpStart(OpIdx)) {
-      emitMemOperand(MI.getOperand(OpIdx), MI.getOperand(OpIdx + 1), CB,
-                     Fixups, StartByte);
-      return 2;
+      emitMemOperand(MI.getOperand(OpIdx), MI.getOperand(OpIdx + 1),
+                     MI.getOperand(OpIdx + 2), MI.getOperand(OpIdx + 3),
+                     CB, Fixups, StartByte);
+      return 4;
     }
 
     const MCOperand &Op = MI.getOperand(OpIdx);

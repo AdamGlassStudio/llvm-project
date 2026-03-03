@@ -48,7 +48,9 @@ void VAXInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
   BuildMI(MBB, MI, DL, get(Opc))
       .addReg(SrcReg, getKillRegState(isKill))
       .addFrameIndex(FrameIndex)
-      .addImm(0);
+      .addImm(0)
+      .addReg(0) // index (none)
+      .addImm(VAXAM::Disp); // flags
 }
 
 void VAXInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
@@ -61,7 +63,9 @@ void VAXInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
   unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVD_rm : VAX::MOVL_rm;
   BuildMI(MBB, MI, DL, get(Opc), DstReg)
       .addFrameIndex(FrameIndex)
-      .addImm(0);
+      .addImm(0)
+      .addReg(0) // index (none)
+      .addImm(VAXAM::Disp); // flags
 }
 
 static bool isCondBranch(unsigned Opc) {

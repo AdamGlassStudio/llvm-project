@@ -42,13 +42,14 @@ def VAXMemAsmOperand : AsmOperandClass {
 
 def VAXMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
-  let MIOperandInfo = (ops GPR, i32imm);
+  let MIOperandInfo = (ops GPR, i32imm, GPR, i32imm);
   let ParserMatchClass = VAXMemAsmOperand;
 }
 
-// ComplexPattern that recognizes base + displacement addressing.
+// ComplexPattern that recognizes base + displacement + index + flags addressing.
 // Handles: FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
-def VAXMem : ComplexPattern<iPTR, 2, "SelectVAXAddr", [frameindex, add], []>;
+// Index is always NoReg and flags is always 0 (Disp) from SelectionDAG.
+def VAXMem : ComplexPattern<iPTR, 4, "SelectVAXAddr", [frameindex, add], []>;
 
 //===----------------------------------------------------------------------===//
 // Real instructions (Phase 3 — enough for "int f() { return 0; }")
@@ -717,7 +718,7 @@ def EMUL : InstVAX<0x7A, (outs QPR:$dst),
 // F_float memory operand (same layout as integer VAXMemOp).
 def VAXFMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
-  let MIOperandInfo = (ops GPR, i32imm);
+  let MIOperandInfo = (ops GPR, i32imm, GPR, i32imm);
   let ParserMatchClass = VAXMemAsmOperand;
 }
 
@@ -807,7 +808,7 @@ def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
 // D_float memory operand (same layout as integer, but 8-byte load).
 def VAXDMemOp : Operand<iPTR> {
   let PrintMethod   = "printMemOperand";
-  let MIOperandInfo = (ops GPR, i32imm);
+  let MIOperandInfo = (ops GPR, i32imm, GPR, i32imm);
   let ParserMatchClass = VAXMemAsmOperand;
 }
 

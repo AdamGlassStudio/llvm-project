@@ -18,6 +18,22 @@ class FunctionPass;
 class PassRegistry;
 class VAXTargetMachine;
 
+/// VAX addressing mode flags for memory operands.
+/// Stored in the 4th MCOperand of a VAXMemOp (base, disp, index, flags).
+namespace VAXAM {
+enum : unsigned {
+  Disp = 0,        // disp(Rn)   — byte/word/longword displacement
+  RegDirect = 1,   // %Rn        — register direct (0x50|Rn)
+  RegDeferred = 2, // (%Rn)      — register deferred (0x60|Rn)
+  AutoDec = 3,     // -(%Rn)     — autodecrement (0x70|Rn)
+  AutoInc = 4,     // (%Rn)+     — autoincrement (0x80|Rn)
+  DispDeferred = 5,// *disp(Rn)  — displacement deferred (0xB0/D0/F0|Rn)
+  AutoIncDef = 6,  // *(%Rn)+    — autoincrement deferred (0x90|Rn)
+  Imm = 7,         // $val       — literal (0-63) or immediate (0x8F)
+  Absolute = 8,    // *$addr     — absolute deferred (0x9F + addr32)
+};
+} // namespace VAXAM
+
 FunctionPass *createVAXISelDag(VAXTargetMachine &TM,
                                 CodeGenOptLevel OptLevel);
 FunctionPass *createVAXFixupPSWPass();
