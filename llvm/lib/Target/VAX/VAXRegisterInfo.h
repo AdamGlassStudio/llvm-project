@@ -33,6 +33,12 @@ public:
                            RegScavenger *RS = nullptr) const override;
 
   Register getFrameRegister(const MachineFunction &MF) const override;
+
+  // VAX stack is 4-byte aligned and CALLS/RET frame doesn't support
+  // dynamic realignment. Return false to clamp over-aligned allocas.
+  bool canRealignStack(const MachineFunction &MF) const override {
+    return false;
+  }
 };
 
 } // namespace llvm

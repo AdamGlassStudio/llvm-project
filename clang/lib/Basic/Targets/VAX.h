@@ -63,6 +63,10 @@ public:
 
   bool hasFeature(StringRef Feature) const override { return Feature == "vax"; }
 
+  // VAX uses 4-byte alignment for all types including long long and double.
+  // Don't promote preferred alignment to natural size (8 bytes).
+  bool allowsLargerPreferedTypeAlignment() const override { return false; }
+
   ArrayRef<const char *> getGCCRegNames() const override;
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override;
 
