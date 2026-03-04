@@ -1043,6 +1043,8 @@ set(ve_SOURCES
 
 set(m68k_SOURCES ${GENERIC_SOURCES})
 
+set(vax_SOURCES ${GENERIC_SOURCES})
+
 add_custom_target(builtins)
 set_target_properties(builtins PROPERTIES FOLDER "compiler-rt/Metatargets")
 
