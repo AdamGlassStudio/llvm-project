@@ -904,7 +904,20 @@ set(ve_SOURCES
 
 set(m68k_SOURCES ${GENERIC_SOURCES})
 
-set(vax_SOURCES ${GENERIC_SOURCES})
+set(vax_SOURCES
+  ${GENERIC_SOURCES}
+  vax/floatdidf.c
+  vax/floatundidf.c
+  vax/floatdisf.c
+  vax/floatundisf.c
+)
+# Remove the generic IEEE 754 versions that the VAX overrides replace.
+list(REMOVE_ITEM vax_SOURCES
+  floatdidf.c
+  floatundidf.c
+  floatdisf.c
+  floatundisf.c
+)
 
 add_custom_target(builtins)
 set_target_properties(builtins PROPERTIES FOLDER "Compiler-RT/Metatargets")
