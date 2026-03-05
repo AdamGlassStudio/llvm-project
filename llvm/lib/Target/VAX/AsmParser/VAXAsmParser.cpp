@@ -316,6 +316,7 @@ bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     OperandVector &Operands) {
   // GAS accepts "j<cond>" as aliases for "b<cond>" branch instructions,
   // and "jbr" as an alias for "brw" (unconditional branch word).
+  // GAS also accepts "bcc"/"bcs" as aliases for "bgequ"/"blssu".
   StringRef Mnemonic = Name;
   if (Mnemonic == "jbr") {
     Mnemonic = "brw";
@@ -323,6 +324,11 @@ bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
     MnemonicStorage.push_back(("b" + Mnemonic.drop_front(1)).str());
     Mnemonic = MnemonicStorage.back();
   }
+  // After j→b translation, also handle bcc/bcs → bgequ/blssu.
+  if (Mnemonic == "bcc" || Mnemonic == "jcc")
+    Mnemonic = "bgequ";
+  else if (Mnemonic == "bcs" || Mnemonic == "jcs")
+    Mnemonic = "blssu";
 
   // Mnemonic is the first token operand.
   Operands.push_back(VAXOperand::createToken(Mnemonic, NameLoc));

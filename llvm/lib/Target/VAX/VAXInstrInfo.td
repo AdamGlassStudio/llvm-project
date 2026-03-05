@@ -1139,6 +1139,18 @@ def MULL2 : InstVAX<0xC4, (outs),
     (ins VAXMemOp:$mulr, VAXMemOp:$prod),
     "mull2\t$mulr, $prod", []>;
 
+// SUBL3 with MemOp operands (e.g., subl3 %r2, 4(%ap), %r0)
+let Defs = [PSW] in
+def SUBL3 : InstVAX<0xC3, (outs),
+    (ins VAXMemOp:$s, VAXMemOp:$m, VAXMemOp:$dst),
+    "subl3\t$s, $m, $dst", []>;
+
+// ADDL3 with MemOp operands
+let Defs = [PSW] in
+def ADDL3 : InstVAX<0xC1, (outs),
+    (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
+    "addl3\t$a, $b, $dst", []>;
+
 // CMPL with memory operands (e.g., cmpl 4(%ap), %r2 in udiv.S)
 let Defs = [PSW] in
 def CMPL : InstVAX<0xD1, (outs),
