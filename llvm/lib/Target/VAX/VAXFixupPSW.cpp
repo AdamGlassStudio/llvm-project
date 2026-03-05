@@ -222,6 +222,9 @@ char VAXExpandCmpBranch::ID = 0;
 
 } // end anonymous namespace
 
+static bool cleanStaleSuccessors(MachineFunction &MF,
+                                 const TargetInstrInfo *TII);
+
 bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -264,6 +267,44 @@ bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
       auto EraseIt = II;
       ++II;
       EraseIt->eraseFromParent();
+      Changed = true;
+    }
+  }
+
+  // Clean up stale successor edges. SelectionDAG can produce blocks with
+  // unconditional branches but extra successors left over from folded
+  // conditional branches (e.g., fcmp uno on VAX always folds to false,
+  // leaving a phantom edge to the "true" block). Doing this here — before
+  // BranchFolding — avoids iterator-invalidation issues that occur if the
+  // cleanup is done inside analyzeBranch during TailMergeBlocks.
+  Changed |= cleanStaleSuccessors(MF, TII);
+
+  return Changed;
+}
+
+static bool cleanStaleSuccessors(MachineFunction &MF,
+                                 const TargetInstrInfo *TII) {
+  bool Changed = false;
+  for (MachineBasicBlock &MBB : MF) {
+    MachineBasicBlock *TBB = nullptr, *FBB = nullptr;
+    SmallVector<MachineOperand, 4> Cond;
+    if (TII->analyzeBranch(MBB, TBB, FBB, Cond, /*AllowModify=*/false))
+      continue;
+
+    // Only clean up unconditional-only blocks (no conditional branch).
+    if (!TBB || !Cond.empty())
+      continue;
+
+    SmallVector<MachineBasicBlock *, 4> Stale;
+    for (MachineBasicBlock *Succ : MBB.successors())
+      if (Succ != TBB)
+        Stale.push_back(Succ);
+
+    for (MachineBasicBlock *S : Stale) {
+      LLVM_DEBUG(dbgs() << "VAXExpandCmpBranch: removing stale successor "
+                        << printMBBReference(*S) << " from "
+                        << printMBBReference(MBB) << "\n");
+      MBB.removeSuccessor(S);
       Changed = true;
     }
   }
