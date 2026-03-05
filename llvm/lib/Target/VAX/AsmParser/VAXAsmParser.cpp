@@ -189,6 +189,7 @@ private:
 /// Parses GAS-syntax VAX assembly.
 class VAXAsmParser : public MCTargetAsmParser {
   MCAsmParser &Parser;
+  SmallVector<std::string, 4> MnemonicStorage; // owns aliased mnemonic strings
 
   bool matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                OperandVector &Operands, MCStreamer &Out,
@@ -313,8 +314,18 @@ bool VAXAsmParser::matchAndEmitInstruction(SMLoc Loc, unsigned &Opcode,
 bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     SMLoc NameLoc,
                                     OperandVector &Operands) {
+  // GAS accepts "j<cond>" as aliases for "b<cond>" branch instructions,
+  // and "jbr" as an alias for "brw" (unconditional branch word).
+  StringRef Mnemonic = Name;
+  if (Mnemonic == "jbr") {
+    Mnemonic = "brw";
+  } else if (Mnemonic.starts_with("j") && Mnemonic.size() > 1) {
+    MnemonicStorage.push_back(("b" + Mnemonic.drop_front(1)).str());
+    Mnemonic = MnemonicStorage.back();
+  }
+
   // Mnemonic is the first token operand.
-  Operands.push_back(VAXOperand::createToken(Name, NameLoc));
+  Operands.push_back(VAXOperand::createToken(Mnemonic, NameLoc));
 
   // If no more operands, we're done (e.g., "ret", "nop", "halt").
   if (getLexer().is(AsmToken::EndOfStatement))

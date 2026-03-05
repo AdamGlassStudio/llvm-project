@@ -522,6 +522,12 @@ def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
     [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>;
 } // let Defs = [PSW] — end of shift/rotate block
 
+// ROTL — assembly-only form with all MemOp operands (for hand-written .S)
+let Defs = [PSW], HasMemOp = 1 in
+def ROTL : InstVAX<0x9C, (outs),
+    (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
+    "rotl\t$cnt, $src, $dst", []>;
+
 //===----------------------------------------------------------------------===//
 // Phase 8 — Function calls
 //===----------------------------------------------------------------------===//
@@ -1056,6 +1062,12 @@ let HasMemOp = 1 in
 def MOVAQ : InstVAX<0x7E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movaq\t$src, $dst", []>;
+
+// MOVQ (0x7D): move quadword. src.rq, dst.wq
+let HasMemOp = 1 in
+def MOVQ : InstVAX<0x7D, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "movq\t$src, $dst", []>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
 def EXTZV : InstVAX<0xEF, (outs),
