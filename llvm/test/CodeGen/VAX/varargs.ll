@@ -6,8 +6,8 @@ declare void @llvm.va_end(ptr)
 ; Variadic callee: sum of N variadic i32 args.
 define i32 @sum_varargs(i32 %count, ...) {
 ; CHECK-LABEL: sum_varargs:
-; CHECK:       addl3 $8, %ap
 ; CHECK:       movl 4(%ap)
+; CHECK:       addl3 $8, %ap
 ; CHECK:       ret
 entry:
   %ap = alloca ptr

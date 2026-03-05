@@ -35,6 +35,8 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   // Use external GAS assembler — the integrated assembler does not yet
   // support VAX instruction encoding.
   UseIntegratedAssembler = true;
+  // VAX GAS does not support the `.bss` shorthand; use `.section .bss`.
+  UsesELFSectionDirectiveForBSS = true;
 
   initializeAtSpecifiers(atSpecifiers);
 }

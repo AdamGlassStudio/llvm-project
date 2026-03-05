@@ -59,6 +59,22 @@ static uint64_t convertIEEEToVAXD(uint64_t IEEE) {
          (uint64_t(W1) << 16) | W0;
 }
 
+// Custom calling convention handler: split i64 return into R0 (lo) + R1 (hi).
+static bool CC_VAX_RetI64(unsigned ValNo, MVT ValVT, MVT LocVT,
+                           CCValAssign::LocInfo LocInfo, ISD::ArgFlagsTy ArgFlags,
+                           CCState &State) {
+  // Allocate R0 for the low half and R1 for the high half.
+  if (!State.AllocateReg(VAX::R0))
+    return false;
+  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, VAX::R0,
+                                          MVT::i32, LocInfo));
+  if (!State.AllocateReg(VAX::R1))
+    return false;
+  State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, VAX::R1,
+                                          MVT::i32, LocInfo));
+  return true;
+}
+
 #define GET_CALLINGCONV_IMPL
 #include "VAXGenCallingConv.inc"
 
@@ -74,7 +90,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   setStackPointerRegisterToSaveRestore(VAX::SP);
-  setSchedulingPreference(Sched::RegPressure);
+  // Use source-order scheduling. The register-pressure scheduler (list-burr)
+  // calls getMinimalPhysRegClass on physical registers with MVT::i64, which
+  // fails because no GPR class holds i64. Source-order is safest for now.
+  setSchedulingPreference(Sched::Source);
 
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
@@ -631,18 +650,13 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   const GlobalValue *GV = GN->getGlobal();
   SDLoc DL(GN);
 
+  // Note: VAX GAS does not support @GOT relocations.  Even for PIC,
+  // emit plain PC-relative addressing.  True shared library support
+  // would require a different approach (not GOT/PLT).
   unsigned TF = VAXII::MO_NO_FLAG;
-  if (isPositionIndependent() && !GV->isDSOLocal())
-    TF = VAXII::MO_GOT;
 
   SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset(), TF);
   SDValue Addr = DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
-
-  // GOT references are indirect: the PC-relative displacement points to a
-  // GOT entry containing the symbol's actual address. Load through it.
-  if (TF == VAXII::MO_GOT)
-    Addr = DAG.getLoad(MVT::i32, DL, DAG.getEntryNode(), Addr,
-                       MachinePointerInfo::getGOT(DAG.getMachineFunction()));
 
   return Addr;
 }
@@ -807,6 +821,26 @@ SDValue VAXTargetLowering::LowerReturn(
   for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
     CCValAssign &VA = RVLocs[i];
     assert(VA.isRegLoc() && "VAX: all return values must be in registers");
+
+    if (VA.needsCustom()) {
+      // i64 return: split into lo (R0) and hi (R1).
+      assert(i + 1 < e && "i64 return needs two CCValAssigns");
+      CCValAssign &HiVA = RVLocs[i + 1];
+      SDValue Val = OutVals[VA.getValNo()];
+      SDValue Lo = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i32, Val,
+                               DAG.getConstant(0, DL, MVT::i32));
+      SDValue Hi = DAG.getNode(ISD::EXTRACT_ELEMENT, DL, MVT::i32, Val,
+                               DAG.getConstant(1, DL, MVT::i32));
+      Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Lo, Flag);
+      Flag = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(VA.getLocReg(), MVT::i32));
+      Chain = DAG.getCopyToReg(Chain, DL, HiVA.getLocReg(), Hi, Flag);
+      Flag = Chain.getValue(1);
+      RetOps.push_back(DAG.getRegister(HiVA.getLocReg(), MVT::i32));
+      ++i; // skip the hi half
+      continue;
+    }
+
     Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVals[i], Flag);
     Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
@@ -935,14 +969,15 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   // Wrap callee for direct calls.
+  // Note: VAX GAS does not support @PLT relocations.  Even when building
+  // position-independent code, emit plain calls — the linker resolves
+  // cross-DSO references via other mechanisms.
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-    unsigned TF = VAXII::MO_NO_FLAG;
-    if (isPositionIndependent() && !G->getGlobal()->isDSOLocal())
-      TF = VAXII::MO_PLT;
-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32, 0, TF);
+    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32, 0,
+                                        VAXII::MO_NO_FLAG);
   } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
-    unsigned TF = isPositionIndependent() ? VAXII::MO_PLT : VAXII::MO_NO_FLAG;
-    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32, TF);
+    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32,
+                                         VAXII::MO_NO_FLAG);
   }
 
   // Build VAXISD::CALL node.
@@ -966,7 +1001,28 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   SmallVector<CCValAssign, 4> RVLocs;
   CCState RetInfo(CLI.CallConv, isVarArg, MF, RVLocs, *DAG.getContext());
   RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_VAX);
-  for (auto &VA : RVLocs) {
+  for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
+    CCValAssign &VA = RVLocs[i];
+
+    if (VA.needsCustom()) {
+      // i64 return: reassemble from R0 (lo) and R1 (hi).
+      assert(i + 1 < e && "i64 return needs two CCValAssigns");
+      CCValAssign &HiVA = RVLocs[i + 1];
+      SDValue Lo = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), MVT::i32,
+                                      InFlag);
+      Chain  = Lo.getValue(1);
+      InFlag = Lo.getValue(2);
+      SDValue Hi = DAG.getCopyFromReg(Chain, DL, HiVA.getLocReg(), MVT::i32,
+                                      InFlag);
+      Chain  = Hi.getValue(1);
+      InFlag = Hi.getValue(2);
+      SDValue Val = DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i64,
+                                Lo.getValue(0), Hi.getValue(0));
+      InVals.push_back(Val);
+      ++i; // skip the hi half
+      continue;
+    }
+
     SDValue RV = DAG.getCopyFromReg(Chain, DL, VA.getLocReg(), VA.getLocVT(),
                                     InFlag);
     Chain  = RV.getValue(1);
@@ -1063,5 +1119,17 @@ VAXTargetLowering::shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const {
 TargetLoweringBase::AtomicExpansionKind
 VAXTargetLowering::shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *AI) const {
   // VAX is single-core — CAS expands to a simple compare-and-store.
+  return AtomicExpansionKind::NotAtomic;
+}
+
+TargetLoweringBase::AtomicExpansionKind
+VAXTargetLowering::shouldExpandAtomicLoadInIR(LoadInst *LI) const {
+  // VAX is single-core with strict memory ordering.  All loads are atomic.
+  // Expand to non-atomic to avoid ISel issues with sub-32-bit atomic loads.
+  return AtomicExpansionKind::NotAtomic;
+}
+
+TargetLoweringBase::AtomicExpansionKind
+VAXTargetLowering::shouldExpandAtomicStoreInIR(StoreInst *SI) const {
   return AtomicExpansionKind::NotAtomic;
 }
