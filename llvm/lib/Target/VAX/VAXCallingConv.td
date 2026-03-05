@@ -24,6 +24,7 @@
 def RetCC_VAX : CallingConv<[
   CCIfType<[f32], CCAssignToReg<[R0]>>,
   CCIfType<[f64], CCAssignToReg<[R0_R1]>>,
+  CCIfType<[i64], CCCustom<"CC_VAX_RetI64">>,
   CCIfType<[i32], CCAssignToReg<[R0, R1]>>
 ]>;
 

@@ -21,8 +21,8 @@ define i64 @test_sub64(i64 %a, i64 %b) {
 ; i64 bitwise AND
 define i64 @test_and64(i64 %a, i64 %b) {
 ; CHECK-LABEL: test_and64:
-; CHECK: bicl3
-; CHECK: bicl3
+; CHECK: bicl2
+; CHECK: bicl2
   %r = and i64 %a, %b
   ret i64 %r
 }

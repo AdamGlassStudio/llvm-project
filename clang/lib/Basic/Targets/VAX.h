@@ -33,9 +33,9 @@ public:
     LongLongWidth = 64;
     LongLongAlign = 32;
     PointerWidth = PointerAlign = 32;
-    SizeType = UnsignedInt;
-    PtrDiffType = SignedInt;
-    IntPtrType = SignedInt;
+    SizeType = UnsignedLong;
+    PtrDiffType = SignedLong;
+    IntPtrType = SignedLong;
     DoubleAlign = 32;
     LongDoubleWidth = 64;
     LongDoubleAlign = 32;
