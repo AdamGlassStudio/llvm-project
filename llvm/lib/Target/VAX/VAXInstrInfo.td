@@ -150,7 +150,7 @@ def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
-// Atomic load/store: VAX aligned 32-bit loads/stores are naturally atomic.
+// Atomic load/store: VAX aligned loads/stores are naturally atomic.
 def : Pat<(atomic_load_32 VAXMem:$src), (MOVL_rm VAXMemOp:$src)>;
 def : Pat<(atomic_store_32 GPRnoPC:$src, VAXMem:$dst), (MOVL_mr GPRnoPC:$src, VAXMemOp:$dst)>;
 
@@ -611,6 +611,19 @@ def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
     "pushl\t$imm", [(vax_pushl (i32 imm:$imm))]>;
 }
 
+// PUSHAx — push address onto stack (SP autodecrement)
+// These are assembly-only (used in hand-written .S files like crtbegin.S)
+let Defs = [SP], Uses = [SP], HasMemOp = 1 in {
+def PUSHAB : InstVAX<0x9F, (outs), (ins VAXMemOp:$src),
+    "pushab\t$src", []>;
+def PUSHAW : InstVAX<0x3F, (outs), (ins VAXMemOp:$src),
+    "pushaw\t$src", []>;
+def PUSHAL : InstVAX<0xDF, (outs), (ins VAXMemOp:$src),
+    "pushal\t$src", []>;
+def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
+    "pushaq\t$src", []>;
+}
+
 // CALLS — call subroutine with stack arguments  opcode 0xFB
 // CALLS clears all condition codes and clobbers R0-R5, SP, AP, FP.
 let isCall = 1, Uses = [SP],
@@ -1018,14 +1031,31 @@ def ASHL : InstVAX<0x78, (outs),
     "ashl\t$cnt, $src, $dst", []>;
 
 // MOVAB (0x9E): move address byte. src.ab, dst.wl
+let HasMemOp = 1 in
 def MOVAB : InstVAX<0x9E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movab\t$src, $dst", []>;
 
+// MOVABL (0x9E): move address byte — alias for MOVAB
+// (GAS accepts both movab and movabl)
+
+// MOVAW (0x3E): move address word. src.aw, dst.wl
+let HasMemOp = 1 in
+def MOVAW : InstVAX<0x3E, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "movaw\t$src, $dst", []>;
+
 // MOVAL (0xDE): move address long. src.al, dst.wl
+let HasMemOp = 1 in
 def MOVAL : InstVAX<0xDE, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "moval\t$src, $dst", []>;
+
+// MOVAQ (0x7E): move address quad. src.aq, dst.wl
+let HasMemOp = 1 in
+def MOVAQ : InstVAX<0x7E, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "movaq\t$src, $dst", []>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
 def EXTZV : InstVAX<0xEF, (outs),
@@ -1044,3 +1074,9 @@ def SOBGTR : InstVAX<0xF5, (outs),
     "sobgtr\t$index, $disp", []>;
 
 } // let HasMemOp = 1
+
+// Atomic load/store for i8/i16 (after all instruction defs).
+def : Pat<(atomic_load_8  VAXMem:$src), (MOVZBL_rm VAXMemOp:$src)>;
+def : Pat<(atomic_load_16 VAXMem:$src), (MOVZWL_rm VAXMemOp:$src)>;
+def : Pat<(atomic_store_8  GPRnoPC:$src, VAXMem:$dst), (MOVB_mr GPRnoPC:$src, VAXMemOp:$dst)>;
+def : Pat<(atomic_store_16 GPRnoPC:$src, VAXMem:$dst), (MOVW_mr GPRnoPC:$src, VAXMemOp:$dst)>;

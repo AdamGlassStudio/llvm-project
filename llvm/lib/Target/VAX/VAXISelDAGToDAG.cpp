@@ -284,8 +284,15 @@ bool VAXDAGToDAGISel::SelectInlineAsmMemoryOperand(
   case InlineAsm::ConstraintCode::o:
   case InlineAsm::ConstraintCode::p: {
     SDValue Base, Offset, Index, Flags;
-    if (!SelectVAXAddr(Op, Base, Offset, Index, Flags))
-      return true;
+    if (!SelectVAXAddr(Op, Base, Offset, Index, Flags)) {
+      // SelectVAXAddr rejects PCRelWrapper to let TableGen patterns match
+      // globals directly. For inline asm, accept it as base+0.
+      SDLoc DL(Op);
+      Base = Op;
+      Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+      Index = CurDAG->getRegister(0, MVT::i32);
+      Flags = CurDAG->getTargetConstant(0, DL, MVT::i32);
+    }
     OutOps.push_back(Base);
     OutOps.push_back(Offset);
     OutOps.push_back(Index);

@@ -122,6 +122,10 @@ private:
   shouldExpandAtomicRMWInIR(const AtomicRMWInst *AI) const override;
   TargetLoweringBase::AtomicExpansionKind
   shouldExpandAtomicCmpXchgInIR(const AtomicCmpXchgInst *AI) const override;
+  TargetLoweringBase::AtomicExpansionKind
+  shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
+  TargetLoweringBase::AtomicExpansionKind
+  shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
 };
 
 } // namespace llvm

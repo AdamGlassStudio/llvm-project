@@ -75,7 +75,7 @@ define i32 @test_xor_rr() {
 ; AND(A, B) is lowered to BICL3(MCOML(B), A) — two instructions.
 ; CHECK-LABEL: test_and_rr:
 ; CHECK: mcoml
-; CHECK: bicl3
+; CHECK: bicl2
 ; CHECK: ret
 define i32 @test_and_rr() {
   %a = load i32, ptr @x
