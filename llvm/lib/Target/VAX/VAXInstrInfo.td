@@ -1127,6 +1127,48 @@ def INCB : InstVAX<0x96, (outs),
     (ins VAXMemOp:$dst),
     "incb\t$dst", []>;
 
+// DIVL2 (0xC6): divide longword 2-operand. divisor.rl, dividend.ml
+let Defs = [PSW] in
+def DIVL2 : InstVAX<0xC6, (outs),
+    (ins VAXMemOp:$divisor, VAXMemOp:$dividend),
+    "divl2\t$divisor, $dividend", []>;
+
+// MULL2 (0xC4): multiply longword 2-operand. mulr.rl, prod.ml
+let Defs = [PSW] in
+def MULL2 : InstVAX<0xC4, (outs),
+    (ins VAXMemOp:$mulr, VAXMemOp:$prod),
+    "mull2\t$mulr, $prod", []>;
+
+// CMPL with memory operands (e.g., cmpl 4(%ap), %r2 in udiv.S)
+let Defs = [PSW] in
+def CMPL : InstVAX<0xD1, (outs),
+    (ins VAXMemOp:$a, VAXMemOp:$b),
+    "cmpl\t$a, $b", []>;
+
+// CLRL with memory operand (e.g., clrl (%r3) in udiv.S)
+let Defs = [PSW] in
+def CLRL_m : InstVAX<0xD4, (outs),
+    (ins VAXMemOp:$dst),
+    "clrl\t$dst", []>;
+
+// CLRB (0x94): clear byte
+let Defs = [PSW] in
+def CLRB : InstVAX<0x94, (outs),
+    (ins VAXMemOp:$dst),
+    "clrb\t$dst", []>;
+
+// CLRW (0xB4): clear word
+let Defs = [PSW] in
+def CLRW : InstVAX<0xB4, (outs),
+    (ins VAXMemOp:$dst),
+    "clrw\t$dst", []>;
+
+// CLRQ (0x7C): clear quadword
+let Defs = [PSW] in
+def CLRQ : InstVAX<0x7C, (outs),
+    (ins VAXMemOp:$dst),
+    "clrq\t$dst", []>;
+
 } // let HasMemOp = 1
 
 // Atomic load/store for i8/i16 (after all instruction defs).
