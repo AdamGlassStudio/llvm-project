@@ -1087,6 +1087,48 @@ def SOBGTR : InstVAX<0xF5, (outs),
 
 } // let HasMemOp = 1
 
+// Assembly-only MemOp forms of 2-operand instructions (for hand-written .S).
+// These allow memory operands in positions that codegen uses registers.
+let HasMemOp = 1 in {
+
+// SUBL2 with memory destination (e.g., subl2 %r0, 12(%ap) in memcpy.S)
+let Defs = [PSW] in
+def SUBL2 : InstVAX<0xC2, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "subl2\t$src, $dst", []>;
+
+// ADDL2 with memory operands
+let Defs = [PSW] in
+def ADDL2 : InstVAX<0xC0, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "addl2\t$src, $dst", []>;
+
+// DECW (0xB7): decrement word
+let Defs = [PSW] in
+def DECW : InstVAX<0xB7, (outs),
+    (ins VAXMemOp:$dst),
+    "decw\t$dst", []>;
+
+// DECB (0x97): decrement byte
+let Defs = [PSW] in
+def DECB : InstVAX<0x97, (outs),
+    (ins VAXMemOp:$dst),
+    "decb\t$dst", []>;
+
+// INCW (0xB6): increment word
+let Defs = [PSW] in
+def INCW : InstVAX<0xB6, (outs),
+    (ins VAXMemOp:$dst),
+    "incw\t$dst", []>;
+
+// INCB (0x96): increment byte
+let Defs = [PSW] in
+def INCB : InstVAX<0x96, (outs),
+    (ins VAXMemOp:$dst),
+    "incb\t$dst", []>;
+
+} // let HasMemOp = 1
+
 // Atomic load/store for i8/i16 (after all instruction defs).
 def : Pat<(atomic_load_8  VAXMem:$src), (MOVZBL_rm VAXMemOp:$src)>;
 def : Pat<(atomic_load_16 VAXMem:$src), (MOVZWL_rm VAXMemOp:$src)>;
