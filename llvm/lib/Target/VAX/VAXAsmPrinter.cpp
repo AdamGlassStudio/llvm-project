@@ -469,10 +469,11 @@ void VAXAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
     OS << '$' << MO.getImm();
     break;
   case MachineOperand::MO_GlobalAddress:
+    OS << '$';
     PrintSymbolOperand(MO, OS);
     break;
   case MachineOperand::MO_ExternalSymbol:
-    OS << *GetExternalSymbolSymbol(MO.getSymbolName());
+    OS << '$' << *GetExternalSymbolSymbol(MO.getSymbolName());
     break;
   case MachineOperand::MO_MachineBasicBlock:
     MO.getMBB()->getSymbol()->print(OS, MAI);
@@ -494,12 +495,20 @@ bool VAXAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
 bool VAXAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
                                            const char *ExtraCode,
                                            raw_ostream &OS) {
-  const MachineOperand &MO = MI->getOperand(OpNo);
-  if (MO.isReg()) {
-    OS << "(" << VAXInstPrinter::getRegisterName(MO.getReg()) << ")";
-    return false;
-  }
-  return true;
+  // Inline asm memory operands use the same 4-tuple format as regular
+  // instructions: (base, disp, index, flags).
+  const MachineOperand &Base = MI->getOperand(OpNo);
+  if (!Base.isReg())
+    return true;
+
+  int64_t Disp = 0;
+  if (OpNo + 1 < MI->getNumOperands() && MI->getOperand(OpNo + 1).isImm())
+    Disp = MI->getOperand(OpNo + 1).getImm();
+
+  if (Disp != 0)
+    OS << Disp;
+  OS << "(" << VAXInstPrinter::getRegisterName(Base.getReg()) << ")";
+  return false;
 }
 
 // Force static initialization.

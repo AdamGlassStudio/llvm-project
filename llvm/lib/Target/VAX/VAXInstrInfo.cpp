@@ -26,8 +26,9 @@ void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 Register SrcReg, bool KillSrc,
                                 bool RenamableDst, bool RenamableSrc) const {
   if (VAX::QPRRegClass.contains(DstReg, SrcReg)) {
-    // 64-bit register pair copy via MOVD.
-    BuildMI(MBB, MI, DL, get(VAX::MOVD_rr), DstReg)
+    // 64-bit register pair copy via MOVQ (not MOVD — MOVD validates float
+    // format and faults on reserved operand patterns in integer data).
+    BuildMI(MBB, MI, DL, get(VAX::MOVQ_rr), DstReg)
         .addReg(SrcReg, getKillRegState(KillSrc));
     return;
   }
@@ -44,7 +45,7 @@ void VAXInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         Register VReg,
                                         MachineInstr::MIFlag Flags) const {
   DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
-  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVD_mr : VAX::MOVL_mr;
+  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVQ_mr : VAX::MOVL_mr;
   BuildMI(MBB, MI, DL, get(Opc))
       .addReg(SrcReg, getKillRegState(isKill))
       .addFrameIndex(FrameIndex)
@@ -60,7 +61,7 @@ void VAXInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
                                          Register VReg, unsigned SubReg,
                                          MachineInstr::MIFlag Flags) const {
   DebugLoc DL = MI != MBB.end() ? MI->getDebugLoc() : DebugLoc();
-  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVD_rm : VAX::MOVL_rm;
+  unsigned Opc = (RC == &VAX::QPRRegClass) ? VAX::MOVQ_rm : VAX::MOVL_rm;
   BuildMI(MBB, MI, DL, get(Opc), DstReg)
       .addFrameIndex(FrameIndex)
       .addImm(0)
