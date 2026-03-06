@@ -176,6 +176,85 @@ multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
       [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>;
 }
 
+// Multiclass for 2-operand ALU: dst OP= src. Used by all xyzL2 instructions.
+multiclass VAXAlu2<bits<16> opc, string mn> {
+  def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+  def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+}
+
+// Multiclass for zero-extending loads: MOVZBL, MOVZWL.
+multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload> {
+  let HasMemOp = 1 in {
+  def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+      mn # "\t$src, $dst",
+      [(set GPRnoPC:$dst, (zload VAXMem:$src))]>;
+  def _rm_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+      mn # "\t$src, $dst",
+      [(set GPRnoPC:$dst, (eload VAXMem:$src))]>;
+  }
+  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+      mn # "\t$sym, $dst",
+      [(set GPRnoPC:$dst, (zload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+  def _rg_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+      mn # "\t$sym, $dst",
+      [(set GPRnoPC:$dst, (eload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+}
+
+// Multiclass for sign-extending conversions: CVTBL, CVTWL.
+multiclass VAXSextConv<bits<16> opc, string mn, PatFrag sload, ValueType subvt> {
+  let HasMemOp = 1 in
+  def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+      mn # "\t$src, $dst",
+      [(set GPRnoPC:$dst, (sload VAXMem:$src))]>;
+  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+      mn # "\t$sym, $dst",
+      [(set GPRnoPC:$dst, (sload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+  def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+      mn # "\t$src, $dst",
+      [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, subvt))]>;
+}
+
+// Multiclass for truncating stores: MOVB, MOVW.
+multiclass VAXTruncStore<bits<16> opc, string mn, PatFrag tstore> {
+  let HasMemOp = 1 in
+  def _mr : InstVAX<opc, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
+      mn # "\t$src, $dst",
+      [(tstore GPRnoPC:$src, VAXMem:$dst)]>;
+  def _mg : InstVAX<opc, (outs), (ins GPRnoPC:$src, i32imm:$sym),
+      mn # "\t$src, $sym",
+      [(tstore GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+}
+
+// Multiclass for FP data moves (load/store/copy variants).
+multiclass VAXFpMov<bits<16> opc, string mn, RegisterClass RC,
+                    ValueType VT, Operand MemOp> {
+  let HasMemOp = 1 in
+  def _rm : InstVAX<opc, (outs RC:$dst), (ins MemOp:$src),
+      mn # "\t$src, $dst",
+      [(set RC:$dst, (VT (load VAXMem:$src)))]>;
+  def _rcp : InstVAX<opc, (outs RC:$dst), (ins i32imm:$sym),
+      mn # "\t$sym, $dst",
+      [(set RC:$dst, (VT (load (vax_pcrelwrapper tconstpool:$sym))))]>;
+  def _rga : InstVAX<opc, (outs RC:$dst), (ins i32imm:$sym),
+      mn # "\t$sym, $dst",
+      [(set RC:$dst, (VT (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
+  let HasMemOp = 1 in
+  def _mr : InstVAX<opc, (outs), (ins RC:$src, MemOp:$dst),
+      mn # "\t$src, $dst",
+      [(store (VT RC:$src), VAXMem:$dst)]>;
+  def _mga : InstVAX<opc, (outs), (ins RC:$src, i32imm:$sym),
+      mn # "\t$src, $sym",
+      [(store (VT RC:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
+  def _rr : InstVAX<opc, (outs RC:$dst), (ins RC:$src),
+      mn # "\t$src, $dst", []>;
+}
+
 // All integer ALU instructions set PSW condition codes.
 let Defs = [PSW] in {
 defm ADDL3 : VAXAlu3_comm<0xC1, "addl3", add>;
@@ -225,21 +304,7 @@ def BICL3_ri : InstVAX<0xCB, (outs GPRnoPC:$dst),
     [(set GPRnoPC:$dst, (vax_bicl (i32 imm:$mask), GPRnoPC:$src))]>;
 
 // MOVZBL — zero-extend byte to longword.
-// Handles both zextloadi8 (explicit zero-ext) and extloadi8 (anyext, upper bits defined as 0).
-let HasMemOp = 1 in {
-def MOVZBL_rm : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "movzbl\t$src, $dst",
-    [(set GPRnoPC:$dst, (zextloadi8 VAXMem:$src))]>;
-def MOVZBL_rm_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "movzbl\t$src, $dst",
-    [(set GPRnoPC:$dst, (extloadi8 VAXMem:$src))]>;
-}
-def MOVZBL_rg : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "movzbl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (zextloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-def MOVZBL_rg_e : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "movzbl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (extloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8>;
 } // let Defs = [PSW] — end of integer ALU + MOVZBL block
 
 //===----------------------------------------------------------------------===//
@@ -393,64 +458,19 @@ let Defs = [PSW] in {
 
 // CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
 // source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
-let HasMemOp = 1 in
-def CVTBL_rm : InstVAX<0x98, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "cvtbl\t$src, $dst",
-    [(set GPRnoPC:$dst, (sextloadi8 VAXMem:$src))]>;
-def CVTBL_rg : InstVAX<0x98, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "cvtbl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (sextloadi8 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-// Register source: interprets low byte of $src as signed byte, extends to long.
-def CVTBL_rr : InstVAX<0x98, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
-    "cvtbl\t$src, $dst",
-    [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, i8))]>;
+defm CVTBL : VAXSextConv<0x98, "cvtbl", sextloadi8, i8>;
 
 // MOVZWL (0x3C) — Move Zero-Extended Word to Longword.
-// Covers zextloadi16 and extloadi16 (anyext is fine with zero-extension).
-let HasMemOp = 1 in {
-def MOVZWL_rm : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "movzwl\t$src, $dst",
-    [(set GPRnoPC:$dst, (zextloadi16 VAXMem:$src))]>;
-def MOVZWL_rm_e : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "movzwl\t$src, $dst",
-    [(set GPRnoPC:$dst, (extloadi16 VAXMem:$src))]>;
-}
-def MOVZWL_rg : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "movzwl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (zextloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-def MOVZWL_rg_e : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "movzwl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (extloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+defm MOVZWL : VAXMovZext<0x3C, "movzwl", zextloadi16, extloadi16>;
 
 // CVTWL (0x32) — Convert Word to Longword: sign-extends low 16 bits.
-let HasMemOp = 1 in
-def CVTWL_rm : InstVAX<0x32, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "cvtwl\t$src, $dst",
-    [(set GPRnoPC:$dst, (sextloadi16 VAXMem:$src))]>;
-def CVTWL_rg : InstVAX<0x32, (outs GPRnoPC:$dst), (ins i32imm:$sym),
-    "cvtwl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (sextloadi16 (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-def CVTWL_rr : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
-    "cvtwl\t$src, $dst",
-    [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, i16))]>;
+defm CVTWL : VAXSextConv<0x32, "cvtwl", sextloadi16, i16>;
 
 // MOVB (0x90) — Move Byte: used for truncating stores of i32 to i8 memory.
-let HasMemOp = 1 in
-def MOVB_mr : InstVAX<0x90, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
-    "movb\t$src, $dst",
-    [(truncstorei8 GPRnoPC:$src, VAXMem:$dst)]>;
-def MOVB_mg : InstVAX<0x90, (outs), (ins GPRnoPC:$src, i32imm:$sym),
-    "movb\t$src, $sym",
-    [(truncstorei8 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+defm MOVB : VAXTruncStore<0x90, "movb", truncstorei8>;
 
 // MOVW (0xB0) — Move Word: used for truncating stores of i32 to i16 memory.
-let HasMemOp = 1 in
-def MOVW_mr : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
-    "movw\t$src, $dst",
-    [(truncstorei16 GPRnoPC:$src, VAXMem:$dst)]>;
-def MOVW_mg : InstVAX<0xB0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
-    "movw\t$src, $sym",
-    [(truncstorei16 GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+defm MOVW : VAXTruncStore<0xB0, "movw", truncstorei16>;
 } // let Defs = [PSW] — end of Phase 7 conversion/move block
 
 // LEA_FI — materialize frame slot address as a register value.
@@ -549,60 +569,14 @@ def ADJCALLSTACKUP : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
     "#ADJCALLSTACKUP", [(callseq_end timm:$amt1, timm:$amt2)]>;
 }
 
-// SUBL2_ri — subl2 $imm, $dst  (dst -= imm)  opcode 0xC2
+// 2-operand ALU instructions: dst OP= src. Used by frame lowering and peephole.
 let Defs = [PSW] in {
-def SUBL2_ri : InstVAX<0xC2, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
-    "subl2\t$imm, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-
-// ADDL2_ri — addl2 $imm, $dst  (dst += imm)  opcode 0xC0
-def ADDL2_ri : InstVAX<0xC0, (outs GPRnoPC:$dst), (ins i32imm:$imm, GPRnoPC:$src),
-    "addl2\t$imm, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-
-// 2-operand register-register forms: opl2 src, dst → dst OP= src
-def ADDL2_rr : InstVAX<0xC0, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "addl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def SUBL2_rr : InstVAX<0xC2, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "subl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def MULL2_rr : InstVAX<0xC4, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "mull2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def MULL2_ri : InstVAX<0xC4, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-    "mull2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def BISL2_rr : InstVAX<0xC8, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "bisl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def BISL2_ri : InstVAX<0xC8, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-    "bisl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def XORL2_rr : InstVAX<0xCC, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "xorl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def XORL2_ri : InstVAX<0xCC, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-    "xorl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def BICL2_rr : InstVAX<0xCA, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-    "bicl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
-def BICL2_ri : InstVAX<0xCA, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-    "bicl2\t$s, $dst", []> {
-  let Constraints = "$src = $dst";
-}
+defm ADDL2 : VAXAlu2<0xC0, "addl2">;
+defm SUBL2 : VAXAlu2<0xC2, "subl2">;
+defm MULL2 : VAXAlu2<0xC4, "mull2">;
+defm BISL2 : VAXAlu2<0xC8, "bisl2">;
+defm BICL2 : VAXAlu2<0xCA, "bicl2">;
+defm XORL2 : VAXAlu2<0xCC, "xorl2">;
 } // let Defs = [PSW]
 
 // PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
@@ -775,29 +749,8 @@ def VAXFMemOp : Operand<iPTR> {
 
 // All F_float data instructions set PSW condition codes.
 let Defs = [PSW] in {
-// MOVL for f32: load/store (reuse i32 move opcode, different type).
-let HasMemOp = 1 in
-def MOVF_rm : InstVAX<0x50, (outs GPRI:$dst), (ins VAXFMemOp:$src),
-    "movf\t$src, $dst",
-    [(set GPRI:$dst, (f32 (load VAXMem:$src)))]>;
-// f32 load from constant pool
-def MOVF_rcp : InstVAX<0x50, (outs GPRI:$dst), (ins i32imm:$sym),
-    "movf\t$sym, $dst",
-    [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
-// f32 load from global address
-def MOVF_rga : InstVAX<0x50, (outs GPRI:$dst), (ins i32imm:$sym),
-    "movf\t$sym, $dst",
-    [(set GPRI:$dst, (f32 (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
-let HasMemOp = 1 in
-def MOVF_mr : InstVAX<0x50, (outs), (ins GPRI:$src, VAXFMemOp:$dst),
-    "movf\t$src, $dst",
-    [(store (f32 GPRI:$src), VAXMem:$dst)]>;
-// f32 store to global address
-def MOVF_mga : InstVAX<0x50, (outs), (ins GPRI:$src, i32imm:$sym),
-    "movf\t$src, $sym",
-    [(store (f32 GPRI:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
-def MOVF_rr : InstVAX<0x50, (outs GPRI:$dst), (ins GPRI:$src),
-    "movf\t$src, $dst", []>;
+// MOVF (0x50) — F_float data moves (load/store/copy).
+defm MOVF : VAXFpMov<0x50, "movf", GPRI, f32, VAXFMemOp>;
 
 // ADDF3 (0x41) — Add F_float: dst = src1 + src2.
 def ADDF3_rr : InstVAX<0x41, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
@@ -865,29 +818,8 @@ def VAXDMemOp : Operand<iPTR> {
 
 // All D_float data instructions set PSW condition codes.
 let Defs = [PSW] in {
-// MOVD (0x70) — Move D_float (64-bit) using register pairs.
-let HasMemOp = 1 in
-def MOVD_rm : InstVAX<0x70, (outs QPR:$dst), (ins VAXDMemOp:$src),
-    "movd\t$src, $dst",
-    [(set QPR:$dst, (f64 (load VAXMem:$src)))]>;
-// f64 load from constant pool
-def MOVD_rcp : InstVAX<0x70, (outs QPR:$dst), (ins i32imm:$sym),
-    "movd\t$sym, $dst",
-    [(set QPR:$dst, (f64 (load (vax_pcrelwrapper tconstpool:$sym))))]>;
-// f64 load from global address
-def MOVD_rga : InstVAX<0x70, (outs QPR:$dst), (ins i32imm:$sym),
-    "movd\t$sym, $dst",
-    [(set QPR:$dst, (f64 (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
-let HasMemOp = 1 in
-def MOVD_mr : InstVAX<0x70, (outs), (ins QPR:$src, VAXDMemOp:$dst),
-    "movd\t$src, $dst",
-    [(store (f64 QPR:$src), VAXMem:$dst)]>;
-// f64 store to global address
-def MOVD_mga : InstVAX<0x70, (outs), (ins QPR:$src, i32imm:$sym),
-    "movd\t$src, $sym",
-    [(store (f64 QPR:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
-def MOVD_rr : InstVAX<0x70, (outs QPR:$dst), (ins QPR:$src),
-    "movd\t$src, $dst", []>;
+// MOVD (0x70) — D_float data moves (load/store/copy) using register pairs.
+defm MOVD : VAXFpMov<0x70, "movd", QPR, f64, VAXDMemOp>;
 
 // ADDD3 (0x61) — Add D_float: dst = src1 + src2.
 def ADDD3_rr : InstVAX<0x61, (outs QPR:$dst), (ins QPR:$a, QPR:$b),
