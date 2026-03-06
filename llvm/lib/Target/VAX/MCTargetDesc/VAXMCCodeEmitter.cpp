@@ -256,7 +256,14 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
       return;
     }
     if (Disp.isExpr()) {
-      emitExprOperand(Disp.getExpr(), CB, Fixups, StartByte);
+      // Immediate mode with expression: 0x8F + absolute 4-byte value.
+      // This is NOT PC-relative — the value IS the symbol address.
+      CB.push_back(static_cast<char>(0x8F));
+      unsigned FixOff = CB.size() - StartByte;
+      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
+                                       MCFixupKind(FK_Data_4),
+                                       /*IsPCRel=*/false));
       return;
     }
     emitImmOperand(0, 4, CB);

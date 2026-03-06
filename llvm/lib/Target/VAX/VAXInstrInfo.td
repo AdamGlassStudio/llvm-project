@@ -1063,10 +1063,23 @@ def MOVAQ : InstVAX<0x7E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movaq\t$src, $dst", []>;
 
-// MOVQ (0x7D): move quadword. src.rq, dst.wq
+// MOVQ (0x7D): move quadword (64-bit integer, no float validation).
+// Unlike MOVD, MOVQ does NOT check for reserved floating-point operands.
+// Use MOVQ for i64 data and register spills; MOVD only for actual f64 values.
 let HasMemOp = 1 in
 def MOVQ : InstVAX<0x7D, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "movq\t$src, $dst", []>;
+// MOVQ register-register (QPR copy for i64 / register allocation).
+def MOVQ_rr : InstVAX<0x7D, (outs QPR:$dst), (ins QPR:$src),
+    "movq\t$src, $dst", []>;
+// MOVQ register-from-memory (QPR reload from stack slot).
+let HasMemOp = 1 in
+def MOVQ_rm : InstVAX<0x7D, (outs QPR:$dst), (ins VAXDMemOp:$src),
+    "movq\t$src, $dst", []>;
+// MOVQ memory-from-register (QPR spill to stack slot).
+let HasMemOp = 1 in
+def MOVQ_mr : InstVAX<0x7D, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     "movq\t$src, $dst", []>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
@@ -1180,6 +1193,18 @@ let Defs = [PSW] in
 def CLRQ : InstVAX<0x7C, (outs),
     (ins VAXMemOp:$dst),
     "clrq\t$dst", []>;
+
+// EMUL (0x7A): extended multiply with MemOp (used by GMP inline asm)
+let Defs = [PSW] in
+def EMUL_m : InstVAX<0x7A, (outs),
+    (ins VAXMemOp:$mulr, VAXMemOp:$muld, VAXMemOp:$add, VAXMemOp:$dst),
+    "emul\t$mulr, $muld, $add, $dst", []>;
+
+// EDIV (0x7B): extended divide with MemOp
+let Defs = [PSW] in
+def EDIV_m : InstVAX<0x7B, (outs),
+    (ins VAXMemOp:$divisor, VAXMemOp:$dividend, VAXMemOp:$quo, VAXMemOp:$rem),
+    "ediv\t$divisor, $dividend, $quo, $rem", []>;
 
 } // let HasMemOp = 1
 
