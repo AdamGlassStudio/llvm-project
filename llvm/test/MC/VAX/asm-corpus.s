@@ -1,0 +1,708 @@
+# RUN: llvm-mc -triple=vax-unknown-netbsdelf -filetype=obj %s -o %t.o
+#
+# Unified VAX assembly corpus — instructions llvm-mc accepts.
+# Derived from real NetBSD/vax assembly and synthetic torture patterns.
+# 691 instructions, randomized order.
+#
+# Validates that the VAX MC layer assembles all listed instruction
+# forms without error. The RUN line exits non-zero on any failure.
+
+.text
+sym1:
+sym2:
+sym_args:
+.long 0
+
+	divl2	%r2,%r0
+	addl3	$1,$2,%r0
+	movl	(%r1), %ap
+	movzbl	(%r3)+,%r7
+	addl2	$16,%sp
+	movab	sym1,%r0
+	ashl	$1,%r0,(%r1)
+	movl	-(%r1),%r0
+	movzwl	%r0,%r1
+	addl2	$64,%r0
+	movl	%r11,%r11
+	bisl2	%r0,%r0
+	movl	128(%r0),%r1
+	movzwl	4(%ap),%r0
+	addl2	%r2,%r0
+	movl	sym1+4(%r0),%r1
+	clrq	%r0
+	movl	4(%r10),%r0
+	mtpr	%r0,$0x12
+	addl2	(%r0)[%r1],%r2
+	subd3	%r0,%r2,%r4
+	cmpl	4(%r0),$1
+	movl	cs1(%r2),%r1
+	mtpr	cs1(%r3),$cs2
+	addl2	(%r3)+,%r4
+	addl3	4(%r0),8(%r1),%r2
+	movl	256(%r0)[%r1],%r2
+	movq	$0,%r0
+	mull2	%r0,%r1
+	addl2	256(%r1),%r0
+	cmpl	$-1,$1
+	movpsl	-(%sp)
+	movq	68(%ap), (%ap)
+	mull3	$2,%r0,%r1
+	addl2	sym1,%r0
+	incb	%r0
+	mtpr	%r0,$0x3f
+	movzwl	(%r3)+,%r7
+	mull3	%r10, %r11, %r7
+	addl3	$1,4(%ap),%r0
+	movl	$-1,%r9
+	rotl	$-8,%r0,%r1
+	mull2	$10,%r0
+	pushab	sym2
+	addl3	%fp,$28,16(%r0)
+	movl	-200(%fp),%r4
+	subl3	%r5,%r6,%r7
+	pushab	4(%r0)
+	pushl	$0
+	addl3	(%r0),$1,(%r1)
+	mull2	%r2,%r1
+	addl3	(%r0),%r1,(%r2)
+	divl3	%r2,%r0,%r1
+	addd3	%r0,%r2,%r4
+	movab	(%ap), %r7
+	addl3	$cs1, %r2, %r3
+	movc5	%r0, (%r1), $0, %r2, (%r3)
+	extzv	$0,$16,%r0,%r1
+	ediv	%r2,%r0,%r0,%r1
+	movab	-(%r0),%r1
+	bicl2	%r4,%r5
+	extzv	%r0,$8,(%r1),%r2
+	cmpl	4(%ap),%r2
+	addl2	(%r3),%r0
+	cvtdf	%r0,%r1
+	movd	sym1,%r0
+	bisl2	$0x100,%r0
+	cmpl	%r0,$1
+	movl	4(%r6),%r0
+	moval	(%r0)+,%r1
+	bisl2	$4,%r0
+	bisl2	$2,%r0
+	ashl	$0,%r0,%r1
+	movl	(%r0)[%r10],%r11
+	movl	65536(%r0),%r1
+	movab	4(%r0),%r1
+	incl	%r3
+	movaw	sym1,%r0
+	calls	$0, cs1
+	subl3	$1,%r0,%r1
+	movd	$0,%r0
+	movb	%r11,-(%r3)
+	emul	%r0,%r1,%r2,%r4
+	movl	$0x80000000,%r11
+	calls	$1,*4(%r0)
+	ffs	$0,$32,%r0,%r1
+	movq	(%r0),-(%sp)
+	movc3	%r0,(%r1),(%r3)
+	casel	%r0,$0,$7
+	casel	%r0,$0,$15
+	ashq	$1,%r0,%r2
+	extzv	$0,$1,%r0,%r1
+	ashl	$-16,%r0,%r1
+	subl3	%r0,%r1,%r2
+	mnegf	%r0,%r1
+	movc5	$0x0, 36(%ap), $0x0, $0x20	, 36(%ap)
+	clrl	%r2
+	addl2	$1,-(%sp)
+	cmpl	%r1,$16
+	tstl	%r4
+	insv	$12,$0,$4,(%r3)
+	movl	$cs1,cs2(%r3)
+	clrl	%r6
+	bicl3	$0x3ff,%r0,%r1
+	movq	%r8,%r10
+	movl	(%sp)+,%r1
+	addl3	sym1,%r0,%r1
+	mull3	$4,%r0,%r1
+	movf	$0,%r0
+	clrl	-(%sp)
+	calls	$6, (%r6)
+	addl2	$1,sym1
+	clrl	%r4
+	movzwl	$65535,%r0
+	movl	%r0,100000(%r1)
+	addl2	$255,%r0
+	movl	%r1,%r1
+	remque	*4(%r0),%r1
+	movl	$-128,%r10
+	cmpf	%r0,%r1
+	cmpd	%r0,%r2
+	calls	$0,(%r0)
+	movl	$127,%r4
+	moval	sym1,%r0
+	addl2	$-1,%r0
+	addl2	$64,%r2
+	movl	$0xfedcba98,%r0
+	cmpl	%r0,$0
+	bicl2	$0xff,%r0
+	cmpl	(%r0)+,(%r1)+
+	movl	120(%fp),%r0
+	addl2	4(%r1)[%r2],%r0
+	movl	%r4,%r4
+	addl2	%r3,%r4
+	movl	4(%r5),%r0
+	subl3	%r0,$10,%r9
+	movl	$63,%r2
+	ashl	%r9, $0x1, %r8
+	cmpl	%r0,sym1
+	clrl	%r3
+	incl	%r0
+	emul	$-1,%r0,$0,%r2
+	extzv	$1,$1,%r0,%r1
+	movf	%r0,(%r1)
+	subl3	4(%ap),%r5,(%r2)
+	cmpl	(%r0),sym1
+	cmpl	(%r0),(%r1)
+	mtpr	(%sp)+, $cs1
+	tstl	%r6
+	movl	%fp,%r1
+	addl3	(%r0),(%r1),(%r2)
+	cmpl	4(%ap),$-1
+	clrl	20(%sp)
+	addl3	$1,(%r0),%r1
+	movl	$63,%r0
+	ashl	$31,%r0,%r1
+	movl	%r0,%r0
+	ashl	%r0,%r1,%r2
+	cmpl	sym1,%r0
+	cmpl	sym1,$0
+	subl3	$0,%r0,%r1
+	cmpl	$0,%r0
+	xorl2	$1,%r6
+	addl3	(%r5), (%r3), %r9
+	cvtbl	4(%ap),%r0
+	bicl2	$0xffff0000,%r4
+	cvtfl	%r0,%r1
+	clrl	%r8
+	pushl	$1
+	movl	%r0,sym1
+	movl	%r0,(%r1)
+	clrl	8(%r0)
+	movl	*(%r4), %r0
+	calls	$0,sym1
+	clrq	20(%fp)
+	movl	$1,%r0
+	clrl	(%r0)[%r1]
+	cvtwl	%r0,%r1
+	movl	%r6,%r6
+	addf3	%r0,%r1,%r2
+	divd3	%r0,%r2,%r4
+	cmpl	%r3,20(%sp)
+	mfpr	$0x3f,%r0
+	clrb	%r1
+	movl	4(%r9),%r0
+	ashl	$3,%r0,%r1
+	movl	(%r0)[%r2],%r3
+	movl	12(%ap),%r2
+	ediv	$10,%r0,%r2,%r3
+	cmpl	(%r3),%r2
+	movl	65536(%r1),%r0
+	movc5	$0,(%r0),$0,%r0,(%r1)
+	mtpr	%r0,$0x10
+	insv	$1,$0,$1,(%r0)
+	movl	*$0x20000000,%r0
+	movl	32000(%r0),%r1
+	emul	$0,%r0,$0,%r2
+	cmpl	4(%r0),8(%r1)
+	emul	$10,%r0,$5,%r2
+	addl3	$sym1,%r0,%r1
+	movl	$256,%r6
+	addl2	200000(%r2),%r3
+	movl	0(%r0),%r1
+	movl	4(%r1),%r0
+	extzv	$0,$1,(%r0),%r1
+	bisl2	$0xffffffff,%r0
+	bicl2	$0xff00,%r0
+	ashl	$1,(%r0),(%r1)
+	movl	(%r0)[%r6],%r7
+	addl3	sym1,sym2,%r0
+	movl	4(%ap),%r0
+	addl3	4(%r0),8(%r1),12(%r2)
+	extzv	$0,$8,(%r0),%r1
+	cvtwl	(%r3),%r4
+	cvtlf	%r0,%r1
+	cmpl	%r0,$64
+	mcoml	%r0,%r1
+	movl	%r0,*$0x20000004
+	locc	$0x0a,$100,(%r0)
+	mfpr	$17,%r7
+	cmpl	%r1,%r3
+	divf3	%r0,%r1,%r2
+	movl	(%fp),%r1
+	movl	$-1,%r0
+	movf	sym1,%r0
+	cmpl	%r0,%r1
+	movab	cs1(%r0),cs2(%r0)
+	ashl	$-1,%r0,%r1
+	movl	sym1+4,%r0
+	ediv	$100,%r0,%r2,%r3
+	ashq	%r4,%r0,%r2
+	movl	4(%r0),%r1
+	cvtwl	(%r0),%r1
+	movl	16(%ap),%r3
+	movc3	%r2,(%r1),(%r3)
+	clrl	%r9
+	movpsl	4(%sp)
+	emul	$1,%r0,$0,%r2
+	cmpl	cs1,$cs2
+	movl	%r5,%r5
+	movab	68(%ap), -(%sp)
+	movb	%r0,(%r1)
+	subf3	%r0,%r1,%r2
+	movc5	$0,(%r3),%r1,%r2,(%r3)
+	movq	%r6,%r8
+	addl3	%r0,(%r1),%r2
+	insv	%r0,$24,$3,cs1(%r3)
+	rotl	$24,%r0,%r1
+	cvtwl	4(%ap),%r0
+	movl	%r0,%r1
+	addl3	%r11,%r10,%r2
+	extzv	$0x7, $0x8, (%r0), (%r2)
+	scanc	%r0,(%r1),(%r2),$0xff
+	cvtbl	%r0,%r1
+	clrq	%r2
+	locc	$0,%r0,(%r1)
+	extzv	$0,$32,(%r0),%r1
+	addl2	(%r1),%r0
+	clrl	%r7
+	movzbl	4(%ap),%r0
+	cmpl	%r0,$0xdeadbeef
+	addl3	%r0,%r1,%r2
+	mnegd	%r0,%r2
+	mfpr	$cs1,cs2(%r0)
+	ffs	$0,$32,(%r0),%r1
+	movl	%r0,-4(%fp)
+	movzbl	(%r0)+,%r1
+	xorl2	%r7, %r6
+	moval	cs1, %r1
+	movq	%r4,%r6
+	tstd	%r0
+1:
+	mtpr	$0x1f,$0x12
+	insque	(%r0),*4(%r1)
+	addl2	$1,(%r0)[%r1]
+	movab	*4(%r0),%r1
+	ashl	$0x1e, $0x1, %r8
+	bisl2	$0x10000,%r0
+	subl2	%r0,%r0
+	muld3	%r0,%r2,%r4
+	ediv	$2,%r0,%r2,%r3
+	insv	%r0,$0,$16,%r1
+	addl2	$0x200,%r5
+	movab	cs1,cs2(%r3)
+	insv	%r0,$0,$32,(%r1)
+	moval	(%r0),%r1
+	cmpl	$16,%r4
+	mtpr	%r0,$0x11
+	clrl	%r1
+	extzv	$8,$8,%r0,%r1
+	movl	65536(%r0)[%r1],%r2
+	extzv	$16,$16,%r0,%r1
+	movl	%fp, 0xf0000
+	addl2	2048(%r2),%r3
+	addl3	$cs1, cs2(%r3), %r4
+	insv	32(%sp),$4,$4,(%r6)
+	mull2	%r0,%r0
+	decb	%r1
+	extzv	$0,$16,(%r0),%r1
+	movl	sym1(%r0)[%r1],%r2
+	bicl2	$0xffff,%r0
+	insv	%r0,$0,$8,4(%r1)
+	moval	4(%r0),%r1
+	movl	%r2,%r2
+	cmpl	$0,$1
+	divl3	%r0,%r1,%r2
+	ashl	$8,%r0,%r1
+	cmpl	%r8,%r9
+	clrl	%r5
+	sbwc	%r0,%r1
+	movl	32768(%r0),%r1
+	moval	32(%fp),16(%r0)
+	movf	4(%ap),%r0
+	rotl	%r0,%r1,%r2
+	adwc	$0,%r4
+	rotl	$0,%r0,%r1
+	movd	$1,%r0
+	movab	-16(%sp),%sp
+	movd	%r9, %r0
+	movl	%r9,%r9
+	addl2	%r0,%r0
+	movab	(%r0),%r1
+	cmpl	%r0,$0x80000000
+	pushal	4(%r0)
+	addl2	$0x7fffffff,%r0
+	addl2	$63,%r0
+	insv	%r0,$0,$16,(%r1)
+	movl	4(%sp),%r0
+	mull3	$10,%r0,%r1
+	emul	$10,%r0,$0,%r2
+	cvtld	%r0,%r2
+	extzv	$7,$1,%r0,%r1
+	addl3	(%r7), %r7, %r6
+	movl	*4(%r0)[%r1],%r2
+	bicl2	$0xffff0000,%r0
+	movc3	$4,4(%ap),(%r0)
+	movl	(%r1),%r0
+	incw	%r0
+	cmpl	$1,$0
+	clrl	%r0
+	movq	%r6,-(%sp)
+	subl2	(%sp)+,%r0
+	moval	(%fp)[%r2],%r0
+	movl	$1,%r1
+	bisl2	$0x10,%r0
+	insv	%r0,$0,$8,%r1
+	movw	%r0,%r1
+	movl	%r0,512(%r1)
+	extzv	$31,$1,%r0,%r1
+	movab	cs1, %r1
+	movl	%r3,%r3
+	movl	-4(%fp),%r0
+	ashq	$32,%r0,%r2
+	ediv	$-1,%r0,%r2,%r3
+	ashl	$2,%r0,%r1
+	addl2	$1,4(%r0)
+	extzv	$0,$32,%r0,%r1
+	subl3	(%r0),(%r1),%r2
+	movl	$cs1, (%r4)
+	movd	%r0,(%r2)
+	movl	%ap,%ap
+	movl	$sym1,%r0
+	subl3	(%r0),%r1,(%r2)
+	ediv	$7,%r0,%r2,%r3
+	extzv	$8,$8,(%r0),%r1
+	movl	cs1[%r10],%r10
+	nop
+	skpc	$0x20,%r0,(%r1)
+	cvtfd	%r0,%r2
+	bisl2	$1,%r0
+	ashl	$-1,%r11,%r11
+	bicl3	%r0,%r1,%r2
+	clrb	-(%r6)
+	addl2	4(%ap),%r0
+	clrw	%r1
+	movb	%r0,-(%r1)
+	movl	$0, 4(%sp)
+	addl3	4(%ap),%r0,%r1
+	movl	%r1,%r0
+	movl	$0,4(%r0)
+	movl	%r1,-8(%fp)
+	movl	%r3,32(%sp)
+	movl	$0x12345678,%r0
+	movl	-128(%fp),%r0
+	movl	*(%r1)+,%r0
+	addl3	(%r0),%r1,%r2
+	movl	$64,%r0
+	movl	8(%ap),%r1
+	movl	%r0,4(%fp)
+	movl	$0,%r0
+	insv	%r0,$0,$8,(%r1)
+	movf	%r0,%r1
+	movl	$-1,(%r0)
+	movl	-129(%r0),%r1
+	bicl2	%r0,%r1
+	ret
+	addl2	4(%r0),%r1
+	bisl2	$8,%r0
+	movl	$1,sym1
+	movc5	$0,(%r0),$0,$100,(%r1)
+	movl	(%ap),%r0
+	movl	%sp,cs1
+	emul	%r0,%r1,$0,%r2
+	movl	(%r0)+[%r1],%r2
+	movl	(%r0)+,%r1
+	movl	%fp,%fp
+	insv	(%sp),$0,$4,48(%sp)
+	moval	(%r0)[%r1],%r2
+	movl	%sp,%fp
+	mull2	%r10,%r11
+	xorl3	$0xffffffff,%r0,%r1
+	addl2	$63,%r1
+	ashq	$-1,%r0,%r2
+	cmpl	(%sp), $cs1
+	addl3	%r0,%r1,4(%r2)
+	rotl	$-16,%r0,%r1
+	subl2	$16,%sp
+	movl	(%r0)[%r1],%r2
+	movl	-32769(%r0),%r1
+	ffs	$0, $0x20, %r2, %r3
+	insv	%r2,$7,$8,%r0
+	mtpr	$0,$0x12
+	movzbl	%r0,%r1
+	rotl	$8,%r0,%r1
+	subl2	%r4,(%r5)
+	rotl	$16,%r0,%r1
+	xorl2	$0xffffffff,%r0
+	mnegl	%r0,%r0
+	addl3	$1,%r0,%r1
+	divl2	%r0,%r1
+	movl	(%r0),%r1
+	tstl	%r8
+	movl	(%sp)+, %fp
+	cmpl	4(%r0),4(%r1)
+	ashl	$0,%r0,%r0
+	addl2	$1,%r0
+	movl	-128(%r0),%r1
+	movl	%sp,%sp
+	cmpl	%r0,(%r1)
+	movl	127(%r0),%r1
+	movl	(%r0)[%r4],%r5
+	movl	$cs1, %sp
+	bisl3	%r0,%r1,%r2
+	movl	%r10,%r10
+	mnegl	%r6,%r7
+	movl	4(%r8),%r0
+	insv	%r9, $0x7, $0x8, 68(%ap)
+	movl	sym1(%r0),%r1
+	addl2	$24,(%sp)
+	movl	%r3,(%r0)[%r1]
+	addl2	%r7,%r4
+	movq	%r0,%r6
+	decw	%r1
+	ashl	$1,(%r0),%r1
+	movq	4(%ap),%r0
+	movl	%r7,%r7
+	extzv	$0,$4,%r0,%r10
+	bicl2	$0x7fffffff,%r0
+	movab	(%r0)+,%r1
+	insv	$1,$31,$1,%r0
+	addl2	(%sp)+,%r0
+	movl	$62,%r0
+	movl	$cs1, -(%sp)
+	decl	%r1
+	movf	$1,%r0
+	insv	%r0,$16,$16,(%r1)
+	clrl	(%r3)
+	movl	(%r0)[%r0],%r1
+	rei
+	movl	%r1, %r0
+	cmpl	%r0,$-1
+	movc5	$0,(%r3),$0,%r2,(%r3)
+	mnegl	%r0, %r0
+	cmpl	%r0,$63
+	movl	%r2, cs1(%r4)
+	clrl	cs1(%r0)
+	insv	%r0,$0,$1,%r1
+	bisl2	%r0,%r1
+	movl	cs1,%r11
+	addl2	%r0,%r1
+	cmpl	(%r0)[%r1],(%r2)[%r3]
+	clrl	%r10
+	mnegl	%r0,%r1
+	movl	0xf0000, %fp
+	movl	sym1,%r0
+	decw	%r0
+	ashl	%r2,%r0,%r1
+	movl	sym1[%r0],%r1
+	movl	sym1,sym2
+	movb	%r0,%r1
+	movc3	16(%ap),(%r1),(%r3)
+	movpsl	(%r0)
+	addl2	%r6,(%r2)
+	movq	%r0,%r2
+	movl	%r3, *(%r4)
+	movl	32767(%r0),%r1
+	movq	%r0,4(%fp)
+	movq	%r0,(%r2)
+	calls	$0,*4(%r0)
+	ediv	(%r0),%r2,%r4,%r5
+	insv	$4,$24,$3,cs1(%r4)
+	movl	4(%r0)[%r1],%r2
+	movq	(%r0),%r2
+	bisl2	%r2,%r3
+	extzv	$0x7, $0x9, 68(%ap), %r2
+	movq	16(%sp),-4(%r0)
+	movl	$0x7fffffff,%r8
+	movl	4(%r3),%r0
+	movab	(%r0)[%r1],%r2
+	addl2	(%r1)[%r2],%r0
+	addl3	cs1(%r2),%r0,%r3
+	insv	$0,$0,$1,(%r0)
+	movd	36(%ap), %r0
+	movl	(%sp)+,%r0
+	addl2	$-1,%r3
+	movzbl	(%r1),%r2
+	cmpl	(%r0),$0
+	movzbl	cs1(%r0), %r3
+	movl	%r1,-(%r2)
+	addl2	(%r1)+,%r0
+	movzwl	(%r0)+,%r1
+	addl2	$1,(%r0)
+	movl	*4(%r1),%r0
+	movzwl	16(%sp),%r0
+	mcoml	%r0,%r0
+	movd	4(%ap),%r0
+	extzv	$0,$8,%r0,%r1
+	movl	%r0,-(%sp)
+	bisl2	%r1,%r2
+	movc5	$0x0, (%ap), $0x0, $0x20	, (%ap)
+	clrl	(%r0)
+	movc3	$100,(%r0),(%r1)
+	clrl	%r11
+	mtpr	%r3, $cs1
+	movl	1(%r0),%r1
+	ashl	$16,%r0,%r1
+	addl2	%r1,%r0
+	ashl	$-24,%r0,%r1
+	cvtbl	(%sp),%r10
+	addl2	4(%r1),%r0
+	calls	$4,sym1
+	addl3	$4,%sp,%r0
+	movab	4(%sp),%fp
+	movl	256(%r1),%r0
+	addl2	(%r2),%r3
+	mull3	$16,%r0,%r1
+	mfpr	$0x12,%r0
+	mull3	$8,%r0,%r1
+	insque	(%r0),(%r1)
+	movl	4(%fp),%r0
+	cmpl	$0,$0
+	insv	%r0,$0,$32,%r1
+	cmpl	4(%ap),4(%fp)
+	pushab	sym1
+	movl	(%r0)[%r7],%r8
+	movl	4(%r11),%r0
+	addl2	$0,%r0
+	pushal	(%r0)
+	movl	4(%r4),%r0
+	addl3	$1,(%r0),(%r1)
+	pushl	$-1
+	movl	4(%r7),%r0
+	pushl	%r11
+	pushl	%r0
+	bisl2	$8,%r4
+	remque	(%r0),%r1
+	movl	(%r1)+,%r0
+	movl	(%sp),%r2
+	movl	$64,%r3
+	movaw	4(%r0),%r1
+	ffs	$0,$8,%r0,%r1
+	movw	%r0,(%r1)
+	rotl	$1,%r0,%r1
+	cvtbl	(%r0),%r1
+	calls	$1,sym1
+	movd	(%r0),%r2
+	ediv	$1,%r0,%r2,%r3
+	adwc	%r0,%r1
+	sbwc	$0,%r0
+	cmpl	4(%r0),$0x7fffffff
+	movl	4(%r2),%r0
+	addl2	(%r0)+,(%r1)+
+	addl2	$1,256(%r0)
+	movd	%r0, 68(%ap)
+	movl	(%r0)[%r5],%r6
+	subl2	$0xfffc,16(%ap)
+	movl	%r5,(%sp)
+	mtpr	4(%r0),$cs1
+	movl	%r8,%r8
+	subl2	$48,%r2
+	subl2	$4,%sp
+	movl	-32768(%r0),%r1
+	subl2	%r0,16(%ap)
+	ashl	$-8,%r0,%r1
+	movl	*4(%r0),%r1
+	movc3	%r0,(%r1),(%r2)
+	subl2	4(%ap), %r0
+	decl	%r0
+	movl	(%r0)[%r3],%r4
+	movl	sym1,(%r0)
+	subl3	$cs1, %r2, %r3
+	subl3	$cs1, $cs2, %r0
+	movl	$65535,%r7
+	subl3	%r0,%r1,$0
+	calls	$1,*cs1(%r6)
+	movl	*8(%ap),%r2
+	cmpl	(%r0),%r1
+	subl3	%r10,%r11,%r0
+	subl3	%r0,(%r1),%r2
+	movl	4(%ap), %r2
+	clrb	cs1(%r0)
+	movq	%r2,%r4
+	movl	%sp,%r2
+	movzwl	(%r0),%r1
+	subl3	(%r0),(%r1),(%r2)
+	movl	$255,%r5
+	movl	(%r0)[%r8],%r9
+	movl	4(%r1)[%r2],%r0
+	movc5	%r0,(%r1),$0,%r2,(%r3)
+	subl3	4(%r0),8(%r1),12(%r2)
+	movl	(%r0)[%r9],%r10
+	rotl	$-8, 4(%ap), %r0
+	tstl	%r10
+	tstl	%r1
+	insv	%r1,$0,$4,(%r3)
+	bicl2	$0xffff0000,%r1
+	clrq	(%r0)
+	tstl	%r3
+	ashl	$24,%r0,%r1
+	mfpr	$cs1, -(%sp)
+	movl	%r1,-4(%fp)
+	tstl	%r7
+	addl3	(%r0),4(%r1),%r2
+	movl	(%r1)[%r2],%r0
+	xorl2	%r0,%r0
+	cmpl	%r0,$0x7fffffff
+	movl	$0,(%r0)
+	movzbl	(%r3)[%r2],%r2
+	insv	%r0,$8,$8,(%r1)
+	xorl3	$0xffff,%r4,%r0
+	ashl	$-31,%r0,%r1
+	movl	*(%r0)+,%r1
+	movzbl	(%r0),%r1
+	pushab	(%r0)
+	bisl2	$0x80000000,%r0
+	movq	(%r0),(%r2)
+	mull3	%r0,%r1,%r2
+	tstl	%r9
+	emul	(%r0),%r1,$0,%r2
+	movl	1024(%fp),%r1
+	subl3	%r2,(%r3),%r0
+	halt
+	clrl	(%sp)
+	subl3	(%r0),%r1,%r2
+	subl3	4(%ap),8(%ap),%r0
+	ashl	$4,%r0,%r1
+	ashl	$1,%r0,%r1
+	insv	$0,$0,$1,%r1
+	pushl	sym1
+	subl3	%r0,%r1,(%r2)
+	subl3	%r2,4(%ap),%r0
+	clrl	(%r0)+
+	movb	%r1, %r0
+	tstf	%r0
+	movpsl	%r0
+	movl	$1,(%r0)
+	subl2	%r2,8(%r3)
+	movd	%r0,%r2
+	adwc	$0,%r0
+	tstl	%r11
+	tstl	%r0
+	tstl	%r5
+	mulf3	%r0,%r1,%r2
+	movf	(%r0),%r1
+	tstl	%r2
+	pushal	sym1
+	subl2	$0x80000000,%r0
+	cvtdl	%r0,%r1
+	subl2	%r0,%r1
+	ediv	%r0,%r2,%r4,%r5
+	ashl	$9,80(%r10),%r8
+	movb	%r11,(%r5)+
+	extzv	$0,$4,(%r3),%r2
+	movl	256(%ap),%r0
+	subl2	$32,%sp
+	mull3	$3,%r0,%r1
+	xorl2	%r0,%r1
+	movl	%ap,%r0
+	subl3	%r0,$1,%r1
+	rotl	$8,%r4,%r4
+	bicl2	$1,%r0
+	xorl3	%r0,%r1,%r2
+1:
