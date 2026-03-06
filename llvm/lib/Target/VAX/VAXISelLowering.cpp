@@ -606,28 +606,59 @@ SDValue VAXTargetLowering::LowerSMUL_LOHI(SDValue Op,
 }
 
 SDValue VAXTargetLowering::LowerUDIV(SDValue Op, SelectionDAG &DAG) const {
-  // udiv(a, b) → EDIV(b, a, 0).quotient
-  // Zero-extend dividend to 64-bit quadword for unsigned division.
+  // VAX EDIV is signed — it interprets the divisor as signed i32.
+  // Two cases for unsigned division:
+  //   1. divisor >= 2^31 (MSB set, signed negative): quotient is 0 or 1
+  //   2. divisor < 2^31 (positive): EDIV with zero-extended 64-bit dividend
+  //      Works because divisor>0 makes the 64-bit dividend positive regardless
+  //      of the 32-bit dividend's MSB. EDIV overflow stores truncated quotient
+  //      on all known VAX implementations, which is the correct unsigned answer.
+  // NOTE: We must NOT emit ISD::SDIV here — the DAGCombiner will convert
+  // sdiv-by-positive-constant back to udiv, creating an infinite loop.
   SDLoc DL(Op);
   SDValue Dividend = Op.getOperand(0);
   SDValue Divisor = Op.getOperand(1);
   SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
-  SDValue EDIV = DAG.getNode(VAXISD::EDIV, DL,
-                              DAG.getVTList(MVT::i32, MVT::i32),
-                              Divisor, Dividend, Zero);
-  return EDIV.getValue(0);
+
+  // Case 1: divisor >= 2^31 → result is (dividend >=u divisor) ? 1 : 0
+  SDValue One = DAG.getConstant(1, DL, MVT::i32);
+  SDValue BigDivisorResult =
+      DAG.getSelectCC(DL, Dividend, Divisor, One, Zero, ISD::SETUGE);
+
+  // Case 2: divisor < 2^31 → EDIV({dividend, 0}, divisor)
+  SDValue EdivResult = DAG.getNode(VAXISD::EDIV, DL,
+                                   DAG.getVTList(MVT::i32, MVT::i32),
+                                   Divisor, Dividend, Zero);
+
+  // Select based on divisor MSB (signed < 0 means MSB set)
+  return DAG.getSelectCC(DL, Divisor, Zero,
+                         BigDivisorResult, EdivResult.getValue(0), ISD::SETLT);
 }
 
 SDValue VAXTargetLowering::LowerUREM(SDValue Op, SelectionDAG &DAG) const {
-  // urem(a, b) → EDIV(b, a, 0).remainder
+  // Unsigned remainder — same 2-case split as LowerUDIV.
+  //   1. divisor >= 2^31: remainder is dividend (if < divisor) or dividend-divisor
+  //   2. divisor < 2^31: EDIV with zero-extended dividend, take remainder result
+  // NOTE: We must NOT emit ISD::SDIV here — see LowerUDIV comment.
   SDLoc DL(Op);
   SDValue Dividend = Op.getOperand(0);
   SDValue Divisor = Op.getOperand(1);
   SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
-  SDValue EDIV = DAG.getNode(VAXISD::EDIV, DL,
-                              DAG.getVTList(MVT::i32, MVT::i32),
-                              Divisor, Dividend, Zero);
-  return EDIV.getValue(1);
+
+  // Case 1: divisor >= 2^31 → remainder is dividend if dividend < divisor,
+  // else dividend - divisor.
+  SDValue Diff = DAG.getNode(ISD::SUB, DL, MVT::i32, Dividend, Divisor);
+  SDValue BigDivisorResult =
+      DAG.getSelectCC(DL, Dividend, Divisor, Diff, Dividend, ISD::SETUGE);
+
+  // Case 2: divisor < 2^31 → EDIV remainder (second result)
+  SDValue EdivResult = DAG.getNode(VAXISD::EDIV, DL,
+                                   DAG.getVTList(MVT::i32, MVT::i32),
+                                   Divisor, Dividend, Zero);
+
+  // Select based on divisor MSB
+  return DAG.getSelectCC(DL, Divisor, Zero,
+                         BigDivisorResult, EdivResult.getValue(1), ISD::SETLT);
 }
 
 SDValue VAXTargetLowering::LowerSREM(SDValue Op, SelectionDAG &DAG) const {
