@@ -317,9 +317,11 @@ bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
   // GAS branch/jump aliases: explicit mapping table.
   // GAS accepts "j<cond>" as aliases for "b<cond>" branch instructions,
   // "jbr" for "brw", and "bcc"/"bcs" for "bgequ"/"blssu".
+  // Also j-forms for branch-on-bit and low-bit instructions.
   StringRef Mnemonic = Name;
   StringRef Alias = StringSwitch<StringRef>(Mnemonic)
     .Case("jbr",   "brw")
+    // Conditional branch aliases
     .Case("jeql",  "beql")
     .Case("jneq",  "bneq")
     .Case("jgtr",  "bgtr")
@@ -334,6 +336,17 @@ bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
     .Case("jcs",   "blssu")
     .Case("bcc",   "bgequ")
     .Case("bcs",   "blssu")
+    // Branch-on-bit aliases
+    .Case("jbs",   "bbs")
+    .Case("jbc",   "bbc")
+    .Case("jbss",  "bbss")
+    .Case("jbcs",  "bbcs")
+    .Case("jbsc",  "bbsc")
+    .Case("jbcc",  "bbcc")
+    .Case("jbssi", "bbssi")
+    .Case("jbcci", "bbcci")
+    .Case("jlbs",  "blbs")
+    .Case("jlbc",  "blbc")
     .Default(StringRef());
   if (!Alias.empty())
     Mnemonic = Alias;
