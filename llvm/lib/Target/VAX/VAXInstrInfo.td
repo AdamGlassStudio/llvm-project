@@ -181,6 +181,13 @@ multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
   def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
       [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>;
+  // Fold a load into one source operand: addl3 mem, reg, dst.
+  // Commutative, so either operand can be the load.
+  let HasMemOp = 1 in
+  def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
+      (ins VAXMemOp:$a, GPRnoPC:$b),
+      mn # "\t$a, $b, $dst",
+      [(set GPRnoPC:$dst, (SDOp (load VAXMemLong:$a), GPRnoPC:$b))]>;
 }
 
 // Multiclass for 2-operand ALU: dst OP= src. Used by all xyzL2 instructions.
@@ -283,6 +290,18 @@ def SUBL3_ri : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$m),
 def SUBL3_ir : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, i32imm:$m),
     "subl3\t$s, $m, $dst",
     [(set GPRnoPC:$dst, (sub (i32 imm:$m), GPRnoPC:$s))]>;
+// reg - mem  (subtrahend loaded from memory): dst = reg - (load addr)
+let HasMemOp = 1 in
+def SUBL3_rm : InstVAX<0xC3, (outs GPRnoPC:$dst),
+    (ins VAXMemOp:$s, GPRnoPC:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (load VAXMemLong:$s)))]>;
+// mem - reg  (minuend loaded from memory): dst = (load addr) - reg
+let HasMemOp = 1 in
+def SUBL3_mr : InstVAX<0xC3, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$s, VAXMemOp:$m),
+    "subl3\t$s, $m, $dst",
+    [(set GPRnoPC:$dst, (sub (load VAXMemLong:$m), GPRnoPC:$s))]>;
 
 // DIVL3 — signed divide: dst = dividend / divisor.
 // VAX encoding: divl3 src1, src2, dst  →  dst = src2 / src1.
@@ -309,6 +328,12 @@ def BICL3_ri : InstVAX<0xCB, (outs GPRnoPC:$dst),
     (ins i32imm:$mask, GPRnoPC:$src),
     "bicl3\t$mask, $src, $dst",
     [(set GPRnoPC:$dst, (vax_bicl (i32 imm:$mask), GPRnoPC:$src))]>;
+// Fold load into source operand: dst = (load addr) & ~mask
+let HasMemOp = 1 in
+def BICL3_rm : InstVAX<0xCB, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$mask, VAXMemOp:$src),
+    "bicl3\t$mask, $src, $dst",
+    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, (load VAXMemLong:$src)))]>;
 
 // MOVZBL — zero-extend byte to longword.
 defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8>;
@@ -360,6 +385,11 @@ def CMPL_rr : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, GPRnoPC:$b),
 def CMPL_ri : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, i32imm:$b),
     "cmpl\t$a, $b",
     [(vax_cmp GPRnoPC:$a, (i32 imm:$b))]>;
+// Compare register against memory operand.
+let HasMemOp = 1 in
+def CMPL_rm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, GPRnoPC:$b),
+    "cmpl\t$a, $b",
+    [(vax_cmp (load VAXMemLong:$a), GPRnoPC:$b)]>;
 // TSTL — Test Longword: equivalent to cmpl reg, $0 but one byte shorter.
 def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
     "tstl\t$a",
