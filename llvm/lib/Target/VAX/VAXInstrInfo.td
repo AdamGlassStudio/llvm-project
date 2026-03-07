@@ -208,6 +208,38 @@ multiclass VAXAlu2<bits<16> opc, string mn> {
   }
 }
 
+// 2-operand byte ALU: dst OP= src (byte). Used by peephole.
+multiclass VAXAlu2B<bits<16> opc, string mn> {
+  def _rr : InstVAX<opc, (outs GPRB:$dst), (ins GPRB:$s, GPRB:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+}
+
+// 2-operand word ALU: dst OP= src (word). Used by peephole.
+multiclass VAXAlu2W<bits<16> opc, string mn> {
+  def _rr : InstVAX<opc, (outs GPRW:$dst), (ins GPRW:$s, GPRW:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+}
+
+// 2-operand F_float ALU: dst OP= src. Used by peephole.
+multiclass VAXAlu2F<bits<16> opc, string mn> {
+  def _rr : InstVAX<opc, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+}
+
+// 2-operand D_float ALU: dst OP= src. Used by peephole.
+multiclass VAXAlu2D<bits<16> opc, string mn> {
+  def _rr : InstVAX<opc, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
+}
+
 // Multiclass for zero-extending loads: MOVZBL, MOVZWL.
 multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload> {
   let HasMemOp = 1 in {
@@ -929,9 +961,16 @@ let Defs = [PSW] in {
 defm ADDL2 : VAXAlu2<0xC0, "addl2">;
 defm SUBL2 : VAXAlu2<0xC2, "subl2">;
 defm MULL2 : VAXAlu2<0xC4, "mull2">;
+defm DIVL2 : VAXAlu2<0xC6, "divl2">;
 defm BISL2 : VAXAlu2<0xC8, "bisl2">;
 defm BICL2 : VAXAlu2<0xCA, "bicl2">;
 defm XORL2 : VAXAlu2<0xCC, "xorl2">;
+// Byte 2-operand
+defm ADDB2 : VAXAlu2B<0x80, "addb2">;
+defm SUBB2 : VAXAlu2B<0x82, "subb2">;
+// Word 2-operand
+defm ADDW2 : VAXAlu2W<0xA0, "addw2">;
+defm SUBW2 : VAXAlu2W<0xA2, "subw2">;
 } // let Defs = [PSW]
 
 // PUSHL — push longword onto stack (SP autodecrement)  opcode 0xDD
