@@ -64,6 +64,13 @@ def WordImm : Operand<i32> {
 // Index is always NoReg and flags is always 0 (Disp) from SelectionDAG.
 def VAXMem : ComplexPattern<iPTR, 4, "SelectVAXAddr", [frameindex, add], []>;
 
+// Enhanced ComplexPattern for longword (4-byte) memory operands.
+// Matches everything VAXMem does plus indexed: ADD(base, SHL(idx, 2)).
+// Only use for instructions with 4-byte data size (MOVL, MOVF, etc.)
+// because VAX indexed mode implicitly scales by the instruction's data size.
+def VAXMemLong : ComplexPattern<iPTR, 4, "SelectVAXAddrLong",
+                                [frameindex, add], []>;
+
 //===----------------------------------------------------------------------===//
 // Real instructions (Phase 3 — enough for "int f() { return 0; }")
 //===----------------------------------------------------------------------===//
@@ -104,19 +111,19 @@ def MOVL_ri : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$imm),
 let HasMemOp = 1 in
 def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "movl\t$src, $dst",
-    [(set GPRnoPC:$dst, (load VAXMem:$src))]>;
+    [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>;
 
 // memory <- reg  (displacement/deferred store)
 let HasMemOp = 1 in
 def MOVL_mr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
     "movl\t$src, $dst",
-    [(store GPRnoPC:$src, VAXMem:$dst)]>;
+    [(store GPRnoPC:$src, VAXMemLong:$dst)]>;
 
 // memory <- immediate  (store constant to memory without register)
 let HasMemOp = 1 in
 def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
     "movl\t$imm, $dst",
-    [(store (i32 imm:$imm), VAXMem:$dst)]>;
+    [(store (i32 imm:$imm), VAXMemLong:$dst)]>;
 
 // reg <- global  (PC-relative load from global/extern data)
 def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
@@ -151,8 +158,8 @@ def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
 // Atomic load/store: VAX aligned loads/stores are naturally atomic.
-def : Pat<(atomic_load_32 VAXMem:$src), (MOVL_rm VAXMemOp:$src)>;
-def : Pat<(atomic_store_32 GPRnoPC:$src, VAXMem:$dst), (MOVL_mr GPRnoPC:$src, VAXMemOp:$dst)>;
+def : Pat<(atomic_load_32 VAXMemLong:$src), (MOVL_rm VAXMemOp:$src)>;
+def : Pat<(atomic_store_32 GPRnoPC:$src, VAXMemLong:$dst), (MOVL_mr GPRnoPC:$src, VAXMemOp:$dst)>;
 
 //===----------------------------------------------------------------------===//
 // Phase 5 — Integer Arithmetic (longword i32)
