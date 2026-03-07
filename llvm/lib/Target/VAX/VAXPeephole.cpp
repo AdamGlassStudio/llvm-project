@@ -37,18 +37,36 @@ struct Alu3To2 {
 //   For add: addl3 s1, s2, dst → dst = s2 + s1  (commutative)
 //   For sub: subl3 s1, s2, dst → dst = s2 - s1  (NOT commutative)
 static const Alu3To2 Alu3To2Table[] = {
+    // Longword integer
     {VAX::ADDL3_rr, VAX::ADDL2_rr, true},
     {VAX::ADDL3_ri, VAX::ADDL2_ri, true},
     {VAX::SUBL3_rr, VAX::SUBL2_rr, false},
     {VAX::SUBL3_ri, VAX::SUBL2_ri, false},
     {VAX::MULL3_rr, VAX::MULL2_rr, true},
     {VAX::MULL3_ri, VAX::MULL2_ri, true},
+    {VAX::DIVL3_rr, VAX::DIVL2_rr, false},
     {VAX::BISL3_rr, VAX::BISL2_rr, true},
     {VAX::BISL3_ri, VAX::BISL2_ri, true},
     {VAX::XORL3_rr, VAX::XORL2_rr, true},
     {VAX::XORL3_ri, VAX::XORL2_ri, true},
     {VAX::BICL3_rr, VAX::BICL2_rr, false},
     {VAX::BICL3_ri, VAX::BICL2_ri, false},
+    // Byte
+    {VAX::ADDB3_rr, VAX::ADDB2_rr, true},
+    {VAX::SUBB3_rr, VAX::SUBB2_rr, false},
+    // Word
+    {VAX::ADDW3_rr, VAX::ADDW2_rr, true},
+    {VAX::SUBW3_rr, VAX::SUBW2_rr, false},
+    // F_float
+    {VAX::ADDF3_rr, VAX::ADDF2_rr, true},
+    {VAX::SUBF3_rr, VAX::SUBF2_rr, false},
+    {VAX::MULF3_rr, VAX::MULF2_rr, true},
+    {VAX::DIVF3_rr, VAX::DIVF2_rr, false},
+    // D_float
+    {VAX::ADDD3_rr, VAX::ADDD2_rr, true},
+    {VAX::SUBD3_rr, VAX::SUBD2_rr, false},
+    {VAX::MULD3_rr, VAX::MULD2_rr, true},
+    {VAX::DIVD3_rr, VAX::DIVD2_rr, false},
 };
 
 class VAXPeephole : public MachineFunctionPass {
@@ -125,6 +143,31 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
         }
 
         break; // Found matching entry but can't convert
+      }
+
+      // Try ADDL2_ri $1 → INCL, ADDL2_ri $-1 → DECL
+      if (!Converted) {
+        unsigned Opc = MI.getOpcode();
+        if (Opc == VAX::ADDL2_ri && MI.getOperand(1).isImm()) {
+          int64_t Imm = MI.getOperand(1).getImm();
+          Register DstReg = MI.getOperand(0).getReg();
+          unsigned NewOpc = 0;
+          if (Imm == 1)
+            NewOpc = VAX::INCL;
+          else if (Imm == -1)
+            NewOpc = VAX::DECL;
+          if (NewOpc) {
+            MachineInstrBuilder MIB =
+                BuildMI(MBB, II, MI.getDebugLoc(), TII->get(NewOpc));
+            MIB.addDef(DstReg);
+            MIB.addReg(DstReg);
+            LLVM_DEBUG(dbgs() << "VAXPeephole: addl2→inc/dec " << MI);
+            auto EraseIt = II++;
+            EraseIt->eraseFromParent();
+            Changed = true;
+            Converted = true;
+          }
+        }
       }
 
       if (!Converted)

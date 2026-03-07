@@ -28,7 +28,7 @@ define i32 @sdiv_by_const(i32 %a) {
 
 define i32 @sdiv(i32 %a, i32 %b) {
 ; CHECK-LABEL: sdiv:
-; CHECK: divl3
+; CHECK: divl2
   %r = sdiv i32 %a, %b
   ret i32 %r
 }
