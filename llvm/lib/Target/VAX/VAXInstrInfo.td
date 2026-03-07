@@ -313,11 +313,19 @@ def DIVL3_rr : InstVAX<0xC7, (outs GPRnoPC:$dst), (ins GPRnoPC:$dv, GPRnoPC:$dd)
 def MNEGL : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "mnegl\t$src, $dst",
     [(set GPRnoPC:$dst, (ineg GPRnoPC:$src))]>;
+let HasMemOp = 1 in
+def MNEGL_m : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "mnegl\t$src, $dst",
+    [(set GPRnoPC:$dst, (ineg (load VAXMemLong:$src)))]>;
 
 // MCOML — ones complement: dst = ~src  (matches not = xor x, -1)
 def MCOML : InstVAX<0xD2, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "mcoml\t$src, $dst",
     [(set GPRnoPC:$dst, (not GPRnoPC:$src))]>;
+let HasMemOp = 1 in
+def MCOML_m : InstVAX<0xD2, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "mcoml\t$src, $dst",
+    [(set GPRnoPC:$dst, (not (load VAXMemLong:$src)))]>;
 
 // BICL3 — bit clear: dst = src & ~mask  (selected from VAXISD::BICL)
 def BICL3_rr : InstVAX<0xCB, (outs GPRnoPC:$dst),
@@ -394,6 +402,10 @@ def CMPL_rm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, GPRnoPC:$b),
 def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
     "tstl\t$a",
     [(vax_cmp GPRnoPC:$a, (i32 0))]>;
+let HasMemOp = 1 in
+def TSTL_m : InstVAX<0xD5, (outs), (ins VAXMemOp:$a),
+    "tstl\t$a",
+    [(vax_cmp (load VAXMemLong:$a), (i32 0))]>;
 }
 
 // Unconditional branch — use BRW (16-bit displacement, ±32 KB) as the
