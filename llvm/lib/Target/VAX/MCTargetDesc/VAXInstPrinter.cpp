@@ -23,8 +23,22 @@ using namespace llvm;
 #include "VAXGenAsmWriter.inc"
 
 void VAXInstPrinter::printRegName(raw_ostream &O, MCRegister Reg) {
-  // VAX GAS uses bare register names: r0, r1, ..., ap, fp, sp, pc
-  O << getRegisterName(Reg);
+  // VAX sub-registers (BR0-BR11, WR0-WR11) have no assembly-level names —
+  // the instruction mnemonic (movb vs movl) conveys the operand width.
+  // TableGen falls back to the record name ("BR0", "WR0") when AsmName is
+  // empty. Detect these and print the parent GPR name instead.
+  const char *Name = getRegisterName(Reg);
+  if (Name[0] == 'B' || Name[0] == 'W') {
+    // BR0-BR11 and WR0-WR11 — resolve to parent GPR.
+    for (MCPhysReg SR : MRI.superregs(Reg)) {
+      const char *SRName = getRegisterName(SR);
+      if (SRName[0] == '%') {
+        O << SRName;
+        return;
+      }
+    }
+  }
+  O << Name;
 }
 
 void VAXInstPrinter::printInst(const MCInst *MI, uint64_t Address,
