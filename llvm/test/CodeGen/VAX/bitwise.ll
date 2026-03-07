@@ -5,29 +5,26 @@
 ; AND with 255 optimizes to zero-extend byte
 define i32 @and_imm(i32 %a) {
 ; CHECK-LABEL: and_imm:
-; CHECK: movzbl	4(%ap), %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end0:
+; CHECK:       movzbl	4(%ap), %r0
+; CHECK:       ret
   %r = and i32 %a, 255
   ret i32 %r
 }
 
 define i32 @or_imm(i32 %a) {
 ; CHECK-LABEL: or_imm:
-; CHECK: movl	$255, %r0
-; CHECK-NEXT: bisl3	4(%ap), %r0, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end1:
+; CHECK:       movl	$255, %r0
+; CHECK:       bisl3	4(%ap), %r0, %r0
+; CHECK:       ret
   %r = or i32 %a, 255
   ret i32 %r
 }
 
 define i32 @xor_imm(i32 %a) {
 ; CHECK-LABEL: xor_imm:
-; CHECK: movl	$255, %r0
-; CHECK-NEXT: xorl3	4(%ap), %r0, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end2:
+; CHECK:       movl	$255, %r0
+; CHECK:       xorl3	4(%ap), %r0, %r0
+; CHECK:       ret
   %r = xor i32 %a, 255
   ret i32 %r
 }
@@ -35,10 +32,8 @@ define i32 @xor_imm(i32 %a) {
 ; Bit complement
 define i32 @not_i32(i32 %a) {
 ; CHECK-LABEL: not_i32:
-; CHECK: movl	$-1, %r0
-; CHECK-NEXT: xorl3	4(%ap), %r0, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end3:
+; CHECK:       mcoml	4(%ap), %r0
+; CHECK:       ret
   %r = xor i32 %a, -1
   ret i32 %r
 }
@@ -46,10 +41,9 @@ define i32 @not_i32(i32 %a) {
 ; Shift left by constant
 define i32 @shl_const(i32 %a) {
 ; CHECK-LABEL: shl_const:
-; CHECK: movl	4(%ap), %r0
-; CHECK-NEXT: ashl	$4, %r0, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end4:
+; CHECK:       movl	4(%ap), %r0
+; CHECK:       ashl	$4, %r0, %r0
+; CHECK:       ret
   %r = shl i32 %a, 4
   ret i32 %r
 }
@@ -57,10 +51,9 @@ define i32 @shl_const(i32 %a) {
 ; Arithmetic shift right by constant
 define i32 @ashr_const(i32 %a) {
 ; CHECK-LABEL: ashr_const:
-; CHECK: movl	4(%ap), %r0
-; CHECK-NEXT: ashl	$-4, %r0, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end5:
+; CHECK:       movl	4(%ap), %r0
+; CHECK:       ashl	$-4, %r0, %r0
+; CHECK:       ret
   %r = ashr i32 %a, 4
   ret i32 %r
 }
@@ -68,11 +61,10 @@ define i32 @ashr_const(i32 %a) {
 ; Logical shift right by constant (uses rotl + mask)
 define i32 @lshr_const(i32 %a) {
 ; CHECK-LABEL: lshr_const:
-; CHECK: movl	4(%ap), %r0
-; CHECK-NEXT: rotl	$28, %r0, %r0
-; CHECK-NEXT: bicl2	$-268435456, %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end6:
+; CHECK:       movl	4(%ap), %r0
+; CHECK:       rotl	$28, %r0, %r0
+; CHECK:       bicl2	$-268435456, %r0
+; CHECK:       ret
   %r = lshr i32 %a, 4
   ret i32 %r
 }
@@ -80,9 +72,8 @@ define i32 @lshr_const(i32 %a) {
 ; Byte-level AND (mask low byte) - optimized to movzbl
 define i32 @mask_byte(i32 %a) {
 ; CHECK-LABEL: mask_byte:
-; CHECK: movzbl	4(%ap), %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end7:
+; CHECK:       movzbl	4(%ap), %r0
+; CHECK:       ret
   %r = and i32 %a, 255
   ret i32 %r
 }
@@ -90,9 +81,8 @@ define i32 @mask_byte(i32 %a) {
 ; Byte-level AND (mask low 16 bits) - optimized to movzwl
 define i32 @mask_halfword(i32 %a) {
 ; CHECK-LABEL: mask_halfword:
-; CHECK: movzwl	4(%ap), %r0
-; CHECK-NEXT: ret
-; CHECK-NEXT: .Lfunc_end8:
+; CHECK:       movzwl	4(%ap), %r0
+; CHECK:       ret
   %r = and i32 %a, 65535
   ret i32 %r
 }

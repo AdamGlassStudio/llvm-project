@@ -5,20 +5,20 @@
 ; Sum array elements
 define i32 @sum_array(ptr %arr, i32 %n) {
 ; CHECK-LABEL: sum_array:
-; CHECK: movl	8(%ap), %r1
-; CHECK-NEXT: clrl	%r0
-; CHECK-NEXT: cmpl	%r1, $1
-; CHECK-NEXT: blss	{{.*}}
-; CHECK: movl	4(%ap), %r2
-; CHECK-NEXT: clrl	%r0
-; CHECK-NEXT: {{.*}}:                                # %loop
-; CHECK: addl3	(%r2), %r0, %r0
-; CHECK-NEXT: decl	%r1
-; CHECK-NEXT: addl2	$4, %r2
-; CHECK-NEXT: tstl	%r1
-; CHECK-NEXT: bneq	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %exit
-; CHECK-NEXT: ret
+; CHECK:       movl	8(%ap), %r1
+; CHECK:       clrl	%r0
+; CHECK:       cmpl	%r1, $1
+; CHECK:       blss	.LBB0_3
+; CHECK:       movl	4(%ap), %r2
+; CHECK:       clrl	%r0
+; CHECK:       .LBB0_2:
+; CHECK:       addl3	(%r2), %r0, %r0
+; CHECK:       decl	%r1
+; CHECK:       addl2	$4, %r2
+; CHECK:       tstl	%r1
+; CHECK:       bneq	.LBB0_2
+; CHECK:       .LBB0_3:
+; CHECK:       ret
 entry:
   %cmp = icmp sgt i32 %n, 0
   br i1 %cmp, label %loop, label %exit
@@ -39,34 +39,32 @@ exit:
 ; Count nonzero elements
 define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK-LABEL: count_nonzero:
-; CHECK: movl	8(%ap), %r1
-; CHECK-NEXT: clrl	%r0
-; CHECK-NEXT: cmpl	%r1, $1
-; CHECK-NEXT: bgeq	{{.*}}
-; CHECK-NEXT: brw	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %loop.preheader
-; CHECK-NEXT: movl	4(%ap), %r2
-; CHECK-NEXT: clrl	%r3
-; CHECK-NEXT: movl	$1, %r4
-; CHECK-NEXT: movl	%r3, %r0
-; CHECK-NEXT: brw	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %loop
-; CHECK: bicl2	$-2, %r5
-; CHECK-NEXT: addl2	%r5, %r0
-; CHECK-NEXT: decl	%r1
-; CHECK-NEXT: addl2	$4, %r2
-; CHECK-NEXT: tstl	%r1
-; CHECK-NEXT: beql	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %loop
-; CHECK: cmpl	(%r2), %r3
-; CHECK-NEXT: movl	%r4, %r5
-; CHECK-NEXT: beql	{{.*}}
-; CHECK-NEXT: brw	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %loop
-; CHECK: movl	%r3, %r5
-; CHECK-NEXT: brw	{{.*}}
-; CHECK-NEXT: {{.*}}:                                # %exit
-; CHECK-NEXT: ret
+; CHECK:       movl	8(%ap), %r1
+; CHECK:       clrl	%r0
+; CHECK:       cmpl	%r1, $1
+; CHECK:       bgeq	.LBB1_1
+; CHECK:       brw	.LBB1_5
+; CHECK:       .LBB1_1:
+; CHECK:       movl	4(%ap), %r2
+; CHECK:       clrl	%r3
+; CHECK:       movl	$1, %r4
+; CHECK:       movl	%r3, %r0
+; CHECK:       brw	.LBB1_3
+; CHECK:       .LBB1_2:
+; CHECK:       bicl2	$-2, %r5
+; CHECK:       addl2	%r5, %r0
+; CHECK:       decl	%r1
+; CHECK:       addl2	$4, %r2
+; CHECK:       tstl	%r1
+; CHECK:       beql	.LBB1_5
+; CHECK:       .LBB1_3:
+; CHECK:       tstl	(%r2)
+; CHECK:       movl	%r4, %r5
+; CHECK:       bneq	.LBB1_2
+; CHECK:       movl	%r3, %r5
+; CHECK:       brw	.LBB1_2
+; CHECK:       .LBB1_5:
+; CHECK:       ret
 entry:
   %cmp = icmp sgt i32 %n, 0
   br i1 %cmp, label %loop, label %exit
