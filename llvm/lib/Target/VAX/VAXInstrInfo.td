@@ -529,6 +529,20 @@ def TSTF_BRANCH : Pseudo<(outs),
     (ins GPRI:$src, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTD_BRANCH : Pseudo<(outs),
     (ins QPR:$src, i32imm:$cc, brtarget:$dst), "", []>;
+// Memory-operand compare/test fused pseudos:
+def CMP_BRANCH_rm : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, GPRnoPC:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TST_BRANCH_m : Pseudo<(outs),
+    (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
+// Byte/word compare/test fused pseudos:
+def CMPB_BRANCH : Pseudo<(outs),
+    (ins GPRB:$lhs, GPRB:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTB_BRANCH : Pseudo<(outs),
+    (ins GPRB:$src, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPW_BRANCH : Pseudo<(outs),
+    (ins GPRW:$lhs, GPRW:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTW_BRANCH : Pseudo<(outs),
+    (ins GPRW:$src, i32imm:$cc, brtarget:$dst), "", []>;
 }
 
 // INCL / DECL — increment / decrement longword (sets PSW).
