@@ -161,6 +161,11 @@ def MOVAL_ga : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
 def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
+
+// Address-of-block (computed goto): moval .Ltmp_n, $dst
+def MOVAL_ba : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+    "moval\t$sym, $dst",
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tblockaddress:$sym))]>;
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
 // Atomic load/store: VAX aligned loads/stores are naturally atomic.
