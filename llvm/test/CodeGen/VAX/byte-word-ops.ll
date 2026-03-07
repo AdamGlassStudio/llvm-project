@@ -237,3 +237,27 @@ define signext i8 @const_i8() {
 ; CHECK:       ret
   ret i8 7
 }
+
+;--- Direct i8→i16 sign-extend (CVTBW) ---
+
+define void @sext_b_to_w(ptr %p, ptr %q) {
+; CHECK-LABEL: sext_b_to_w:
+; CHECK:       cvtbw
+; CHECK:       ret
+  %v = load i8, ptr %p
+  %ext = sext i8 %v to i16
+  store i16 %ext, ptr %q
+  ret void
+}
+
+;--- Direct i8→i16 zero-extend (MOVZBW) ---
+
+define void @zext_b_to_w(ptr %p, ptr %q) {
+; CHECK-LABEL: zext_b_to_w:
+; CHECK:       movzbw
+; CHECK:       ret
+  %v = load i8, ptr %p
+  %ext = zext i8 %v to i16
+  store i16 %ext, ptr %q
+  ret void
+}
