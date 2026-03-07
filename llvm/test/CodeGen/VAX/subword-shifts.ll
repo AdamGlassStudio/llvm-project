@@ -76,3 +76,53 @@ define i16 @shl_i16_one_variable(i16 %bit) {
   %r = select i1 %cmp, i16 1, i16 0
   ret i16 %r
 }
+
+; --- Two-byte combine pattern (caused infinite loop in distribution build) ---
+; Pattern: ((unsigned short)p[0] << 8) | p[1]
+; This was the root cause of 6 libc files hanging during NetBSD build.
+
+define i16 @twobyte_combine(ptr %p) {
+; CHECK-LABEL: twobyte_combine:
+; CHECK: ashl	$8
+; CHECK: bisw3
+; CHECK: ret
+  %b0 = load i8, ptr %p, align 1
+  %conv = zext i8 %b0 to i16
+  %shl = shl nuw i16 %conv, 8
+  %arrayidx2 = getelementptr inbounds i8, ptr %p, i32 1
+  %b1 = load i8, ptr %arrayidx2, align 1
+  %conv3 = zext i8 %b1 to i16
+  %or = or disjoint i16 %shl, %conv3
+  ret i16 %or
+}
+
+; --- i8 shift-and-mask (common in bitfield code) ---
+
+define i8 @shl_i8_const_mask(i8 %a) {
+; CHECK-LABEL: shl_i8_const_mask:
+; CHECK: ashl
+; CHECK: ret
+  %shl = shl i8 %a, 4
+  %mask = and i8 %shl, -16
+  ret i8 %mask
+}
+
+; --- i16 logical right shift by constant (extzv path) ---
+
+define i16 @srl_i16_const(i16 %a) {
+; CHECK-LABEL: srl_i16_const:
+; CHECK: extzv
+; CHECK: ret
+  %r = lshr i16 %a, 5
+  ret i16 %r
+}
+
+; --- i8 arithmetic right shift by constant ---
+
+define i8 @sra_i8_const(i8 %a) {
+; CHECK-LABEL: sra_i8_const:
+; CHECK: ashl
+; CHECK: ret
+  %r = ashr i8 %a, 3
+  ret i8 %r
+}
