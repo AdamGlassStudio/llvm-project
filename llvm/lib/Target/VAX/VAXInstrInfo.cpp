@@ -209,13 +209,13 @@ unsigned VAXInstrInfo::removeBranch(MachineBasicBlock &MBB,
 
   I->eraseFromParent();
   unsigned Count = 1;
-  int Removed = isUncondBranch(Opc) ? 3 : 2; // BRW=3, Bcc=2
+  int Removed = (Opc == VAX::BRW) ? 3 : 2; // BRW=3, BRB/Bcc=2
 
   I = MBB.getLastNonDebugInstr();
   if (I != MBB.end()) {
     Opc = I->getOpcode();
     if (isCondBranch(Opc) || isUncondBranch(Opc)) {
-      Removed += isUncondBranch(Opc) ? 3 : 2;
+      Removed += (Opc == VAX::BRW) ? 3 : 2;
       I->eraseFromParent();
       ++Count;
     }
@@ -235,11 +235,12 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
   if (Cond.empty()) {
-    // Unconditional branch.
+    // Unconditional branch — emit BRB (2 bytes) by default.
+    // BranchRelaxationPass will widen to BRW if the target is out of range.
     assert(!FBB && "Unconditional branch with false block?");
-    BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(TBB);
+    BuildMI(&MBB, DL, get(VAX::BRB)).addMBB(TBB);
     if (BytesAdded)
-      *BytesAdded = 3;
+      *BytesAdded = 2;
     return 1;
   }
 
@@ -254,9 +255,9 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
   }
 
   // Conditional + fallthrough unconditional.
-  BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(FBB);
+  BuildMI(&MBB, DL, get(VAX::BRB)).addMBB(FBB);
   if (BytesAdded)
-    *BytesAdded = 5; // 2 (Bcc) + 3 (BRW)
+    *BytesAdded = 4; // 2 (Bcc) + 2 (BRB)
   return 2;
 }
 
