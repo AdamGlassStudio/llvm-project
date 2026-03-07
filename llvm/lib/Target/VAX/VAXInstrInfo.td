@@ -1107,6 +1107,31 @@ let Defs = [PSW] in {
 // MOVF (0x50) — F_float data moves (load/store/copy).
 defm MOVF : VAXFpMov<0x50, "movf", GPRI, f32, VAXFMemOp>;
 
+// CLRF (0xD4) — Clear F_float: dst = 0.0.
+def CLRF : InstVAX<0xD4, (outs GPRI:$dst), (ins),
+    "clrf\t$dst", []>;
+
+// ADDF2 (0x40) — Add F_float 2-op: dst += src.
+def ADDF2_rr : InstVAX<0x40, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
+    "addf2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// SUBF2 (0x42) — Subtract F_float 2-op: dst -= src.
+def SUBF2_rr : InstVAX<0x42, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
+    "subf2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// MULF2 (0x44) — Multiply F_float 2-op: dst *= src.
+def MULF2_rr : InstVAX<0x44, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
+    "mulf2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// DIVF2 (0x46) — Divide F_float 2-op: dst /= src.
+def DIVF2_rr : InstVAX<0x46, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
+    "divf2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+
 // ADDF3 (0x41) — Add F_float: dst = src1 + src2.
 def ADDF3_rr : InstVAX<0x41, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
     "addf3\t$a, $b, $dst",
@@ -1143,12 +1168,17 @@ def CVTLF : InstVAX<0x4E, (outs GPRI:$dst), (ins GPRnoPC:$src),
 def SDT_VAXFCMP : SDTypeProfile<0, 2, [SDTCisSameAs<0,1>, SDTCisFP<0>]>;
 def vax_fcmp : SDNode<"VAXISD::FCMP", SDT_VAXFCMP, [SDNPOutGlue]>;
 
+// FP zero immediate — used for TSTF/TSTD compare-to-zero folding.
+def fpimm_zero : PatLeaf<(fpimm), [{return N->isExactlyValue(0.0);}]>;
+
 let Defs = [PSW] in {
 def CMPF : InstVAX<0x51, (outs), (ins GPRI:$a, GPRI:$b),
     "cmpf\t$a, $b",
     [(vax_fcmp GPRI:$a, GPRI:$b)]>;
+// TSTF (0x53) — Test F_float: sets PSW from src vs 0.0.
 def TSTF : InstVAX<0x53, (outs), (ins GPRI:$a),
-    "tstf\t$a", []>;
+    "tstf\t$a",
+    [(vax_fcmp GPRI:$a, (f32 fpimm_zero))]>;
 }
 
 // SELECT_CC for f32 results (same diamond expansion as i32).
@@ -1175,6 +1205,31 @@ def VAXDMemOp : Operand<iPTR> {
 let Defs = [PSW] in {
 // MOVD (0x70) — D_float data moves (load/store/copy) using register pairs.
 defm MOVD : VAXFpMov<0x70, "movd", QPR, f64, VAXDMemOp>;
+
+// CLRD (0x7C) — Clear D_float: dst = 0.0.
+def CLRD : InstVAX<0x7C, (outs QPR:$dst), (ins),
+    "clrd\t$dst", []>;
+
+// ADDD2 (0x60) — Add D_float 2-op: dst += src.
+def ADDD2_rr : InstVAX<0x60, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
+    "addd2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// SUBD2 (0x62) — Subtract D_float 2-op: dst -= src.
+def SUBD2_rr : InstVAX<0x62, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
+    "subd2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// MULD2 (0x64) — Multiply D_float 2-op: dst *= src.
+def MULD2_rr : InstVAX<0x64, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
+    "muld2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
+// DIVD2 (0x66) — Divide D_float 2-op: dst /= src.
+def DIVD2_rr : InstVAX<0x66, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
+    "divd2\t$s, $dst", []> {
+  let Constraints = "$src = $dst";
+}
 
 // ADDD3 (0x61) — Add D_float: dst = src1 + src2.
 def ADDD3_rr : InstVAX<0x61, (outs QPR:$dst), (ins QPR:$a, QPR:$b),
@@ -1221,8 +1276,10 @@ let Defs = [PSW] in {
 def CMPD : InstVAX<0x71, (outs), (ins QPR:$a, QPR:$b),
     "cmpd\t$a, $b",
     [(vax_fcmp QPR:$a, QPR:$b)]>;
+// TSTD (0x73) — Test D_float: sets PSW from src vs 0.0.
 def TSTD : InstVAX<0x73, (outs), (ins QPR:$a),
-    "tstd\t$a", []>;
+    "tstd\t$a",
+    [(vax_fcmp QPR:$a, (f64 fpimm_zero))]>;
 }
 
 // SELECT_CC for f64 results.

@@ -42,19 +42,19 @@ define i32 @fcmp_ogt_d(double %a, double %b) {
   ret i32 %r
 }
 
-; Compare float against zero (constant pool load)
+; Compare float against zero — should use tstf (not cmpf + constant pool)
 define i32 @fcmp_zero_f(float %a) {
 ; CHECK-LABEL: fcmp_zero_f:
-; CHECK: cmpf
+; CHECK: tstf
   %c = fcmp oeq float %a, 0.0
   %r = zext i1 %c to i32
   ret i32 %r
 }
 
-; Compare double against zero (constant pool load)
+; Compare double against zero — should use tstd (not cmpd + constant pool)
 define i32 @fcmp_zero_d(double %a) {
 ; CHECK-LABEL: fcmp_zero_d:
-; CHECK: cmpd
+; CHECK: tstd
   %c = fcmp oeq double %a, 0.0
   %r = zext i1 %c to i32
   ret i32 %r
