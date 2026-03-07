@@ -5,8 +5,16 @@
 ; Unsigned less-than
 define i32 @ucmp_lt(i32 %a, i32 %b) {
 ; CHECK-LABEL: ucmp_lt:
-; CHECK: cmpl
-; CHECK: blssu
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: blssu	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp ult i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
@@ -15,8 +23,16 @@ define i32 @ucmp_lt(i32 %a, i32 %b) {
 ; Unsigned greater-than
 define i32 @ucmp_gt(i32 %a, i32 %b) {
 ; CHECK-LABEL: ucmp_gt:
-; CHECK: cmpl
-; CHECK: bgtru
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: bgtru	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp ugt i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
@@ -25,8 +41,16 @@ define i32 @ucmp_gt(i32 %a, i32 %b) {
 ; Signed equal
 define i32 @scmp_eq(i32 %a, i32 %b) {
 ; CHECK-LABEL: scmp_eq:
-; CHECK: cmpl
-; CHECK: beql
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: beql	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp eq i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
@@ -35,8 +59,16 @@ define i32 @scmp_eq(i32 %a, i32 %b) {
 ; Signed not-equal
 define i32 @scmp_ne(i32 %a, i32 %b) {
 ; CHECK-LABEL: scmp_ne:
-; CHECK: cmpl
-; CHECK: bneq
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: bneq	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp ne i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
@@ -45,8 +77,13 @@ define i32 @scmp_ne(i32 %a, i32 %b) {
 ; Compare against zero — should use tstl
 define i32 @cmp_zero(i32 %a) {
 ; CHECK-LABEL: cmp_zero:
-; CHECK: tstl
-; CHECK: beql
+; CHECK: clrl	%r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: bneq	{{.*}}
+; CHECK: movl	$1, %r0
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp eq i32 %a, 0
   %r = zext i1 %c to i32
   ret i32 %r
@@ -55,8 +92,16 @@ define i32 @cmp_zero(i32 %a) {
 ; Signed less-than
 define i32 @scmp_slt(i32 %a, i32 %b) {
 ; CHECK-LABEL: scmp_slt:
-; CHECK: cmpl
-; CHECK: blss
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: blss	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp slt i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
@@ -65,8 +110,16 @@ define i32 @scmp_slt(i32 %a, i32 %b) {
 ; Signed greater-than
 define i32 @scmp_sgt(i32 %a, i32 %b) {
 ; CHECK-LABEL: scmp_sgt:
-; CHECK: cmpl
-; CHECK: bgtr
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: cmpl	4(%ap), %r0
+; CHECK-NEXT: bgtr	{{.*}}
+; CHECK: clrl	%r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
+; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: movl	$1, %r0
+; CHECK-NEXT: bicl2	$-2, %r0
+; CHECK-NEXT: ret
   %c = icmp sgt i32 %a, %b
   %r = zext i1 %c to i32
   ret i32 %r
