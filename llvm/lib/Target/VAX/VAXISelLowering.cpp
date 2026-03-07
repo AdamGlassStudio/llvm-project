@@ -610,10 +610,19 @@ SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
 
-  // Sub-i32: sign-extend to i32, shift, truncate back.
+  // Sub-i32: sign-extend to i32, use VAXISD::ASHL(-cnt), truncate back.
+  // Must use target-specific node to prevent DAGCombine infinite loop.
   if (VT != MVT::i32) {
     SDValue Ext = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, Src);
-    SDValue Shift = DAG.getNode(ISD::SRA, DL, MVT::i32, Ext, Cnt);
+    SDValue NegCnt;
+    if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
+      int64_t NegAmt = -CN->getSExtValue();
+      NegCnt = DAG.getSignedConstant(NegAmt, DL, MVT::i32);
+    } else {
+      NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                           DAG.getConstant(0, DL, MVT::i32), Cnt);
+    }
+    SDValue Shift = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Ext);
     return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
   }
 
@@ -635,11 +644,27 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
 
-  // Sub-i32: zero-extend to i32, shift, truncate back.
+  // Sub-i32: zero-extend to i32, use VAXISD::EXTZV, truncate back.
+  // Must use target-specific node to prevent DAGCombine infinite loop.
   if (VT != MVT::i32) {
     SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
-    SDValue Shift = DAG.getNode(ISD::SRL, DL, MVT::i32, Ext, Cnt);
-    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+    if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
+      unsigned N = CN->getZExtValue();
+      unsigned TypeBits = VT.getSizeInBits();
+      if (N == 0) return Src;
+      if (N >= TypeBits)
+        return DAG.getConstant(0, DL, VT);
+      SDValue Shifted = DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
+                                    DAG.getConstant(N, DL, MVT::i32),
+                                    DAG.getConstant(32 - N, DL, MVT::i32),
+                                    Ext);
+      return DAG.getNode(ISD::TRUNCATE, DL, VT, Shifted);
+    }
+    SDValue Size = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                               DAG.getConstant(32, DL, MVT::i32), Cnt);
+    SDValue Shifted = DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
+                                  Cnt, Size, Ext);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shifted);
   }
 
   // i32: srl(x, n) = extzv(n, 32-n, x).
@@ -656,13 +681,16 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue VAXTargetLowering::LowerSHL(SDValue Op, SelectionDAG &DAG) const {
-  // Sub-i32 SHL: zero-extend to i32, shift, truncate back.
+  // Sub-i32 SHL: zero-extend to i32, use VAXISD::ASHL, truncate back.
+  // Must use target-specific ASHL node (not ISD::SHL) to prevent DAGCombine
+  // from folding trunc(shl(zext(x), c)) back to shl(x, c) and looping.
   SDLoc DL(Op);
   MVT VT = Op.getSimpleValueType();
+
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
   SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
-  SDValue Shift = DAG.getNode(ISD::SHL, DL, MVT::i32, Ext, Cnt);
+  SDValue Shift = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, Cnt, Ext);
   return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
 }
 
