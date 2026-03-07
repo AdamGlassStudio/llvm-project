@@ -32,10 +32,17 @@ public:
   // ComplexPattern selector for base+displacement memory operands.
   // Returns true and sets Base/Offset/Index/Flags when Addr matches a known
   // form: FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
-  // Index is always NoReg and Flags is always 0 (VAXAM::Disp) from
-  // SelectionDAG — indexed and special modes are AsmParser-only.
+  // Index is always NoReg — use SelectVAXAddrLong for indexed addressing.
   bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset,
                      SDValue &Index, SDValue &Flags);
+
+  // Enhanced ComplexPattern selector for longword (4-byte) memory operands.
+  // Matches everything SelectVAXAddr does, plus indexed addressing:
+  //   ADD(base, SHL(idx, 2))  →  base[idx]  (scale=4, longword)
+  // Only valid for instructions with 4-byte data size (MOVL, MOVF, etc.)
+  // because VAX indexed mode implicitly scales by the instruction's data size.
+  bool SelectVAXAddrLong(SDValue Addr, SDValue &Base, SDValue &Offset,
+                         SDValue &Index, SDValue &Flags);
 
   // Handle 'm' constraint for inline assembly memory operands.
   bool SelectInlineAsmMemoryOperand(const SDValue &Op,
@@ -272,6 +279,58 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
   return true;
+}
+
+bool VAXDAGToDAGISel::SelectVAXAddrLong(SDValue Addr, SDValue &Base,
+                                         SDValue &Offset, SDValue &Index,
+                                         SDValue &Flags) {
+  SDLoc DL(Addr);
+  MVT PtrTy = MVT::i32;
+
+  // Try indexed addressing: ADD(base, SHL(idx, 2)) or ADD(SHL(idx, 2), base).
+  // VAX indexed mode computes EA = EA(base_specifier) + Rx * data_size.
+  // For longword instructions (4 bytes), shift by 2 matches the implicit scale.
+  if (Addr.getOpcode() == ISD::ADD) {
+    for (int Swap = 0; Swap < 2; ++Swap) {
+      SDValue MaybeShift = Addr.getOperand(Swap);
+      SDValue MaybeBase = Addr.getOperand(1 - Swap);
+
+      if (MaybeShift.getOpcode() != ISD::SHL)
+        continue;
+      auto *ShAmt = dyn_cast<ConstantSDNode>(MaybeShift.getOperand(1));
+      if (!ShAmt || ShAmt->getZExtValue() != 2)
+        continue;
+
+      // Matched (add base, (shl idx, 2)).
+      SDValue IdxReg = MaybeShift.getOperand(0);
+      Index = IdxReg;
+      Flags = CurDAG->getTargetConstant(VAXAM::Disp, DL, MVT::i32);
+
+      // Decompose base: FrameIndex, ADD(base, const), or bare register.
+      if (auto *FIN = dyn_cast<FrameIndexSDNode>(MaybeBase)) {
+        Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
+        Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+        return true;
+      }
+      if (MaybeBase.getOpcode() == ISD::ADD) {
+        if (auto *CN = dyn_cast<ConstantSDNode>(MaybeBase.getOperand(1))) {
+          if (auto *FIN = dyn_cast<FrameIndexSDNode>(MaybeBase.getOperand(0))) {
+            Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
+          } else {
+            Base = MaybeBase.getOperand(0);
+          }
+          Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+          return true;
+        }
+      }
+      Base = MaybeBase;
+      Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
+      return true;
+    }
+  }
+
+  // No indexed match — fall back to standard address selection.
+  return SelectVAXAddr(Addr, Base, Offset, Index, Flags);
 }
 
 bool VAXDAGToDAGISel::SelectInlineAsmMemoryOperand(
