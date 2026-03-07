@@ -88,6 +88,12 @@ def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>;
 let Defs = [PSW] in
 def CLRL : InstVAX<0xD4, (outs GPRnoPC:$dst), (ins),
     "clrl\t$dst", [(set GPRnoPC:$dst, (i32 0))]>;
+// CLRL to memory: store zero without an intermediate register.
+// Matches (store 0, addr) with higher specificity than MOVL_mi.
+let Defs = [PSW], HasMemOp = 1 in
+def CLRL_ms : InstVAX<0xD4, (outs), (ins VAXMemOp:$dst),
+    "clrl\t$dst",
+    [(store (i32 0), VAXMemLong:$dst)]>;
 
 //===----------------------------------------------------------------------===//
 // Phase 4 — MOV instructions + basic addressing
@@ -596,6 +602,61 @@ let Defs = [PSW], HasMemOp = 1 in
 def ROTL : InstVAX<0x9C, (outs),
     (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
     "rotl\t$cnt, $src, $dst", []>;
+
+//===----------------------------------------------------------------------===//
+// EXTZV — Extract Zero-extended Field (ISel forms)
+//===----------------------------------------------------------------------===//
+
+// Custom SDNode for VAXISD::EXTZV: (pos, size, base) → result
+def SDT_VAXEXTZV : SDTypeProfile<1, 3, [SDTCisInt<0>, SDTCisInt<1>,
+                                          SDTCisInt<2>, SDTCisSameAs<0, 3>]>;
+def vax_extzv : SDNode<"VAXISD::EXTZV", SDT_VAXEXTZV>;
+
+// EXTZV with immediate pos/size and register base — constant lshr.
+let Defs = [PSW] in
+def EXTZV_iir : InstVAX<0xEF, (outs GPRnoPC:$dst),
+    (ins ByteImm:$pos, ByteImm:$size, GPRnoPC:$base),
+    "extzv\t$pos, $size, $base, $dst",
+    [(set GPRnoPC:$dst, (vax_extzv (i32 imm:$pos), (i32 imm:$size),
+                                     GPRnoPC:$base))]>;
+
+// EXTZV with register pos/size — variable lshr.
+let Defs = [PSW] in
+// EXTZV with register pos, register size — variable lshr.
+// The size operand is .rb but accepts a register operand specifier.
+let Defs = [PSW] in
+def EXTZV_rrr : InstVAX<0xEF, (outs GPRnoPC:$dst),
+    (ins GPRnoPC:$pos, GPRnoPC:$size, GPRnoPC:$base),
+    "extzv\t$pos, $size, $base, $dst",
+    [(set GPRnoPC:$dst, (vax_extzv GPRnoPC:$pos, GPRnoPC:$size,
+                                     GPRnoPC:$base))]>;
+
+// EXTZV with memory base — load + shift folded.
+let Defs = [PSW], HasMemOp = 1 in
+def EXTZV_iim : InstVAX<0xEF, (outs GPRnoPC:$dst),
+    (ins ByteImm:$pos, ByteImm:$size, VAXMemOp:$base),
+    "extzv\t$pos, $size, $base, $dst",
+    [(set GPRnoPC:$dst, (vax_extzv (i32 imm:$pos), (i32 imm:$size),
+                                     (load VAXMemLong:$base)))]>;
+
+//===----------------------------------------------------------------------===//
+// FFS — Find First Set bit (ISel form for cttz)
+//===----------------------------------------------------------------------===//
+
+// FFS $0, $32, src, dst — find lowest set bit (count trailing zeros).
+let Defs = [PSW] in {
+def FFS_rr : InstVAX<0xEA, (outs GPRnoPC:$dst),
+    (ins ByteImm:$pos, ByteImm:$size, GPRnoPC:$base),
+    "ffs\t$pos, $size, $base, $dst", []>;
+let HasMemOp = 1 in
+def FFS_rm : InstVAX<0xEA, (outs GPRnoPC:$dst),
+    (ins ByteImm:$pos, ByteImm:$size, VAXMemOp:$base),
+    "ffs\t$pos, $size, $base, $dst", []>;
+}
+def : Pat<(cttz_zero_undef i32:$src),
+          (FFS_rr (i32 0), (i32 32), GPRnoPC:$src)>;
+def : Pat<(cttz_zero_undef (i32 (load VAXMemLong:$src))),
+          (FFS_rm (i32 0), (i32 32), VAXMemOp:$src)>;
 
 //===----------------------------------------------------------------------===//
 // Phase 8 — Function calls

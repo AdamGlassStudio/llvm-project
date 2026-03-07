@@ -50,6 +50,9 @@ enum NodeType : unsigned {
   // EDIV: extended divide. (divisor:i32, dividend_lo:i32, dividend_hi:i32) →
   // (quotient:i32, remainder:i32). dividend_quad / divisor.
   EDIV,
+  // EXTZV: extract zero-extended bit field. (pos:i32, size:i32, base:i32) →
+  // result:i32. Used for logical right shift (srl).
+  EXTZV,
 };
 } // namespace VAXISD
 
