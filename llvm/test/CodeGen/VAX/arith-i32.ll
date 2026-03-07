@@ -43,7 +43,7 @@ define i32 @test_mul_rr() {
 }
 
 ; CHECK-LABEL: test_sdiv_rr:
-; CHECK: divl3
+; CHECK: divl2
 ; CHECK: ret
 define i32 @test_sdiv_rr() {
   %a = load i32, ptr @x

@@ -3,7 +3,7 @@
 ; F_float add
 define float @test_addf(float %a, float %b) {
 ; CHECK-LABEL: test_addf:
-; CHECK: addf3
+; CHECK: addf2
   %r = fadd float %a, %b
   ret float %r
 }
@@ -11,7 +11,7 @@ define float @test_addf(float %a, float %b) {
 ; F_float subtract
 define float @test_subf(float %a, float %b) {
 ; CHECK-LABEL: test_subf:
-; CHECK: subf3
+; CHECK: subf2
   %r = fsub float %a, %b
   ret float %r
 }
@@ -19,7 +19,7 @@ define float @test_subf(float %a, float %b) {
 ; F_float multiply
 define float @test_mulf(float %a, float %b) {
 ; CHECK-LABEL: test_mulf:
-; CHECK: mulf3
+; CHECK: mulf2
   %r = fmul float %a, %b
   ret float %r
 }
@@ -27,7 +27,7 @@ define float @test_mulf(float %a, float %b) {
 ; F_float divide
 define float @test_divf(float %a, float %b) {
 ; CHECK-LABEL: test_divf:
-; CHECK: divf3
+; CHECK: divf2
   %r = fdiv float %a, %b
   ret float %r
 }

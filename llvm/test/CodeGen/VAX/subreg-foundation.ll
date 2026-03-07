@@ -46,7 +46,7 @@ define signext i8 @add_i8(i8 signext %a, i8 signext %b) {
 ; CHECK-LABEL: add_i8:
 ; CHECK:       movl 8(%ap), %r0
 ; CHECK-NEXT:  movl 4(%ap), %r1
-; CHECK-NEXT:  addb3 %r1, %r0, %r0
+; CHECK-NEXT:  addb2 %r1, %r0
 ; CHECK-NEXT:  cvtbl %r0, %r0
 ; CHECK-NEXT:  ret
   %sum = add i8 %a, %b
@@ -57,7 +57,7 @@ define signext i16 @add_i16(i16 signext %a, i16 signext %b) {
 ; CHECK-LABEL: add_i16:
 ; CHECK:       movl 8(%ap), %r0
 ; CHECK-NEXT:  movl 4(%ap), %r1
-; CHECK-NEXT:  addw3 %r1, %r0, %r0
+; CHECK-NEXT:  addw2 %r1, %r0
 ; CHECK-NEXT:  cvtwl %r0, %r0
 ; CHECK-NEXT:  ret
   %sum = add i16 %a, %b

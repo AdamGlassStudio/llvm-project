@@ -3,7 +3,7 @@
 ; D_float add
 define double @test_addd(double %a, double %b) {
 ; CHECK-LABEL: test_addd:
-; CHECK: addd3
+; CHECK: addd2
   %r = fadd double %a, %b
   ret double %r
 }
@@ -11,7 +11,7 @@ define double @test_addd(double %a, double %b) {
 ; D_float subtract
 define double @test_subd(double %a, double %b) {
 ; CHECK-LABEL: test_subd:
-; CHECK: subd3
+; CHECK: subd2
   %r = fsub double %a, %b
   ret double %r
 }
@@ -19,7 +19,7 @@ define double @test_subd(double %a, double %b) {
 ; D_float multiply
 define double @test_muld(double %a, double %b) {
 ; CHECK-LABEL: test_muld:
-; CHECK: muld3
+; CHECK: muld2
   %r = fmul double %a, %b
   ret double %r
 }
@@ -27,7 +27,7 @@ define double @test_muld(double %a, double %b) {
 ; D_float divide
 define double @test_divd(double %a, double %b) {
 ; CHECK-LABEL: test_divd:
-; CHECK: divd3
+; CHECK: divd2
   %r = fdiv double %a, %b
   ret double %r
 }
