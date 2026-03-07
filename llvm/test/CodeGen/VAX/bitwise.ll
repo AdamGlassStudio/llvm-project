@@ -58,13 +58,11 @@ define i32 @ashr_const(i32 %a) {
   ret i32 %r
 }
 
-; Logical shift right by constant (uses rotl + mask)
+; Logical shift right by constant (uses EXTZV)
 define i32 @lshr_const(i32 %a) {
 ; CHECK-LABEL: lshr_const:
-; CHECK:       movl	4(%ap), %r0
-; CHECK:       rotl	$28, %r0, %r0
-; CHECK:       bicl2	$-268435456, %r0
-; CHECK:       ret
+; CHECK:       extzv	$4, $28, 4(%ap), %r0
+; CHECK-NEXT:  ret
   %r = lshr i32 %a, 4
   ret i32 %r
 }

@@ -196,14 +196,14 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::UDIVREM,    MVT::i32, Expand);
   setOperationAction(ISD::SDIVREM,    MVT::i32, Expand);
 
-  // Bit manipulation: VAX has no native CLZ, CTZ, bswap, or popcount.
-  // CTZ could use FFS in the future; for now expand all to libcalls.
+    // Bit manipulation: VAX has no native CLZ, bswap, or popcount.
+  // CTTZ_ZERO_UNDEF uses VAX FFS instruction directly.
   setOperationAction(ISD::CTLZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTTZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTPOP,      MVT::i32, Expand);
   setOperationAction(ISD::BSWAP,      MVT::i32, Expand);
   setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Legal);
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
 
@@ -309,7 +309,8 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::CASEL:        return "VAXISD::CASEL";
   case VAXISD::ASHQ:         return "VAXISD::ASHQ";
   case VAXISD::EMUL:         return "VAXISD::EMUL";
-  case VAXISD::EDIV:         return "VAXISD::EDIV";
+    case VAXISD::EDIV:         return "VAXISD::EDIV";
+  case VAXISD::EXTZV:        return "VAXISD::EXTZV";
   default:                   return nullptr;
   }
 }
@@ -529,9 +530,8 @@ SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
-  // VAX has no logical right shift. Use: srl(x, n) = rotl(x, 32-n) & mask.
-  // For constant n, mask = (1 << (32-n)) - 1 = ~0u >> n.
-  // For variable n, compute mask dynamically via ASHL.
+  // VAX has no logical right shift instruction, but EXTZV (extract zero-extended
+  // bit field) achieves the same result: srl(x, n) = extzv(n, 32-n, x).
   SDLoc DL(Op);
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
@@ -539,25 +539,15 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     unsigned N = CN->getZExtValue() & 31;
     if (N == 0) return Src;
-    // rotl(src, 32-N) then AND with mask
-    SDValue Rot = DAG.getNode(ISD::ROTL, DL, MVT::i32, Src,
-                              DAG.getConstant(32 - N, DL, MVT::i32));
-    uint32_t Mask = 0xFFFFFFFFu >> N;
-    return DAG.getNode(ISD::AND, DL, MVT::i32, Rot,
-                       DAG.getConstant(Mask, DL, MVT::i32));
+    // extzv(pos=N, size=32-N, base=Src) → extract bits [N..31], zero-extend
+    return DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
+                       DAG.getConstant(N, DL, MVT::i32),
+                       DAG.getConstant(32 - N, DL, MVT::i32), Src);
   }
-  // Variable logical right shift: ASHL(-n, x) gives arithmetic right shift,
-  // then mask off sign-extended bits.
-  // Mask = (1 << (32-n)) - 1 = ~((-1) << (32-n)) = ~ASHL(32-n, -1).
-  SDValue NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
-                               DAG.getConstant(0, DL, MVT::i32), Cnt);
-  SDValue Shifted = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Src);
-  SDValue MaskShift = DAG.getNode(ISD::SUB, DL, MVT::i32,
-                                  DAG.getConstant(32, DL, MVT::i32), Cnt);
-  SDValue SignBits = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, MaskShift,
-                                 DAG.getAllOnesConstant(DL, MVT::i32));
-  SDValue Mask = DAG.getNOT(DL, SignBits, MVT::i32);
-  return DAG.getNode(ISD::AND, DL, MVT::i32, Shifted, Mask);
+  // Variable shift: compute size = 32 - cnt, then extzv(cnt, size, src).
+  SDValue Size = DAG.getNode(ISD::SUB, DL, MVT::i32,
+                             DAG.getConstant(32, DL, MVT::i32), Cnt);
+  return DAG.getNode(VAXISD::EXTZV, DL, MVT::i32, Cnt, Size, Src);
 }
 
 SDValue VAXTargetLowering::LowerSHL_PARTS(SDValue Op,
