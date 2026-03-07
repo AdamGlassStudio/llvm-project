@@ -22,14 +22,18 @@
 // f32 returns in R0 (same register as i32).
 // f64 (D_float) returns in R0_R1 (quadword register pair).
 def RetCC_VAX : CallingConv<[
+  // Promote i8/i16 returns to i32 (CALLS convention: R0 is always longword).
+  CCIfType<[i8, i16], CCPromoteToType<i32>>,
   CCIfType<[f32], CCAssignToReg<[R0]>>,
   CCIfType<[f64], CCAssignToReg<[R0_R1]>>,
   CCIfType<[i64], CCCustom<"CC_VAX_RetI64">>,
   CCIfType<[i32], CCAssignToReg<[R0, R1]>>
 ]>;
 
-// Argument convention: all on stack (CALLS pushes args right-to-left)
+// Argument convention: all on stack (CALLS pushes args right-to-left).
+// i8/i16 promoted to i32 — VAX CALLS always pushes longwords.
 def CC_VAX : CallingConv<[
+  CCIfType<[i8, i16], CCPromoteToType<i32>>,
   CCIfType<[f64], CCAssignToStack<8, 4>>,
   CCIfType<[f32], CCAssignToStack<4, 4>>,
   CCAssignToStack<4, 4>

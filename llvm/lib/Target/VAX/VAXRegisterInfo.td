@@ -22,7 +22,8 @@ let Namespace = "VAX" in {
 
 // Byte (8-bit) register views — low byte of each GPR.
 // VAX byte instructions select width via the opcode, not the register name.
-// Empty AsmName: these are internal sub-registers, never written in assembly.
+// Empty AsmName avoids AsmParser ambiguity (BR0/WR0/R0 all map to "%r0").
+// The InstPrinter overrides printRegName to print the parent name.
 // Only R0-R11 (allocatable registers) get sub-register views.
 // AP/FP/SP/PC are reserved and don't need byte/word sub-registers.
 foreach i = 0-11 in

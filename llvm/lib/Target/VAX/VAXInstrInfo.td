@@ -528,6 +528,137 @@ defm MOVB : VAXTruncStore<0x90, "movb", truncstorei8>;
 defm MOVW : VAXTruncStore<0xB0, "movw", truncstorei16>;
 } // let Defs = [PSW] — end of Phase 7 conversion/move block
 
+//===----------------------------------------------------------------------===//
+// Phase 33B — Native byte/word loads, stores, extends, truncates
+//===----------------------------------------------------------------------===//
+
+let Defs = [PSW] in {
+
+// MOVB (0x90) — native i8 load/store/copy (byte register class).
+// reg <- mem (byte load)
+let HasMemOp = 1 in
+def MOVBload : InstVAX<0x90, (outs GPRB:$dst), (ins VAXMemOp:$src),
+    "movb\t$src, $dst",
+    [(set GPRB:$dst, (load VAXMem:$src))]>;
+// reg <- globaladdr (byte load via PC-relative)
+def MOVBload_ga : InstVAX<0x90, (outs GPRB:$dst), (ins i32imm:$sym),
+    "movb\t$sym, $dst",
+    [(set GPRB:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+// mem <- reg (byte store)
+let HasMemOp = 1 in
+def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
+    "movb\t$src, $dst",
+    [(store GPRB:$src, VAXMem:$dst)]>;
+// globaladdr <- reg (byte store via PC-relative)
+def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
+    "movb\t$src, $sym",
+    [(store GPRB:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+// reg <- reg (byte copy; no DAG pattern — emitted by copyPhysReg)
+def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
+    "movb\t$src, $dst", []>;
+
+// MOVW (0xB0) — native i16 load/store/copy (word register class).
+// reg <- mem (word load)
+let HasMemOp = 1 in
+def MOVWload : InstVAX<0xB0, (outs GPRW:$dst), (ins VAXMemOp:$src),
+    "movw\t$src, $dst",
+    [(set GPRW:$dst, (load VAXMem:$src))]>;
+// reg <- globaladdr (word load via PC-relative)
+def MOVWload_ga : InstVAX<0xB0, (outs GPRW:$dst), (ins i32imm:$sym),
+    "movw\t$sym, $dst",
+    [(set GPRW:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+// mem <- reg (word store)
+let HasMemOp = 1 in
+def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
+    "movw\t$src, $dst",
+    [(store GPRW:$src, VAXMem:$dst)]>;
+// globaladdr <- reg (word store via PC-relative)
+def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
+    "movw\t$src, $sym",
+    [(store GPRW:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+// reg <- reg (word copy; no DAG pattern — emitted by copyPhysReg)
+def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
+    "movw\t$src, $dst", []>;
+
+// MOVZBL (0x9A) reg <- reg: zero-extend i8 to i32.
+def MOVZBL_rr : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins GPRB:$src),
+    "movzbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (zext GPRB:$src))]>;
+
+// CVTBL (0x98) reg <- reg: sign-extend i8 to i32.
+def CVTBL_rr_ext : InstVAX<0x98, (outs GPRnoPC:$dst), (ins GPRB:$src),
+    "cvtbl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sext GPRB:$src))]>;
+
+// MOVZWL (0x3C) reg <- reg: zero-extend i16 to i32.
+def MOVZWL_rr : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins GPRW:$src),
+    "movzwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (zext GPRW:$src))]>;
+
+// CVTWL (0x32) reg <- reg: sign-extend i16 to i32.
+def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
+    "cvtwl\t$src, $dst",
+    [(set GPRnoPC:$dst, (sext GPRW:$src))]>;
+
+} // let Defs = [PSW]
+
+// anyext i8/i16→i32: use MOVZBL/MOVZWL (zero-fill is cheapest).
+def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
+def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
+
+// i8→i16 extensions: go through i32 (no CVTBW/MOVZBW patterns yet).
+def : Pat<(i16 (zext GPRB:$src)),
+          (EXTRACT_SUBREG (MOVZBL_rr GPRB:$src), sub_16lo)>;
+def : Pat<(i16 (sext GPRB:$src)),
+          (EXTRACT_SUBREG (CVTBL_rr_ext GPRB:$src), sub_16lo)>;
+def : Pat<(i16 (anyext GPRB:$src)),
+          (EXTRACT_SUBREG (MOVZBL_rr GPRB:$src), sub_16lo)>;
+
+// Truncate patterns: extract sub-register (free — no instruction emitted).
+def : Pat<(i8  (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_8lo)>;
+def : Pat<(i16 (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_16lo)>;
+def : Pat<(i8  (trunc GPRW:$src)),    (EXTRACT_SUBREG GPRW:$src, sub_8lo)>;
+
+//===----------------------------------------------------------------------===//
+// Phase 33B+ — Native byte/word arithmetic
+//===----------------------------------------------------------------------===//
+
+let Defs = [PSW] in {
+
+// ADDB3 (0x81) — byte add: dst = src1 + src2
+def ADDB3_rr : InstVAX<0x81, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
+    "addb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (add GPRB:$a, GPRB:$b))]> {
+  let isCommutable = 1;
+}
+// SUBB3 (0x83) — byte subtract: dst = src2 - src1
+def SUBB3_rr : InstVAX<0x83, (outs GPRB:$dst), (ins GPRB:$s, GPRB:$m),
+    "subb3\t$s, $m, $dst",
+    [(set GPRB:$dst, (sub GPRB:$m, GPRB:$s))]>;
+
+// MNEGB (0x8E) — byte negate: dst = -src
+def MNEGB : InstVAX<0x8E, (outs GPRB:$dst), (ins GPRB:$src),
+    "mnegb\t$src, $dst",
+    [(set GPRB:$dst, (ineg GPRB:$src))]>;
+
+// ADDW3 (0xA1) — word add: dst = src1 + src2
+def ADDW3_rr : InstVAX<0xA1, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
+    "addw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (add GPRW:$a, GPRW:$b))]> {
+  let isCommutable = 1;
+}
+// SUBW3 (0xA3) — word subtract: dst = src2 - src1
+def SUBW3_rr : InstVAX<0xA3, (outs GPRW:$dst), (ins GPRW:$s, GPRW:$m),
+    "subw3\t$s, $m, $dst",
+    [(set GPRW:$dst, (sub GPRW:$m, GPRW:$s))]>;
+
+// MNEGW (0xAE) — word negate: dst = -src
+def MNEGW : InstVAX<0xAE, (outs GPRW:$dst), (ins GPRW:$src),
+    "mnegw\t$src, $dst",
+    [(set GPRW:$dst, (ineg GPRW:$src))]>;
+
+} // let Defs = [PSW]
+
 // LEA_FI — materialize frame slot address as a register value.
 // Pseudo: expanded by eliminateFrameIndex to addl3 $offset, %fp, $dst.
 // Operand layout matches VAXMemOp (base, disp) for eliminateFrameIndex.

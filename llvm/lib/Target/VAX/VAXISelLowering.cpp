@@ -82,6 +82,8 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
   // Register classes by value type.
+  addRegisterClass(MVT::i8,  &VAX::GPRBRegClass);
+  addRegisterClass(MVT::i16, &VAX::GPRWRegClass);
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
   addRegisterClass(MVT::f32, &VAX::GPRIRegClass);
   addRegisterClass(MVT::f64, &VAX::QPRRegClass);
@@ -94,6 +96,90 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // calls getMinimalPhysRegClass on physical registers with MVT::i64, which
   // fails because no GPR class holds i64. Source-order is safest for now.
   setSchedulingPreference(Sched::Source);
+
+  //===------------------------------------------------------------------===//
+  // i8/i16 type legalization.
+  // With addRegisterClass(i8/i16), these types are legal and all operations
+  // default to Legal. We must explicitly mark operations that lack native
+  // byte/word instructions. "Promote" only works for operations that have
+  // a PromoteNode handler in LegalizeDAG; the rest use Expand or Custom.
+  //===------------------------------------------------------------------===//
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    // ADD, SUB: Legal — native ADDB3/SUBB3/ADDW3/SUBW3 patterns exist.
+
+    // MUL, DIV, REM: Promote to i32 (PromoteNode handles these).
+    // VAX has MULB/DIVB/MULW/DIVW but promoting is simpler for now.
+    setOperationAction(ISD::MUL,  VT, Promote);
+    setOperationAction(ISD::SDIV, VT, Promote);
+    setOperationAction(ISD::UDIV, VT, Promote);
+    setOperationAction(ISD::SREM, VT, Promote);
+    setOperationAction(ISD::UREM, VT, Promote);
+    setOperationAction(ISD::SDIVREM, VT, Expand);
+    setOperationAction(ISD::UDIVREM, VT, Expand);
+
+    // AND, OR, XOR: Promote to i32 (PromoteNode handles these).
+    // VAX has BISB/BICB/XORB but BIC is AND-NOT, needs VAXISD node.
+    setOperationAction(ISD::AND, VT, Promote);
+    setOperationAction(ISD::OR,  VT, Promote);
+    setOperationAction(ISD::XOR, VT, Promote);
+
+    // Shifts: Expand (no byte/word shift instructions on VAX;
+    // PromoteNode does NOT handle SHL/SRA/SRL).
+    setOperationAction(ISD::SHL, VT, Expand);
+    setOperationAction(ISD::SRA, VT, Expand);
+    setOperationAction(ISD::SRL, VT, Expand);
+    setOperationAction(ISD::ROTL, VT, Expand);
+    setOperationAction(ISD::ROTR, VT, Expand);
+
+    // Carry-chained arithmetic: Expand (PromoteNode doesn't handle these).
+    setOperationAction(ISD::ADDC, VT, Expand);
+    setOperationAction(ISD::ADDE, VT, Expand);
+    setOperationAction(ISD::SUBC, VT, Expand);
+    setOperationAction(ISD::SUBE, VT, Expand);
+
+    // Extended mul: Promote (PromoteNode handles SMUL_LOHI/UMUL_LOHI).
+    setOperationAction(ISD::MULHS,     VT, Promote);
+    setOperationAction(ISD::MULHU,     VT, Promote);
+    setOperationAction(ISD::SMUL_LOHI, VT, Promote);
+    setOperationAction(ISD::UMUL_LOHI, VT, Promote);
+
+    // Comparisons and selects: Promote (PromoteNode handles all of these).
+    setOperationAction(ISD::SETCC,     VT, Promote);
+    setOperationAction(ISD::SELECT,    VT, Promote);
+    setOperationAction(ISD::SELECT_CC, VT, Promote);
+    setOperationAction(ISD::BR_CC,     VT, Promote);
+
+    // Bit manipulation: Promote (PromoteNode handles these).
+    setOperationAction(ISD::CTLZ,             VT, Promote);
+    setOperationAction(ISD::CTTZ,             VT, Promote);
+    setOperationAction(ISD::CTPOP,            VT, Promote);
+    setOperationAction(ISD::BSWAP,            VT, Promote);
+    setOperationAction(ISD::CTLZ_ZERO_UNDEF,  VT, Promote);
+    setOperationAction(ISD::CTTZ_ZERO_UNDEF,  VT, Promote);
+    setOperationAction(ISD::BITREVERSE,        VT, Promote);
+
+    // Sign-extend-in-register: Expand (PromoteNode doesn't handle this).
+    // LLVM will expand to shift-left + arithmetic-shift-right.
+    setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
+
+    // FP conversions: Promote (PromoteNode handles these).
+    setOperationAction(ISD::FP_TO_SINT, VT, Promote);
+    setOperationAction(ISD::FP_TO_UINT, VT, Promote);
+    setOperationAction(ISD::SINT_TO_FP, VT, Promote);
+    setOperationAction(ISD::UINT_TO_FP, VT, Promote);
+
+    // Dynamic stack: Expand (not meaningful at i8/i16).
+    setOperationAction(ISD::DYNAMIC_STACKALLOC, VT, Expand);
+  }
+
+  // i8→i16 extending loads: expand to load i8 + extend.
+  // We don't define CVTBW/MOVZBW patterns yet.
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i16, MVT::i8, Expand);
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i16, MVT::i8, Expand);
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i16, MVT::i8, Expand);
+
+  // i16→i8 truncating stores: expand to truncate + store i8.
+  setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
@@ -167,9 +253,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i16, Legal); // MOVZWL (anyext)
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Legal); // CVTWL
   // i1 loads: C _Bool is i1 in LLVM IR. Promote to byte load (MOVZBL).
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i1, Promote);
-  setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i1, Promote);
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i1, Promote);
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1, Promote);
+    setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1, Promote);
+    setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1, Promote);
+  }
 
   // SIGN_EXTEND_INREG i1: no VAX instruction; expand to shift pair.
   // i8 and i16 are handled by CVTBL/CVTWL patterns in TableGen.
@@ -862,7 +950,16 @@ SDValue VAXTargetLowering::LowerReturn(
       continue;
     }
 
-    Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), OutVals[i], Flag);
+    SDValue RetVal = OutVals[i];
+    // Apply CC promotion: extend i8/i16 to i32 for register return.
+    if (VA.getLocInfo() == CCValAssign::SExt)
+      RetVal = DAG.getNode(ISD::SIGN_EXTEND, DL, VA.getLocVT(), RetVal);
+    else if (VA.getLocInfo() == CCValAssign::ZExt)
+      RetVal = DAG.getNode(ISD::ZERO_EXTEND, DL, VA.getLocVT(), RetVal);
+    else if (VA.getLocInfo() == CCValAssign::AExt)
+      RetVal = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), RetVal);
+
+    Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), RetVal, Flag);
     Flag = Chain.getValue(1);
     RetOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
   }
@@ -895,7 +992,28 @@ SDValue VAXTargetLowering::LowerFormalArguments(
     SDValue Ptr = DAG.getNode(ISD::ADD, DL, MVT::i32, AP, Off);
     SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, Ptr,
                                MachinePointerInfo());
-    InVals.push_back(Load);
+
+    // Handle CC promotion: if the arg was promoted (e.g., i8→i32),
+    // truncate back to the expected value type.
+    SDValue Val = Load;
+    if (VA.getValVT() != VA.getLocVT()) {
+      switch (VA.getLocInfo()) {
+      case CCValAssign::SExt:
+        Val = DAG.getNode(ISD::AssertSext, DL, VA.getLocVT(), Val,
+                          DAG.getValueType(VA.getValVT()));
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      case CCValAssign::ZExt:
+        Val = DAG.getNode(ISD::AssertZext, DL, VA.getLocVT(), Val,
+                          DAG.getValueType(VA.getValVT()));
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      default:
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      }
+    }
+    InVals.push_back(Val);
   }
 
   // For variadic functions, record where the first variadic arg starts.
@@ -939,6 +1057,16 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   for (int i = NumArgs - 1; i >= 0; --i) {
     SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
     SDValue Arg = CLI.OutVals[i];
+
+    // Apply CC promotion: extend i8/i16 args to i32 before pushing.
+    CCValAssign &VA = ArgLocs[i];
+    if (VA.getLocInfo() == CCValAssign::SExt)
+      Arg = DAG.getNode(ISD::SIGN_EXTEND, DL, VA.getLocVT(), Arg);
+    else if (VA.getLocInfo() == CCValAssign::ZExt)
+      Arg = DAG.getNode(ISD::ZERO_EXTEND, DL, VA.getLocVT(), Arg);
+    else if (VA.getLocInfo() == CCValAssign::AExt)
+      Arg = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Arg);
+
     if (Arg.getValueType() == MVT::f64) {
       // f64 (D_float): convert to VAX format and push as two i32 words.
       // For constants, convert IEEE→VAX D_float at compile time to avoid
@@ -1048,7 +1176,28 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
                                     InFlag);
     Chain  = RV.getValue(1);
     InFlag = RV.getValue(2);
-    InVals.push_back(RV.getValue(0));
+
+    // Handle CC promotion: if the return value was promoted (e.g., i8→i32),
+    // truncate or assert back to the expected value type.
+    SDValue Val = RV.getValue(0);
+    if (VA.getValVT() != VA.getLocVT()) {
+      switch (VA.getLocInfo()) {
+      case CCValAssign::SExt:
+        Val = DAG.getNode(ISD::AssertSext, DL, VA.getLocVT(), Val,
+                          DAG.getValueType(VA.getValVT()));
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      case CCValAssign::ZExt:
+        Val = DAG.getNode(ISD::AssertZext, DL, VA.getLocVT(), Val,
+                          DAG.getValueType(VA.getValVT()));
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      default:
+        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+        break;
+      }
+    }
+    InVals.push_back(Val);
   }
   return Chain;
 }

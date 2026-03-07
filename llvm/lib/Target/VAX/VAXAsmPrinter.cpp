@@ -461,10 +461,24 @@ void VAXAsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNo,
                                  raw_ostream &OS) {
   const MachineOperand &MO = MI->getOperand(OpNo);
   switch (MO.getType()) {
-  case MachineOperand::MO_Register:
-    // getRegisterName already includes the '%' prefix.
-    OS << VAXInstPrinter::getRegisterName(MO.getReg());
+  case MachineOperand::MO_Register: {
+    // Sub-registers (BR0-BR11, WR0-WR11) have internal record names.
+    // Resolve to the parent GPR name. VAX distinguishes width by opcode.
+    MCRegister Reg = MO.getReg();
+    const char *Name = VAXInstPrinter::getRegisterName(Reg);
+    if (Name[0] == 'B' || Name[0] == 'W') {
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      for (MCPhysReg SR : TRI->superregs(Reg)) {
+        const char *SRName = VAXInstPrinter::getRegisterName(SR);
+        if (SRName[0] == '%') {
+          Name = SRName;
+          break;
+        }
+      }
+    }
+    OS << Name;
     break;
+  }
   case MachineOperand::MO_Immediate:
     OS << '$' << MO.getImm();
     break;
@@ -507,7 +521,20 @@ bool VAXAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
 
   if (Disp != 0)
     OS << Disp;
-  OS << "(" << VAXInstPrinter::getRegisterName(Base.getReg()) << ")";
+  {
+    const char *Name = VAXInstPrinter::getRegisterName(Base.getReg());
+    if (Name[0] == 'B' || Name[0] == 'W') {
+      const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
+      for (MCPhysReg SR : TRI->superregs(Base.getReg())) {
+        const char *SRName = VAXInstPrinter::getRegisterName(SR);
+        if (SRName[0] == '%') {
+          Name = SRName;
+          break;
+        }
+      }
+    }
+    OS << "(" << Name << ")";
+  }
   return false;
 }
 
