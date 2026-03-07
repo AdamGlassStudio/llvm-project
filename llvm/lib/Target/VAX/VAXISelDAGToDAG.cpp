@@ -143,10 +143,10 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     SDValue SrcLo = N->getOperand(1);
     SDValue SrcHi = N->getOperand(2);
 
-    // Build QPR from i32 halves: REG_SEQUENCE QPRRegClass, SrcLo, sub_lo, SrcHi, sub_hi.
+    // Build QPR from i32 halves: REG_SEQUENCE QPRRegClass, SrcLo, VAX::sub_lo, SrcHi, VAX::sub_hi.
     SDValue QprRC = CurDAG->getTargetConstant(VAX::QPRRegClassID, DL, MVT::i32);
-    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
-    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDValue SubLoIdx = CurDAG->getTargetConstant(VAX::sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(VAX::sub_hi, DL, MVT::i32);
     SDNode *SrcPair = CurDAG->getMachineNode(
         TargetOpcode::REG_SEQUENCE, DL, MVT::i64,
         {QprRC, SrcLo, SubLoIdx, SrcHi, SubHiIdx});
@@ -192,8 +192,8 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
         VAX::EMUL, DL, MVT::i64, {Mulr, Muld, Add});
 
     // Extract i32 halves.
-    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
-    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDValue SubLoIdx = CurDAG->getTargetConstant(VAX::sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(VAX::sub_hi, DL, MVT::i32);
     SDNode *Lo = CurDAG->getMachineNode(
         TargetOpcode::EXTRACT_SUBREG, DL, MVT::i32,
         SDValue(Emul, 0), SubLoIdx);
@@ -218,8 +218,8 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
 
     // Build QPR from i32 halves via REG_SEQUENCE.
     SDValue QprRC = CurDAG->getTargetConstant(VAX::QPRRegClassID, DL, MVT::i32);
-    SDValue SubLoIdx = CurDAG->getTargetConstant(sub_lo, DL, MVT::i32);
-    SDValue SubHiIdx = CurDAG->getTargetConstant(sub_hi, DL, MVT::i32);
+    SDValue SubLoIdx = CurDAG->getTargetConstant(VAX::sub_lo, DL, MVT::i32);
+    SDValue SubHiIdx = CurDAG->getTargetConstant(VAX::sub_hi, DL, MVT::i32);
     SDNode *DvdPair = CurDAG->getMachineNode(
         TargetOpcode::REG_SEQUENCE, DL, MVT::i64,
         {QprRC, DvdLo, SubLoIdx, DvdHi, SubHiIdx});

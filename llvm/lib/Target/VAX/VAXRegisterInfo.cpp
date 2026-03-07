@@ -16,6 +16,7 @@
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace llvm;
+using namespace llvm::VAX;
 
 // Include enum values so GET_REGINFO_TARGET_DESC can reference VAX::GPRRegClassID etc.
 #define GET_REGINFO_ENUM

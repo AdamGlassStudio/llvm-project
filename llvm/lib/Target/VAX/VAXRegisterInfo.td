@@ -6,17 +6,42 @@
 //
 //===----------------------------------------------------------------------===//
 
-class VAXReg<bits<4> Enc, string n> : Register<n> {
+class VAXReg<bits<4> Enc, string n, list<Register> subregs = [],
+             list<SubRegIndex> subidx = []> : Register<n> {
   let HWEncoding{3-0} = Enc;
   let Namespace = "VAX";
+  let SubRegs = subregs;
+  let SubRegIndices = subidx;
 }
 
-// General-purpose registers R0-R11
+// Sub-register indices for byte and word views of 32-bit GPRs.
+let Namespace = "VAX" in {
+  def sub_8lo  : SubRegIndex<8, 0>;
+  def sub_16lo : SubRegIndex<16, 0>;
+}
+
+// Byte (8-bit) register views — low byte of each GPR.
+// VAX byte instructions select width via the opcode, not the register name.
+// Empty AsmName: these are internal sub-registers, never written in assembly.
+// Only R0-R11 (allocatable registers) get sub-register views.
+// AP/FP/SP/PC are reserved and don't need byte/word sub-registers.
+foreach i = 0-11 in
+  def BR#i : VAXReg<!cast<bits<4>>(i), "">, DwarfRegNum<[i]>;
+
+// Word (16-bit) register views — low word, with byte sub-register.
+foreach i = 0-11 in
+  def WR#i : VAXReg<!cast<bits<4>>(i), "",
+                    [!cast<Register>("BR"#i)], [sub_8lo]>,
+             DwarfRegNum<[i]>;
+
+// General-purpose registers R0-R11 (32-bit, with word sub-register)
 // Calling convention: R0-R1 return values; R0-R5 caller-saved; R6-R11 callee-saved
 foreach i = 0-11 in
-  def R#i : VAXReg<!cast<bits<4>>(i), "%r"#i>, DwarfRegNum<[i]>;
+  def R#i : VAXReg<!cast<bits<4>>(i), "%r"#i,
+                   [!cast<Register>("WR"#i)], [sub_16lo]>,
+            DwarfRegNum<[i]>;
 
-// Special-purpose registers (ELF GAS requires % prefix)
+// Special-purpose registers — no sub-register views (reserved, never allocated)
 def AP  : VAXReg<12, "%ap">,  DwarfRegNum<[12]>; // Argument Pointer  (R12)
 def FP  : VAXReg<13, "%fp">,  DwarfRegNum<[13]>; // Frame Pointer     (R13)
 def SP  : VAXReg<14, "%sp">,  DwarfRegNum<[14]>; // Stack Pointer     (R14)
@@ -48,14 +73,13 @@ def GPRnoPC : RegisterClass<"VAX", [i32], 32,
 def GPRI : RegisterClass<"VAX", [i32, f32], 32,
     (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
 
-// Word (i16) register class — same physical regs as GPRI, low 16 bits used.
-// Allocation order: caller-saved first (R0-R5), then callee-saved (R6-R11).
-def GPRW : RegisterClass<"VAX", [i16], 32,
-    (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
+// Word (i16) register class — 16-bit sub-register views of R0-R11.
+def GPRW : RegisterClass<"VAX", [i16], 16,
+    (add WR0, WR1, WR2, WR3, WR4, WR5, WR6, WR7, WR8, WR9, WR10, WR11)>;
 
-// Byte (i8) register class — same physical regs as GPRI, low 8 bits used.
-def GPRB : RegisterClass<"VAX", [i8], 32,
-    (add R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11)>;
+// Byte (i8) register class — 8-bit sub-register views of R0-R11.
+def GPRB : RegisterClass<"VAX", [i8], 8,
+    (add BR0, BR1, BR2, BR3, BR4, BR5, BR6, BR7, BR8, BR9, BR10, BR11)>;
 
 //===----------------------------------------------------------------------===//
 // Quadword Register Pairs (for MOVQ, ASHQ, D_float, i64)
