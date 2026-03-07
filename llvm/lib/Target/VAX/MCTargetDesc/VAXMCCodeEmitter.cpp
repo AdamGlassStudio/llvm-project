@@ -94,7 +94,7 @@ unsigned VAXMCCodeEmitter::getRegEncoding(MCRegister Reg) const {
   const MCRegisterInfo &MRI = *Ctx.getRegisterInfo();
 
   // For QPR registers (register pairs), use the low register's encoding.
-  if (unsigned SubReg = MRI.getSubReg(Reg, sub_lo))
+  if (unsigned SubReg = MRI.getSubReg(Reg, VAX::sub_lo))
     return MRI.getEncodingValue(SubReg);
 
   return MRI.getEncodingValue(Reg);
