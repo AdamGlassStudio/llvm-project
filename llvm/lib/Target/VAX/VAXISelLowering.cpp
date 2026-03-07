@@ -82,8 +82,13 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
   // Register classes by value type.
-  addRegisterClass(MVT::i8,  &VAX::GPRBRegClass);
-  addRegisterClass(MVT::i16, &VAX::GPRWRegClass);
+  // NOTE: i8/i16 are NOT registered as legal types. All sub-i32 integer
+  // arithmetic is promoted to i32. Byte/word loads and stores are handled
+  // via extending-load and truncating-store patterns (MOVZBL, CVTBL,
+  // MOVZWL, CVTWL, MOVB, MOVW) which don't require legal i8/i16 types.
+  // Registering i8/i16 caused LLVM to keep computations narrow, but VAX
+  // byte/word instructions leave upper register bits unchanged (not zeroed),
+  // leading to incorrect results when LLVM narrows i32 comparisons to i8.
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
   addRegisterClass(MVT::f32, &VAX::GPRIRegClass);
   addRegisterClass(MVT::f64, &VAX::QPRRegClass);
@@ -98,92 +103,10 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setSchedulingPreference(Sched::Source);
 
   //===------------------------------------------------------------------===//
-  // i8/i16 type legalization.
-  // With addRegisterClass(i8/i16), these types are legal and all operations
-  // default to Legal. We must explicitly mark operations that lack native
-  // byte/word instructions. "Promote" only works for operations that have
-  // a PromoteNode handler in LegalizeDAG; the rest use Expand or Custom.
+  // i8/i16 type legalization: NOT legal types.
+  // All sub-i32 integer operations are promoted to i32 by the type legalizer.
+  // We only need extending-load and truncating-store settings (below).
   //===------------------------------------------------------------------===//
-  for (auto VT : {MVT::i8, MVT::i16}) {
-    // ADD, SUB: Legal — native ADDB3/SUBB3/ADDW3/SUBW3 patterns exist.
-
-    // MUL, DIV, REM: Promote to i32 (PromoteNode handles these).
-    // VAX has MULB/DIVB/MULW/DIVW but promoting is simpler for now.
-    setOperationAction(ISD::MUL,  VT, Promote);
-    setOperationAction(ISD::SDIV, VT, Promote);
-    setOperationAction(ISD::UDIV, VT, Promote);
-    setOperationAction(ISD::SREM, VT, Promote);
-    setOperationAction(ISD::UREM, VT, Promote);
-    setOperationAction(ISD::SDIVREM, VT, Expand);
-    setOperationAction(ISD::UDIVREM, VT, Expand);
-
-    // AND, OR, XOR: native byte/word patterns exist.
-    // AND is Custom (lowered via VAXISD::BICL, same as i32).
-    // OR and XOR are Legal (BISB3/XORB3/BISW3/XORW3 patterns).
-    setOperationAction(ISD::AND, VT, Custom);
-    setOperationAction(ISD::OR,  VT, Legal);
-    setOperationAction(ISD::XOR, VT, Legal);
-
-    // Shifts: Custom — promote to i32, shift, truncate. Neither Promote
-    // (not in PromoteNode) nor Expand (asserts non-vector) works for scalar
-    // sub-i32 shifts.
-    setOperationAction(ISD::SHL, VT, Custom);
-    setOperationAction(ISD::SRA, VT, Custom);
-    setOperationAction(ISD::SRL, VT, Custom);
-    setOperationAction(ISD::ROTL, VT, Expand);
-    setOperationAction(ISD::ROTR, VT, Expand);
-
-    // Carry-chained arithmetic: Expand (PromoteNode doesn't handle these).
-    setOperationAction(ISD::ADDC, VT, Expand);
-    setOperationAction(ISD::ADDE, VT, Expand);
-    setOperationAction(ISD::SUBC, VT, Expand);
-    setOperationAction(ISD::SUBE, VT, Expand);
-
-    // Extended mul: Promote (PromoteNode handles SMUL_LOHI/UMUL_LOHI).
-    setOperationAction(ISD::MULHS,     VT, Promote);
-    setOperationAction(ISD::MULHU,     VT, Promote);
-    setOperationAction(ISD::SMUL_LOHI, VT, Promote);
-    setOperationAction(ISD::UMUL_LOHI, VT, Promote);
-
-    // Comparisons: BR_CC and SELECT_CC are Custom (same lowering as i32).
-    // SETCC stays Promote (result is i1/i32, not i8/i16).
-    // SELECT expands to SELECT_CC.
-    setOperationAction(ISD::SETCC,     VT, Promote);
-    setOperationAction(ISD::SELECT,    VT, Expand);
-    setOperationAction(ISD::SELECT_CC, VT, Custom);
-    setOperationAction(ISD::BR_CC,     VT, Custom);
-
-    // Bit manipulation: Promote (PromoteNode handles these).
-    setOperationAction(ISD::CTLZ,             VT, Promote);
-    setOperationAction(ISD::CTTZ,             VT, Promote);
-    setOperationAction(ISD::CTPOP,            VT, Promote);
-    setOperationAction(ISD::BSWAP,            VT, Promote);
-    setOperationAction(ISD::CTLZ_ZERO_UNDEF,  VT, Promote);
-    setOperationAction(ISD::CTTZ_ZERO_UNDEF,  VT, Promote);
-    setOperationAction(ISD::BITREVERSE,        VT, Promote);
-
-    // Sign-extend-in-register: Expand (PromoteNode doesn't handle this).
-    // LLVM will expand to shift-left + arithmetic-shift-right.
-    setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
-
-    // FP conversions: Promote (PromoteNode handles these).
-    setOperationAction(ISD::FP_TO_SINT, VT, Promote);
-    setOperationAction(ISD::FP_TO_UINT, VT, Promote);
-    setOperationAction(ISD::SINT_TO_FP, VT, Promote);
-    setOperationAction(ISD::UINT_TO_FP, VT, Promote);
-
-    // Dynamic stack: Expand (not meaningful at i8/i16).
-    setOperationAction(ISD::DYNAMIC_STACKALLOC, VT, Expand);
-  }
-
-  // i8→i16 extending loads: expand to load i8 + extend.
-  // We don't define CVTBW/MOVZBW patterns yet.
-  setLoadExtAction(ISD::SEXTLOAD, MVT::i16, MVT::i8, Expand);
-  setLoadExtAction(ISD::ZEXTLOAD, MVT::i16, MVT::i8, Expand);
-  setLoadExtAction(ISD::EXTLOAD,  MVT::i16, MVT::i8, Expand);
-
-  // i16→i8 truncating stores: expand to truncate + store i8.
-  setTruncStoreAction(MVT::i16, MVT::i8, Expand);
 
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
