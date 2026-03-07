@@ -1550,7 +1550,325 @@ def EDIV_m : InstVAX<0x7B, (outs),
     (ins VAXMemOp:$divisor, VAXMemOp:$dividend, VAXMemOp:$quo, VAXMemOp:$rem),
     "ediv\t$divisor, $dividend, $quo, $rem", []>;
 
+//===----------------------------------------------------------------------===//
+// Phase 35 — MC-layer completeness: branch-on-bit, loops, case, subroutine,
+// stack, string, privileged, bit-test, and miscellaneous instructions.
+//===----------------------------------------------------------------------===//
+
+// --- Branch-on-bit instructions ---
+
+// BBS (0xE0): branch on bit set. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBS : InstVAX<0xE0, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbs\t$pos, $base, $disp", []>;
+
+// BBC (0xE1): branch on bit clear. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBC : InstVAX<0xE1, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbc\t$pos, $base, $disp", []>;
+
+// BBSS (0xE2): branch on bit set and set. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBSS : InstVAX<0xE2, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbss\t$pos, $base, $disp", []>;
+
+// BBCS (0xE3): branch on bit clear and set. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBCS : InstVAX<0xE3, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbcs\t$pos, $base, $disp", []>;
+
+// BBSC (0xE4): branch on bit set and clear. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBSC : InstVAX<0xE4, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbsc\t$pos, $base, $disp", []>;
+
+// BBCC (0xE5): branch on bit clear and clear. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBCC : InstVAX<0xE5, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbcc\t$pos, $base, $disp", []>;
+
+// BBSSI (0xE6): branch on bit set and set interlocked. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBSSI : InstVAX<0xE6, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbssi\t$pos, $base, $disp", []>;
+
+// BBCCI (0xE7): branch on bit clear and clear interlocked. pos.rl, base.rl, disp.bb
+let Defs = [PSW] in
+def BBCCI : InstVAX<0xE7, (outs),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    "bbcci\t$pos, $base, $disp", []>;
+
+// BLBS (0xE8): branch on low bit set. src.rl, disp.bb
+def BLBS : InstVAX<0xE8, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$disp),
+    "blbs\t$src, $disp", []>;
+
+// BLBC (0xE9): branch on low bit clear. src.rl, disp.bb
+def BLBC : InstVAX<0xE9, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$disp),
+    "blbc\t$src, $disp", []>;
+
+// --- Bit test instructions (test bits, set PSW, no branch) ---
+
+// BITL (0xD3): bit test longword. mask.rl, src.rl — sets NZV from AND
+let Defs = [PSW] in
+def BITL : InstVAX<0xD3, (outs),
+    (ins VAXMemOp:$mask, VAXMemOp:$src),
+    "bitl\t$mask, $src", []>;
+
+// BITW (0xB3): bit test word. mask.rw, src.rw
+let Defs = [PSW] in
+def BITW : InstVAX<0xB3, (outs),
+    (ins VAXMemOp:$mask, VAXMemOp:$src),
+    "bitw\t$mask, $src", []>;
+
+// BITB (0x93): bit test byte. mask.rb, src.rb
+let Defs = [PSW] in
+def BITB : InstVAX<0x93, (outs),
+    (ins VAXMemOp:$mask, VAXMemOp:$src),
+    "bitb\t$mask, $src", []>;
+
+// --- Loop instructions ---
+
+// SOBGEQ (0xF4): subtract one and branch if >= 0. index.ml, disp.bb
+let Defs = [PSW] in
+def SOBGEQ : InstVAX<0xF4, (outs),
+    (ins VAXMemOp:$index, VAXMemOp:$disp),
+    "sobgeq\t$index, $disp", []>;
+
+// AOBLEQ (0xF3): add one and branch if <= limit. limit.rl, index.ml, disp.bb
+let Defs = [PSW] in
+def AOBLEQ : InstVAX<0xF3, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$index, VAXMemOp:$disp),
+    "aobleq\t$limit, $index, $disp", []>;
+
+// AOBLSS (0xF2): add one and branch if < limit. limit.rl, index.ml, disp.bb
+let Defs = [PSW] in
+def AOBLSS : InstVAX<0xF2, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$index, VAXMemOp:$disp),
+    "aoblss\t$limit, $index, $disp", []>;
+
+// ACBL (0xF1): add compare and branch longword.
+// limit.rl, add.rl, index.ml, disp.bw
+let Defs = [PSW] in
+def ACBL : InstVAX<0xF1, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    "acbl\t$limit, $add, $index, $disp", []>;
+
+// ACBW (0x3D): add compare and branch word.
+// limit.rw, add.rw, index.mw, disp.bw
+let Defs = [PSW] in
+def ACBW : InstVAX<0x3D, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    "acbw\t$limit, $add, $index, $disp", []>;
+
+// ACBB (0x9D): add compare and branch byte.
+// limit.rb, add.rb, index.mb, disp.bw
+let Defs = [PSW] in
+def ACBB : InstVAX<0x9D, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    "acbb\t$limit, $add, $index, $disp", []>;
+
+// ACBF (0x4F): add compare and branch F_float.
+// limit.rf, add.rf, index.mf, disp.bw
+let Defs = [PSW] in
+def ACBF : InstVAX<0x4F, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    "acbf\t$limit, $add, $index, $disp", []>;
+
+// ACBD (0x6F): add compare and branch D_float.
+// limit.rd, add.rd, index.md, disp.bw
+let Defs = [PSW] in
+def ACBD : InstVAX<0x6F, (outs),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    "acbd\t$limit, $add, $index, $disp", []>;
+
+// --- Case instructions ---
+
+// CASEB (0x8F): case byte. selector.rb, base.rb, limit.rb
+let Defs = [PSW] in
+def CASEB : InstVAX<0x8F, (outs),
+    (ins VAXMemOp:$sel, VAXMemOp:$base, VAXMemOp:$limit),
+    "caseb\t$sel, $base, $limit", []>;
+
+// CASEW (0xAF): case word. selector.rw, base.rw, limit.rw
+let Defs = [PSW] in
+def CASEW : InstVAX<0xAF, (outs),
+    (ins VAXMemOp:$sel, VAXMemOp:$base, VAXMemOp:$limit),
+    "casew\t$sel, $base, $limit", []>;
+
+// --- Subroutine instructions ---
+
+// CALLG (0xFA): call with general argument list. arglist.ab, dst.ab
+def CALLG : InstVAX<0xFA, (outs),
+    (ins VAXMemOp:$arglist, VAXMemOp:$dst),
+    "callg\t$arglist, $dst", []>;
+
+// --- Stack save/restore ---
+
+// PUSHR (0xBB): push registers. mask.rw
+def PUSHR : InstVAX<0xBB, (outs),
+    (ins VAXMemOp:$mask),
+    "pushr\t$mask", []>;
+
+// POPR (0xBA): pop registers. mask.rw
+def POPR : InstVAX<0xBA, (outs),
+    (ins VAXMemOp:$mask),
+    "popr\t$mask", []>;
+
+// --- String instructions ---
+
+// CMPC3 (0x29): compare characters 3-operand. len.rw, addr1.ab, addr2.ab
+let Defs = [R0, R1, R2, R3, PSW] in
+def CMPC3 : InstVAX<0x29, (outs),
+    (ins VAXMemOp:$len, VAXMemOp:$addr1, VAXMemOp:$addr2),
+    "cmpc3\t$len, $addr1, $addr2", []>;
+
+// CMPC5 (0x2D): compare characters 5-operand.
+// len1.rw, addr1.ab, fill.rb, len2.rw, addr2.ab
+let Defs = [R0, R1, R2, R3, PSW] in
+def CMPC5 : InstVAX<0x2D, (outs),
+    (ins VAXMemOp:$len1, VAXMemOp:$addr1, VAXMemOp:$fill,
+         VAXMemOp:$len2, VAXMemOp:$addr2),
+    "cmpc5\t$len1, $addr1, $fill, $len2, $addr2", []>;
+
+// MOVTC (0x2E): move translated characters.
+// srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab, dstlen.rw, dstaddr.ab
+let Defs = [R0, R1, R2, R3, R4, R5] in
+def MOVTC : InstVAX<0x2E, (outs),
+    (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
+         VAXMemOp:$tbl, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
+    "movtc\t$srclen, $srcaddr, $fill, $tbl, $dstlen, $dstaddr", []>;
+
+// MOVTUC (0x2F): move translated until character.
+// srclen.rw, srcaddr.ab, esc.rb, tbladdr.ab, dstlen.rw, dstaddr.ab
+let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
+def MOVTUC : InstVAX<0x2F, (outs),
+    (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$esc,
+         VAXMemOp:$tbl, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
+    "movtuc\t$srclen, $srcaddr, $esc, $tbl, $dstlen, $dstaddr", []>;
+
+// CRC (0x0B): compute cyclic redundancy check.
+// tbl.ab, inicrc.rl, strlen.rw, stream.ab
+let Defs = [R0, R1, R2, R3] in
+def CRC : InstVAX<0x0B, (outs),
+    (ins VAXMemOp:$tbl, VAXMemOp:$inicrc, VAXMemOp:$strlen, VAXMemOp:$stream),
+    "crc\t$tbl, $inicrc, $strlen, $stream", []>;
+
+// MATCHC (0x39): match characters. objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab
+let Defs = [R0, R1, R2, R3] in
+def MATCHC : InstVAX<0x39, (outs),
+    (ins VAXMemOp:$objlen, VAXMemOp:$objaddr, VAXMemOp:$srclen, VAXMemOp:$srcaddr),
+    "matchc\t$objlen, $objaddr, $srclen, $srcaddr", []>;
+
+// SPANC (0x2B): span characters. len.rw, addr.ab, tbladdr.ab, mask.rb
+let Defs = [R0, R1, R2, R3] in
+def SPANC : InstVAX<0x2B, (outs),
+    (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
+    "spanc\t$len, $addr, $tbl, $mask", []>;
+
+// --- Privileged / system instructions ---
+
+// CHMK (0xBC): change mode to kernel. code.rw
+def CHMK : InstVAX<0xBC, (outs),
+    (ins VAXMemOp:$code),
+    "chmk\t$code", []>;
+
+// CHME (0xBD): change mode to executive. code.rw
+def CHME : InstVAX<0xBD, (outs),
+    (ins VAXMemOp:$code),
+    "chme\t$code", []>;
+
+// CHMS (0xBE): change mode to supervisor. code.rw
+def CHMS : InstVAX<0xBE, (outs),
+    (ins VAXMemOp:$code),
+    "chms\t$code", []>;
+
+// CHMU (0xBF): change mode to user. code.rw
+def CHMU : InstVAX<0xBF, (outs),
+    (ins VAXMemOp:$code),
+    "chmu\t$code", []>;
+
+// PROBER (0x0C): probe read access. mode.rb, len.rw, base.ab
+let Defs = [PSW] in
+def PROBER : InstVAX<0x0C, (outs),
+    (ins VAXMemOp:$mode, VAXMemOp:$len, VAXMemOp:$base),
+    "prober\t$mode, $len, $base", []>;
+
+// PROBEW (0x0D): probe write access. mode.rb, len.rw, base.ab
+let Defs = [PSW] in
+def PROBEW : InstVAX<0x0D, (outs),
+    (ins VAXMemOp:$mode, VAXMemOp:$len, VAXMemOp:$base),
+    "probew\t$mode, $len, $base", []>;
+
+// INDEX (0x0A): compute index. subscript.rl, low.rl, high.rl, size.rl,
+// indexin.rl, indexout.wl
+let Defs = [PSW] in
+def INDEX : InstVAX<0x0A, (outs),
+    (ins VAXMemOp:$sub, VAXMemOp:$low, VAXMemOp:$high,
+         VAXMemOp:$size, VAXMemOp:$idxin, VAXMemOp:$idxout),
+    "index\t$sub, $low, $high, $size, $idxin, $idxout", []>;
+
+// ADAWI (0x58): add aligned word interlocked. src.rw, dst.mw
+let Defs = [PSW] in
+def ADAWI : InstVAX<0x58, (outs),
+    (ins VAXMemOp:$src, VAXMemOp:$dst),
+    "adawi\t$src, $dst", []>;
+
+// INSQHI (0x5C): insert into queue head interlocked. entry.ab, header.aq
+def INSQHI : InstVAX<0x5C, (outs),
+    (ins VAXMemOp:$entry, VAXMemOp:$header),
+    "insqhi\t$entry, $header", []>;
+
+// INSQTI (0x5D): insert into queue tail interlocked. entry.ab, header.aq
+def INSQTI : InstVAX<0x5D, (outs),
+    (ins VAXMemOp:$entry, VAXMemOp:$header),
+    "insqti\t$entry, $header", []>;
+
+// REMQHI (0x5E): remove from queue head interlocked. header.aq, addr.wl
+let Defs = [PSW] in
+def REMQHI : InstVAX<0x5E, (outs),
+    (ins VAXMemOp:$header, VAXMemOp:$addr),
+    "remqhi\t$header, $addr", []>;
+
+// REMQTI (0x5F): remove from queue tail interlocked. header.aq, addr.wl
+let Defs = [PSW] in
+def REMQTI : InstVAX<0x5F, (outs),
+    (ins VAXMemOp:$header, VAXMemOp:$addr),
+    "remqti\t$header, $addr", []>;
+
 } // let HasMemOp = 1
+
+// BPT (0x03): breakpoint trap. No operands.
+def BPT : InstVAX<0x03, (outs), (ins), "bpt", []>;
+
+// LDPCTX (0x06): load process context. No operands (privileged).
+def LDPCTX : InstVAX<0x06, (outs), (ins), "ldpctx", []>;
+
+// SVPCTX (0x07): save process context. No operands (privileged).
+def SVPCTX : InstVAX<0x07, (outs), (ins), "svpctx", []>;
+
+// XFC (0xFC): extended function call. No operands.
+def XFC : InstVAX<0xFC, (outs), (ins), "xfc", []>;
+
+// BSBB (0x10): branch to subroutine byte displacement. disp.bb
+def BSBB : InstVAX<0x10, (outs), (ins brtarget:$dst),
+    "bsbb\t$dst", []>;
+
+// BSBW (0x30): branch to subroutine word displacement. disp.bw
+def BSBW : InstVAX<0x30, (outs), (ins brtarget:$dst),
+    "bsbw\t$dst", []>;
+
+// RSB (0x05): return from subroutine. No operands.
+let isReturn = 1, isBarrier = 1, isTerminator = 1 in
+def RSB : InstVAX<0x05, (outs), (ins), "rsb", []>;
 
 // Atomic load/store for i8/i16 (after all instruction defs).
 def : Pat<(atomic_load_8  VAXMem:$src), (MOVZBL_rm VAXMemOp:$src)>;
