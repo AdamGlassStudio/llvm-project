@@ -624,13 +624,18 @@ def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
 def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
 def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
 
-// i8→i16 extensions: go through i32 (no CVTBW/MOVZBW patterns yet).
-def : Pat<(i16 (zext GPRB:$src)),
-          (EXTRACT_SUBREG (MOVZBL_rr GPRB:$src), sub_16lo)>;
-def : Pat<(i16 (sext GPRB:$src)),
-          (EXTRACT_SUBREG (CVTBL_rr_ext GPRB:$src), sub_16lo)>;
-def : Pat<(i16 (anyext GPRB:$src)),
-          (EXTRACT_SUBREG (MOVZBL_rr GPRB:$src), sub_16lo)>;
+// CVTBW (0x99) reg <- reg: sign-extend i8 to i16.
+def CVTBW_rr : InstVAX<0x99, (outs GPRW:$dst), (ins GPRB:$src),
+    "cvtbw\t$src, $dst",
+    [(set GPRW:$dst, (sext GPRB:$src))]>;
+
+// MOVZBW (0x9B) reg <- reg: zero-extend i8 to i16.
+def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
+    "movzbw\t$src, $dst",
+    [(set GPRW:$dst, (zext GPRB:$src))]>;
+
+// i8→i16 any-extend: use zero-extend (cheapest).
+def : Pat<(i16 (anyext GPRB:$src)), (MOVZBW_rr GPRB:$src)>;
 
 // Truncate patterns: extract sub-register (free — no instruction emitted).
 def : Pat<(i8  (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_8lo)>;
