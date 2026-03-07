@@ -189,7 +189,7 @@ private:
 /// Parses GAS-syntax VAX assembly.
 class VAXAsmParser : public MCTargetAsmParser {
   MCAsmParser &Parser;
-  SmallVector<std::string, 4> MnemonicStorage; // owns aliased mnemonic strings
+
 
   bool matchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
                                OperandVector &Operands, MCStreamer &Out,
@@ -314,21 +314,29 @@ bool VAXAsmParser::matchAndEmitInstruction(SMLoc Loc, unsigned &Opcode,
 bool VAXAsmParser::parseInstruction(ParseInstructionInfo &Info, StringRef Name,
                                     SMLoc NameLoc,
                                     OperandVector &Operands) {
+  // GAS branch/jump aliases: explicit mapping table.
   // GAS accepts "j<cond>" as aliases for "b<cond>" branch instructions,
-  // and "jbr" as an alias for "brw" (unconditional branch word).
-  // GAS also accepts "bcc"/"bcs" as aliases for "bgequ"/"blssu".
+  // "jbr" for "brw", and "bcc"/"bcs" for "bgequ"/"blssu".
   StringRef Mnemonic = Name;
-  if (Mnemonic == "jbr") {
-    Mnemonic = "brw";
-  } else if (Mnemonic.starts_with("j") && Mnemonic.size() > 1) {
-    MnemonicStorage.push_back(("b" + Mnemonic.drop_front(1)).str());
-    Mnemonic = MnemonicStorage.back();
-  }
-  // After j→b translation, also handle bcc/bcs → bgequ/blssu.
-  if (Mnemonic == "bcc" || Mnemonic == "jcc")
-    Mnemonic = "bgequ";
-  else if (Mnemonic == "bcs" || Mnemonic == "jcs")
-    Mnemonic = "blssu";
+  StringRef Alias = StringSwitch<StringRef>(Mnemonic)
+    .Case("jbr",   "brw")
+    .Case("jeql",  "beql")
+    .Case("jneq",  "bneq")
+    .Case("jgtr",  "bgtr")
+    .Case("jgeq",  "bgeq")
+    .Case("jlss",  "blss")
+    .Case("jleq",  "bleq")
+    .Case("jgtru", "bgtru")
+    .Case("jgequ", "bgequ")
+    .Case("jlssu", "blssu")
+    .Case("jlequ", "blequ")
+    .Case("jcc",   "bgequ")
+    .Case("jcs",   "blssu")
+    .Case("bcc",   "bgequ")
+    .Case("bcs",   "blssu")
+    .Default(StringRef());
+  if (!Alias.empty())
+    Mnemonic = Alias;
 
   // Mnemonic is the first token operand.
   Operands.push_back(VAXOperand::createToken(Mnemonic, NameLoc));
