@@ -90,6 +90,7 @@ private:
   SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAND(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerSHL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRL(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;

@@ -124,11 +124,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
     setOperationAction(ISD::OR,  VT, Legal);
     setOperationAction(ISD::XOR, VT, Legal);
 
-    // Shifts: Expand (no byte/word shift instructions on VAX;
-    // PromoteNode does NOT handle SHL/SRA/SRL).
-    setOperationAction(ISD::SHL, VT, Expand);
-    setOperationAction(ISD::SRA, VT, Expand);
-    setOperationAction(ISD::SRL, VT, Expand);
+    // Shifts: Custom — promote to i32, shift, truncate. Neither Promote
+    // (not in PromoteNode) nor Expand (asserts non-vector) works for scalar
+    // sub-i32 shifts.
+    setOperationAction(ISD::SHL, VT, Custom);
+    setOperationAction(ISD::SRA, VT, Custom);
+    setOperationAction(ISD::SRL, VT, Custom);
     setOperationAction(ISD::ROTL, VT, Expand);
     setOperationAction(ISD::ROTR, VT, Expand);
 
@@ -414,6 +415,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
+  case ISD::SHL:           return LowerSHL(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
@@ -603,42 +605,65 @@ SDValue VAXTargetLowering::LowerAND(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
   // VAX ASHL with negative count does arithmetic right shift.
-  // Lower sra(x, n) → VAXISD::ASHL(-n, x).
   SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
 
+  // Sub-i32: sign-extend to i32, shift, truncate back.
+  if (VT != MVT::i32) {
+    SDValue Ext = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, Src);
+    SDValue Shift = DAG.getNode(ISD::SRA, DL, MVT::i32, Ext, Cnt);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+  }
+
+  // i32: lower sra(x, n) → VAXISD::ASHL(-n, x).
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
-    // Constant shift: negate at compile time.
     int64_t NegAmt = -CN->getSExtValue();
     return DAG.getNode(VAXISD::ASHL, DL, MVT::i32,
                        DAG.getSignedConstant(NegAmt, DL, MVT::i32), Src);
   }
-  // Variable shift: emit MNEGL + ASHL.
   SDValue NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
                                DAG.getConstant(0, DL, MVT::i32), Cnt);
   return DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Src);
 }
 
 SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
-  // VAX has no logical right shift instruction, but EXTZV (extract zero-extended
-  // bit field) achieves the same result: srl(x, n) = extzv(n, 32-n, x).
+  // VAX has no logical right shift instruction.
   SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
 
+  // Sub-i32: zero-extend to i32, shift, truncate back.
+  if (VT != MVT::i32) {
+    SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
+    SDValue Shift = DAG.getNode(ISD::SRL, DL, MVT::i32, Ext, Cnt);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+  }
+
+  // i32: srl(x, n) = extzv(n, 32-n, x).
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     unsigned N = CN->getZExtValue() & 31;
     if (N == 0) return Src;
-    // extzv(pos=N, size=32-N, base=Src) → extract bits [N..31], zero-extend
     return DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
                        DAG.getConstant(N, DL, MVT::i32),
                        DAG.getConstant(32 - N, DL, MVT::i32), Src);
   }
-  // Variable shift: compute size = 32 - cnt, then extzv(cnt, size, src).
   SDValue Size = DAG.getNode(ISD::SUB, DL, MVT::i32,
                              DAG.getConstant(32, DL, MVT::i32), Cnt);
   return DAG.getNode(VAXISD::EXTZV, DL, MVT::i32, Cnt, Size, Src);
+}
+
+SDValue VAXTargetLowering::LowerSHL(SDValue Op, SelectionDAG &DAG) const {
+  // Sub-i32 SHL: zero-extend to i32, shift, truncate back.
+  SDLoc DL(Op);
+  MVT VT = Op.getSimpleValueType();
+  SDValue Src = Op.getOperand(0);
+  SDValue Cnt = Op.getOperand(1);
+  SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
+  SDValue Shift = DAG.getNode(ISD::SHL, DL, MVT::i32, Ext, Cnt);
+  return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
 }
 
 SDValue VAXTargetLowering::LowerSHL_PARTS(SDValue Op,
