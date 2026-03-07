@@ -188,6 +188,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Global addresses are lowered to PC-relative wrappers.
   setOperationAction(ISD::GlobalAddress, MVT::i32, Custom);
   setOperationAction(ISD::GlobalTLSAddress, MVT::i32, Custom);
+  setOperationAction(ISD::BlockAddress,  MVT::i32, Custom);
   setOperationAction(ISD::ConstantPool,  MVT::i32, Custom);
 
   // Jump table addresses are lowered to PC-relative wrappers.
@@ -412,6 +413,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   switch (Op.getOpcode()) {
   case ISD::GlobalAddress: return LowerGlobalAddress(Op, DAG);
   case ISD::GlobalTLSAddress: return LowerGlobalTLSAddress(Op, DAG);
+  case ISD::BlockAddress:  return LowerBlockAddress(Op, DAG);
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
@@ -824,6 +826,16 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   SDValue Addr = DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
 
   return Addr;
+}
+
+SDValue VAXTargetLowering::LowerBlockAddress(SDValue Op,
+                                              SelectionDAG &DAG) const {
+  const BlockAddressSDNode *BAN = cast<BlockAddressSDNode>(Op);
+  const BlockAddress *BA = BAN->getBlockAddress();
+  SDLoc DL(Op);
+
+  SDValue Result = DAG.getTargetBlockAddress(BA, MVT::i32, BAN->getOffset());
+  return DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, Result);
 }
 
 SDValue VAXTargetLowering::LowerGlobalTLSAddress(SDValue Op,
