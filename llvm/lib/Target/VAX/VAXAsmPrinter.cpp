@@ -286,6 +286,16 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
       Inst.addOperand(MCOperand::createExpr(Expr));
       break;
     }
+    case MachineOperand::MO_BlockAddress: {
+      const MCSymbol *Sym = GetBlockAddressSymbol(MO.getBlockAddress());
+      const MCExpr *Expr = MCSymbolRefExpr::create(Sym, OutContext);
+      if (MO.getOffset())
+        Expr = MCBinaryExpr::createAdd(
+            Expr, MCConstantExpr::create(MO.getOffset(), OutContext),
+            OutContext);
+      Inst.addOperand(MCOperand::createExpr(Expr));
+      break;
+    }
     default:
       report_fatal_error("VAXAsmPrinter: unsupported MachineOperand type");
     }
