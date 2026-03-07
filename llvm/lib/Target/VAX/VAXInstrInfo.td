@@ -549,6 +549,11 @@ let HasMemOp = 1 in
 def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store GPRB:$src, VAXMem:$dst)]>;
+// mem <- imm (byte store immediate)
+let HasMemOp = 1 in
+def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
+    "movb\t$src, $dst",
+    [(store (i8 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (byte store via PC-relative)
 def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
     "movb\t$src, $sym",
@@ -556,6 +561,10 @@ def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
 // reg <- reg (byte copy; no DAG pattern — emitted by copyPhysReg)
 def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
     "movb\t$src, $dst", []>;
+// reg <- imm (byte immediate load)
+def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins i8imm:$src),
+    "movb\t$src, $dst",
+    [(set GPRB:$dst, (i8 imm:$src))]>;
 
 // MOVW (0xB0) — native i16 load/store/copy (word register class).
 // reg <- mem (word load)
@@ -572,6 +581,11 @@ let HasMemOp = 1 in
 def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store GPRW:$src, VAXMem:$dst)]>;
+// mem <- imm (word store immediate)
+let HasMemOp = 1 in
+def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
+    "movw\t$src, $dst",
+    [(store (i16 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (word store via PC-relative)
 def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
     "movw\t$src, $sym",
@@ -579,6 +593,10 @@ def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
 // reg <- reg (word copy; no DAG pattern — emitted by copyPhysReg)
 def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
     "movw\t$src, $dst", []>;
+// reg <- imm (word immediate load)
+def MOVWri : InstVAX<0xB0, (outs GPRW:$dst), (ins i16imm:$src),
+    "movw\t$src, $dst",
+    [(set GPRW:$dst, (i16 imm:$src))]>;
 
 // MOVZBL (0x9A) reg <- reg: zero-extend i8 to i32.
 def MOVZBL_rr : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins GPRB:$src),
@@ -657,6 +675,86 @@ def MNEGW : InstVAX<0xAE, (outs GPRW:$dst), (ins GPRW:$src),
     "mnegw\t$src, $dst",
     [(set GPRW:$dst, (ineg GPRW:$src))]>;
 
+//===----------------------------------------------------------------------===//
+// Phase 33C — Byte/word compare, logic, complement, clear
+//===----------------------------------------------------------------------===//
+
+// CMPB (0x91) — compare byte: sets PSW from op1 - op2
+def CMPB_rr : InstVAX<0x91, (outs), (ins GPRB:$a, GPRB:$b),
+    "cmpb\t$a, $b",
+    [(vax_cmp GPRB:$a, GPRB:$b)]>;
+// TSTB (0x95) — test byte: sets PSW from op - 0
+def TSTB : InstVAX<0x95, (outs), (ins GPRB:$a),
+    "tstb\t$a",
+    [(vax_cmp GPRB:$a, (i8 0))]>;
+
+// CMPW (0xB1) — compare word: sets PSW from op1 - op2
+def CMPW_rr : InstVAX<0xB1, (outs), (ins GPRW:$a, GPRW:$b),
+    "cmpw\t$a, $b",
+    [(vax_cmp GPRW:$a, GPRW:$b)]>;
+// TSTW (0xB5) — test word: sets PSW from op - 0
+def TSTW : InstVAX<0xB5, (outs), (ins GPRW:$a),
+    "tstw\t$a",
+    [(vax_cmp GPRW:$a, (i16 0))]>;
+
+// MCOMB (0x92) — ones complement byte: dst = ~src
+def MCOMB : InstVAX<0x92, (outs GPRB:$dst), (ins GPRB:$src),
+    "mcomb\t$src, $dst",
+    [(set GPRB:$dst, (not GPRB:$src))]>;
+
+// MCOMW (0xB2) — ones complement word: dst = ~src
+def MCOMW : InstVAX<0xB2, (outs GPRW:$dst), (ins GPRW:$src),
+    "mcomw\t$src, $dst",
+    [(set GPRW:$dst, (not GPRW:$src))]>;
+
+// BISB3 (0x89) — bit set byte (OR): dst = src1 | src2
+def BISB3_rr : InstVAX<0x89, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
+    "bisb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (or GPRB:$a, GPRB:$b))]> {
+  let isCommutable = 1;
+}
+
+// BISW3 (0xA9) — bit set word (OR): dst = src1 | src2
+def BISW3_rr : InstVAX<0xA9, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
+    "bisw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (or GPRW:$a, GPRW:$b))]> {
+  let isCommutable = 1;
+}
+
+// XORB3 (0x8D) — exclusive-or byte: dst = src1 ^ src2
+def XORB3_rr : InstVAX<0x8D, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
+    "xorb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (xor GPRB:$a, GPRB:$b))]> {
+  let isCommutable = 1;
+}
+
+// XORW3 (0xAD) — exclusive-or word: dst = src1 ^ src2
+def XORW3_rr : InstVAX<0xAD, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
+    "xorw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (xor GPRW:$a, GPRW:$b))]> {
+  let isCommutable = 1;
+}
+
+// BICB3 (0x8B) — bit clear byte: dst = src & ~mask
+def BICB3_rr : InstVAX<0x8B, (outs GPRB:$dst),
+    (ins GPRB:$mask, GPRB:$src),
+    "bicb3\t$mask, $src, $dst",
+    [(set GPRB:$dst, (vax_bicl GPRB:$mask, GPRB:$src))]>;
+def BICB3_ri : InstVAX<0x8B, (outs GPRB:$dst),
+    (ins i8imm:$mask, GPRB:$src),
+    "bicb3\t$mask, $src, $dst",
+    [(set GPRB:$dst, (vax_bicl (i8 imm:$mask), GPRB:$src))]>;
+
+// BICW3 (0xAB) — bit clear word: dst = src & ~mask
+def BICW3_rr : InstVAX<0xAB, (outs GPRW:$dst),
+    (ins GPRW:$mask, GPRW:$src),
+    "bicw3\t$mask, $src, $dst",
+    [(set GPRW:$dst, (vax_bicl GPRW:$mask, GPRW:$src))]>;
+def BICW3_ri : InstVAX<0xAB, (outs GPRW:$dst),
+    (ins i16imm:$mask, GPRW:$src),
+    "bicw3\t$mask, $src, $dst",
+    [(set GPRW:$dst, (vax_bicl (i16 imm:$mask), GPRW:$src))]>;
+
 } // let Defs = [PSW]
 
 // LEA_FI — materialize frame slot address as a register value.
@@ -675,12 +773,23 @@ def SDT_VAXSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
 def vax_select_cc : SDNode<"VAXISD::SELECT_CC", SDT_VAXSelectCC,
     [SDNPInGlue]>;
 
-let usesCustomInserter = 1 in
+let usesCustomInserter = 1 in {
 def SELECT_CC_Pseudo : Pseudo<(outs GPRnoPC:$dst),
     (ins GPRnoPC:$truev, GPRnoPC:$falsev, i32imm:$cc),
     "#SELECT_CC $truev, $falsev, $cc",
     [(set GPRnoPC:$dst, (vax_select_cc GPRnoPC:$truev, GPRnoPC:$falsev,
                                         (i32 imm:$cc)))]>;
+def SELECT_CC_B_Pseudo : Pseudo<(outs GPRB:$dst),
+    (ins GPRB:$truev, GPRB:$falsev, i32imm:$cc),
+    "#SELECT_CC_B $truev, $falsev, $cc",
+    [(set GPRB:$dst, (vax_select_cc GPRB:$truev, GPRB:$falsev,
+                                      (i32 imm:$cc)))]>;
+def SELECT_CC_W_Pseudo : Pseudo<(outs GPRW:$dst),
+    (ins GPRW:$truev, GPRW:$falsev, i32imm:$cc),
+    "#SELECT_CC_W $truev, $falsev, $cc",
+    [(set GPRW:$dst, (vax_select_cc GPRW:$truev, GPRW:$falsev,
+                                      (i32 imm:$cc)))]>;
+}
 
 //===----------------------------------------------------------------------===//
 // Phase 10 — Shift + Rotate
@@ -1386,3 +1495,7 @@ def : Pat<(atomic_load_8  VAXMem:$src), (MOVZBL_rm VAXMemOp:$src)>;
 def : Pat<(atomic_load_16 VAXMem:$src), (MOVZWL_rm VAXMemOp:$src)>;
 def : Pat<(atomic_store_8  GPRnoPC:$src, VAXMem:$dst), (MOVB_mr GPRnoPC:$src, VAXMemOp:$dst)>;
 def : Pat<(atomic_store_16 GPRnoPC:$src, VAXMem:$dst), (MOVW_mr GPRnoPC:$src, VAXMemOp:$dst)>;
+
+// Store-zero patterns: CLRB/CLRW for truncating store of zero.
+def : Pat<(truncstorei8 (i32 0), VAXMem:$dst), (CLRB VAXMemOp:$dst)>;
+def : Pat<(truncstorei16 (i32 0), VAXMem:$dst), (CLRW VAXMemOp:$dst)>;

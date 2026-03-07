@@ -117,11 +117,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
     setOperationAction(ISD::SDIVREM, VT, Expand);
     setOperationAction(ISD::UDIVREM, VT, Expand);
 
-    // AND, OR, XOR: Promote to i32 (PromoteNode handles these).
-    // VAX has BISB/BICB/XORB but BIC is AND-NOT, needs VAXISD node.
-    setOperationAction(ISD::AND, VT, Promote);
-    setOperationAction(ISD::OR,  VT, Promote);
-    setOperationAction(ISD::XOR, VT, Promote);
+    // AND, OR, XOR: native byte/word patterns exist.
+    // AND is Custom (lowered via VAXISD::BICL, same as i32).
+    // OR and XOR are Legal (BISB3/XORB3/BISW3/XORW3 patterns).
+    setOperationAction(ISD::AND, VT, Custom);
+    setOperationAction(ISD::OR,  VT, Legal);
+    setOperationAction(ISD::XOR, VT, Legal);
 
     // Shifts: Expand (no byte/word shift instructions on VAX;
     // PromoteNode does NOT handle SHL/SRA/SRL).
@@ -143,11 +144,13 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
     setOperationAction(ISD::SMUL_LOHI, VT, Promote);
     setOperationAction(ISD::UMUL_LOHI, VT, Promote);
 
-    // Comparisons and selects: Promote (PromoteNode handles all of these).
+    // Comparisons: BR_CC and SELECT_CC are Custom (same lowering as i32).
+    // SETCC stays Promote (result is i1/i32, not i8/i16).
+    // SELECT expands to SELECT_CC.
     setOperationAction(ISD::SETCC,     VT, Promote);
-    setOperationAction(ISD::SELECT,    VT, Promote);
-    setOperationAction(ISD::SELECT_CC, VT, Promote);
-    setOperationAction(ISD::BR_CC,     VT, Promote);
+    setOperationAction(ISD::SELECT,    VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Custom);
+    setOperationAction(ISD::BR_CC,     VT, Custom);
 
     // Bit manipulation: Promote (PromoteNode handles these).
     setOperationAction(ISD::CTLZ,             VT, Promote);
@@ -1214,6 +1217,8 @@ MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
   assert((MI.getOpcode() == VAX::SELECT_CC_Pseudo ||
+          MI.getOpcode() == VAX::SELECT_CC_B_Pseudo ||
+          MI.getOpcode() == VAX::SELECT_CC_W_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_F_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_D_Pseudo) &&
          "Unexpected custom inserter opcode");
