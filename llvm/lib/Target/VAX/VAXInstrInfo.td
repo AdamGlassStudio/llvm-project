@@ -525,6 +525,10 @@ def CMPF_BRANCH : Pseudo<(outs),
     (ins GPRI:$lhs, GPRI:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def CMPD_BRANCH : Pseudo<(outs),
     (ins QPR:$lhs, QPR:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTF_BRANCH : Pseudo<(outs),
+    (ins GPRI:$src, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTD_BRANCH : Pseudo<(outs),
+    (ins QPR:$src, i32imm:$cc, brtarget:$dst), "", []>;
 }
 
 // INCL / DECL — increment / decrement longword (sets PSW).

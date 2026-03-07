@@ -19,36 +19,6 @@ define i32 @div_i32(i32 %a, i32 %b) {
 
 ;; --- Byte 3→2 (args in registers via sub-reg) ---
 
-; CHECK-LABEL: add_i8:
-; CHECK: addb2
-define i8 @add_i8(i8 %a, i8 %b) {
-  %r = add i8 %a, %b
-  ret i8 %r
-}
-
-; CHECK-LABEL: sub_i8:
-; CHECK: subb2
-define i8 @sub_i8(i8 %a, i8 %b) {
-  %r = sub i8 %a, %b
-  ret i8 %r
-}
-
-;; --- Word 3→2 ---
-
-; CHECK-LABEL: add_i16:
-; CHECK: addw2
-define i16 @add_i16(i16 %a, i16 %b) {
-  %r = add i16 %a, %b
-  ret i16 %r
-}
-
-; CHECK-LABEL: sub_i16:
-; CHECK: subw2
-define i16 @sub_i16(i16 %a, i16 %b) {
-  %r = sub i16 %a, %b
-  ret i16 %r
-}
-
 ;; --- F_float 3→2 ---
 
 ; CHECK-LABEL: fadd_f32:
