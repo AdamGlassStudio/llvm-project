@@ -311,6 +311,75 @@ void VAXInstrInfo::insertIndirectBranch(MachineBasicBlock &MBB,
   BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(&NewDestBB);
 }
 
+/// Estimate the size of a single operand specifier in bytes.
+/// For VAXMemOp (base, disp, index, flags), this estimates one operand's
+/// encoding. Called per-operand to sum up the instruction size.
+static unsigned estimateOperandSize(const MachineInstr &MI, unsigned OpIdx) {
+  const MachineOperand &MO = MI.getOperand(OpIdx);
+
+  // Register operand (not part of a VAXMemOp): register direct = 1 byte.
+  if (MO.isReg())
+    return 1;
+
+  // Immediate operand: literal (0-63) = 1 byte, else longword immediate = 5.
+  if (MO.isImm()) {
+    int64_t Val = MO.getImm();
+    return (Val >= 0 && Val <= 63) ? 1 : 5;
+  }
+
+  // Global/symbol reference: longword immediate = 5 bytes.
+  return 5;
+}
+
+/// Estimate the size of a VAXMemOp 4-tuple (base, disp, index, flags) in bytes.
+/// Returns the number of bytes for this operand specifier.
+static unsigned estimateMemOpSize(const MachineInstr &MI, unsigned StartIdx) {
+  const MachineOperand &Flags = MI.getOperand(StartIdx + 3);
+  if (!Flags.isImm())
+    return 5; // conservative
+
+  unsigned Mode = Flags.getImm();
+  switch (Mode) {
+  case VAXAM::RegDirect:   // 0x5n → 1 byte
+  case VAXAM::RegDeferred: // 0x6n → 1 byte
+  case VAXAM::AutoDec:     // 0x7n → 1 byte
+  case VAXAM::AutoInc:     // 0x8n → 1 byte
+  case VAXAM::AutoIncDef:  // 0x9n → 1 byte
+    return 1;
+
+  case VAXAM::Imm: {
+    // Literal (0-63) → 1 byte, else immediate (0x8F + 4 bytes) → 5 bytes.
+    const MachineOperand &Disp = MI.getOperand(StartIdx + 1);
+    if (Disp.isImm()) {
+      int64_t Val = Disp.getImm();
+      return (Val >= 0 && Val <= 63) ? 1 : 5;
+    }
+    return 5; // expression → longword
+  }
+
+  case VAXAM::Absolute: // 0x9F + 4-byte address → 5 bytes
+    return 5;
+
+  case VAXAM::Disp:
+  case VAXAM::DispDeferred: {
+    // Displacement: specifier + byte(1)/word(2)/long(4) displacement.
+    const MachineOperand &Disp = MI.getOperand(StartIdx + 1);
+    if (Disp.isImm()) {
+      int64_t Val = Disp.getImm();
+      if (Val == 0) return 1; // register deferred (no displacement byte)
+      if (Val >= -128 && Val <= 127) return 2;   // byte displacement
+      if (Val >= -32768 && Val <= 32767) return 3; // word displacement
+      return 5; // longword displacement
+    }
+    // Expression (global, etc.) → longword displacement.
+    return 5;
+  }
+
+  default:
+    return 5; // conservative
+  }
+}
+
 unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
 
@@ -333,22 +402,51 @@ unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     unsigned Limit = MI.getOperand(1).getImm();
     return 4 + (Limit + 1) * 2 + 3;
   }
+  // Stack adjustment pseudos expand to nothing (frame setup).
+  case VAX::ADJCALLSTACKDOWN:
+  case VAX::ADJCALLSTACKUP:
+    return 0;
   default:
     break;
   }
 
-  // For non-branch instructions, use a conservative estimate.
-  // VAX instructions are variable-length; most are 2–10 bytes.
-  // Use the MCInst encoding size if available, otherwise estimate.
   const MCInstrDesc &Desc = MI.getDesc();
-  unsigned Size = Desc.getSize();
-  if (Size)
-    return Size;
 
-  // Conservative fallback: count operands and estimate.
-  // VAX instructions are variable-length (1–30+ bytes).
-  // Overestimate to ensure BranchRelaxation is safe.
-  // Opcode(1-2) + each operand can be up to 6 bytes (displacement mode).
-  unsigned NumOps = Desc.getNumOperands();
-  return 2 + NumOps * 6;
+  // Determine opcode size from TSFlags.
+  uint64_t TSFlags = Desc.TSFlags;
+  unsigned HWOpcode = (TSFlags >> 1) & 0xFFFF;
+  unsigned OpcodeSize = (HWOpcode > 0xFF) ? 2 : 1; // FD-prefix → 2 bytes
+  bool HasMemOp = TSFlags & 0x1;
+
+  unsigned Size = OpcodeSize;
+
+  if (HasMemOp) {
+    // Walk explicit operands. VAXMemOp is a 4-tuple.
+    // Skip explicit def operands (output registers at the start).
+    unsigned NumExplicitDefs = Desc.getNumDefs();
+    unsigned NumOps = Desc.getNumOperands();
+    unsigned i = NumExplicitDefs;
+
+    while (i < NumOps) {
+      const MachineOperand &MO = MI.getOperand(i);
+      // Detect VAXMemOp: 4 consecutive operands where [i+3] is the flags imm.
+      if (i + 3 < NumOps && MO.isReg() && MI.getOperand(i + 3).isImm()) {
+        Size += estimateMemOpSize(MI, i);
+        i += 4;
+      } else {
+        Size += estimateOperandSize(MI, i);
+        i++;
+      }
+    }
+  } else {
+    // Non-memory instruction: all operands are register or immediate.
+    unsigned NumExplicitDefs = Desc.getNumDefs();
+    unsigned NumOps = Desc.getNumOperands();
+    for (unsigned i = NumExplicitDefs; i < NumOps; ++i) {
+      if (i < MI.getNumOperands())
+        Size += estimateOperandSize(MI, i);
+    }
+  }
+
+  return Size;
 }
