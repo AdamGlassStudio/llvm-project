@@ -97,10 +97,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   computeRegisterProperties(STI.getRegisterInfo());
 
   setStackPointerRegisterToSaveRestore(VAX::SP);
-  // Use source-order scheduling. The register-pressure scheduler (list-burr)
-  // calls getMinimalPhysRegClass on physical registers with MVT::i64, which
-  // fails because no GPR class holds i64. Source-order is safest for now.
-  setSchedulingPreference(Sched::Source);
+  setSchedulingPreference(Sched::RegPressure);
 
   //===------------------------------------------------------------------===//
   // i8/i16 type legalization: NOT legal types.
