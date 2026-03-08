@@ -140,15 +140,23 @@ void VAXAsmPrinter::emitFunctionBodyStart() {
 }
 
 void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
-  // Expand LEA_FI pseudo: addl3 $offset, %fp, $dst
+  // Expand LEA_FI pseudo: moval disp(%base), $dst
+  // Uses MOVAL instead of ADDL3 — same semantics (address computation) but
+  // idiomatic VAX and slightly more compact encoding.
   if (MI->getOpcode() == VAX::LEA_FI) {
     MCInst Inst;
-    Inst.setOpcode(VAX::ADDL3_ri);
-    // Operand layout: ADDL3_ri (outs $dst), (ins i32imm:$a, GPRnoPC:$b)
-    // LEA_FI: op0=$dst, op1=base(FP), op2=disp
+    Inst.setOpcode(VAX::MOVAL);
+    // MOVAL: (ins VAXMemOp:$src, VAXMemOp:$dst)
+    // Source: displacement addressing — base, disp, index, flags
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg())); // base
+    Inst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm())); // disp
+    Inst.addOperand(MCOperand::createReg(MI->getOperand(3).getReg())); // index
+    Inst.addOperand(MCOperand::createImm(MI->getOperand(4).getImm())); // flags
+    // Destination: register-direct
     Inst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg())); // dst
-    Inst.addOperand(MCOperand::createImm(MI->getOperand(2).getImm())); // offset
-    Inst.addOperand(MCOperand::createReg(MI->getOperand(1).getReg())); // FP
+    Inst.addOperand(MCOperand::createImm(0));                          // disp=0
+    Inst.addOperand(MCOperand::createReg(0));                          // no index
+    Inst.addOperand(MCOperand::createImm(VAXAM::RegDirect));           // flags
     EmitToStreamer(*OutStreamer, Inst);
     return;
   }
