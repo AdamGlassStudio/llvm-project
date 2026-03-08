@@ -9,6 +9,7 @@
 // Post-RA peephole pass for VAX:
 //   - Convert 3-operand ALU to 2-operand when dst == one source
 //     (addl3 %rX, %rY, %rY → addl2 %rX, %rY)
+//   - Eliminate redundant TSTL/TSTB/TSTW after flag-setting instructions
 //   - Combine adjacent CLRL pairs into CLRQ (quadword clear)
 //   - Combine adjacent MOVL load/store pairs into MOVQ (quadword move)
 //
@@ -85,9 +86,74 @@ private:
   bool tryQuadCombine(MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator &II,
                       const TargetInstrInfo *TII);
+  bool tryEliminateRedundantTST(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator &II);
 };
 
 char VAXPeephole::ID = 0;
+
+/// Return the register tested by a TST instruction, or 0 if not a TST.
+static Register getTSTReg(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  case VAX::TSTL:
+  case VAX::TSTB:
+  case VAX::TSTW:
+  case VAX::TSTF:
+  case VAX::TSTD:
+    return MI.getOperand(0).getReg();
+  default:
+    return Register();
+  }
+}
+
+/// Check if MI defines the given physical register as an explicit def
+/// (i.e. it writes a result to that register, setting N/Z flags on it).
+/// We exclude CMP/TST instructions since they set PSW but don't write a GPR.
+static bool definesRegWithFlags(const MachineInstr &MI, Register Reg) {
+  // Must define PSW (set condition codes).
+  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr))
+    return false;
+
+  // Check explicit defs — the result register(s) of the instruction.
+  for (unsigned i = 0, e = MI.getNumExplicitDefs(); i < e; ++i) {
+    const MachineOperand &MO = MI.getOperand(i);
+    if (MO.isReg() && MO.isDef() && MO.getReg() == Reg)
+      return true;
+  }
+  return false;
+}
+
+/// Try to eliminate a redundant TSTL/TSTB/TSTW/TSTF/TSTD by checking if the
+/// immediately preceding (non-debug) instruction already set N/Z on the same
+/// register. Within a basic block, no other path can enter between instructions.
+bool VAXPeephole::tryEliminateRedundantTST(MachineBasicBlock &MBB,
+                                           MachineBasicBlock::iterator &II) {
+  MachineInstr &MI = *II;
+  Register TstReg = getTSTReg(MI);
+  if (!TstReg.isValid())
+    return false;
+
+  // Walk backward skipping debug/CFI.
+  auto Prev = II;
+  while (Prev != MBB.begin()) {
+    --Prev;
+    if (Prev->isDebugInstr() || Prev->isCFIInstruction())
+      continue;
+
+    // If the previous real instruction defines TstReg and sets PSW, the
+    // TST is redundant — N/Z flags already reflect TstReg's value.
+    if (definesRegWithFlags(*Prev, TstReg)) {
+      LLVM_DEBUG(dbgs() << "VAXPeephole: eliminating redundant " << MI
+                        << "  (flags set by " << *Prev << ")\n");
+      auto EraseIt = II++;
+      EraseIt->eraseFromParent();
+      return true;
+    }
+    // Hit a non-matching real instruction — stop.
+    break;
+  }
+  return false;
+}
 
 /// Get the memory operand base from a CLRL_ms, MOVL_mr, or MOVL_rm instruction.
 /// Returns the starting operand index of the VAXMemOp (4-slot: base, disp,
@@ -392,6 +458,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
           }
         }
       }
+
+      if (!Converted)
+        Converted = tryEliminateRedundantTST(MBB, II);
 
       if (!Converted)
         Converted = tryQuadCombine(MBB, II, TII);
