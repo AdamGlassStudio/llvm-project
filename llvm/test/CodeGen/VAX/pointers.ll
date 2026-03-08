@@ -22,7 +22,8 @@ define i32 @indirect_call(ptr %fp, i32 %arg) {
 ; Null pointer check
 define i32 @null_check(ptr %p) {
 ; CHECK-LABEL: null_check:
-; CHECK: tstl
+; CHECK: movl 4(%ap), %r0
+; CHECK-NEXT: beql
 entry:
   %isnull = icmp eq ptr %p, null
   br i1 %isnull, label %is_null, label %not_null
