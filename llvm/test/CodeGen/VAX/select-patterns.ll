@@ -8,7 +8,7 @@ declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32)
 define i32 @sadd_overflow(i32 %a, i32 %b) {
 ; CHECK-LABEL: sadd_overflow:
 ; CHECK: movl	8(%ap), %r0
-; CHECK-NEXT: addl3	4(%ap), %r0, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
 ; CHECK-NEXT: ret
   %r = call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %a, i32 %b)
   %v = extractvalue { i32, i1 } %r, 0

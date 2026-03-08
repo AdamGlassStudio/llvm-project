@@ -12,7 +12,7 @@ define i32 @sum_array(ptr %arr, i32 %n) {
 ; CHECK:       movl	4(%ap), %r2
 ; CHECK:       clrl	%r0
 ; CHECK:       .LBB0_2:
-; CHECK:       addl3	(%r2), %r0, %r0
+; CHECK:       addl2	(%r2), %r0
 ; CHECK:       addl2	$4, %r2
 ; CHECK:       decl	%r1
 ; CHECK:       bneq	.LBB0_2

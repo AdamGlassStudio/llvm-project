@@ -100,11 +100,11 @@ define i32 @dec_i32(i32 %a, i32 %b) {
   ret i32 %r
 }
 
-;; --- Verify 3-op stays when memory operand prevents conversion ---
-; Longword add with stack args uses memory operand → stays addl3
+;; --- Verify memory-operand 3-op→2-op peephole fires ---
+; Longword add with stack args: addl3 mem, %rX, %rX → addl2 mem, %rX
 
 ; CHECK-LABEL: add_i32_stays_3op:
-; CHECK: addl3
+; CHECK: addl2
 define i32 @add_i32_stays_3op(i32 %a, i32 %b) {
   %r = add i32 %a, %b
   ret i32 %r

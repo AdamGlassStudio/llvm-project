@@ -14,7 +14,7 @@ define i32 @and_imm(i32 %a) {
 define i32 @or_imm(i32 %a) {
 ; CHECK-LABEL: or_imm:
 ; CHECK:       movl	$255, %r0
-; CHECK:       bisl3	4(%ap), %r0, %r0
+; CHECK:       bisl2	4(%ap), %r0
 ; CHECK:       ret
   %r = or i32 %a, 255
   ret i32 %r
@@ -23,7 +23,7 @@ define i32 @or_imm(i32 %a) {
 define i32 @xor_imm(i32 %a) {
 ; CHECK-LABEL: xor_imm:
 ; CHECK:       movl	$255, %r0
-; CHECK:       xorl3	4(%ap), %r0, %r0
+; CHECK:       xorl2	4(%ap), %r0
 ; CHECK:       ret
   %r = xor i32 %a, 255
   ret i32 %r
