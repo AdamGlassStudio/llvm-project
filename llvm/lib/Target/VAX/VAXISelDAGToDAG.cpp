@@ -113,6 +113,29 @@ void VAXDAGToDAGISel::Select(SDNode *N) {
     return;
   }
 
+  // PUSHL of a PCRelWrapper → PUSHAL (single instruction instead of
+  // MOVAL + PUSHL). This folds address materialization into the push.
+  if (N->getOpcode() == VAXISD::PUSHL) {
+    SDValue Arg = N->getOperand(1);
+    if (Arg.getOpcode() == VAXISD::PCRelWrapper) {
+      SDValue Sym = Arg.getOperand(0);
+      unsigned Opc;
+      switch (Sym.getOpcode()) {
+      case ISD::TargetGlobalAddress:  Opc = VAX::PUSHAL_ga; break;
+      case ISD::TargetConstantPool:   Opc = VAX::PUSHAL_cp; break;
+      case ISD::TargetBlockAddress:   Opc = VAX::PUSHAL_ba; break;
+      case ISD::TargetExternalSymbol: Opc = VAX::PUSHAL_es; break;
+      default: goto fallthrough_pushl;
+      }
+      SDValue Chain = N->getOperand(0);
+      SDNode *Push = CurDAG->getMachineNode(
+          Opc, SDLoc(N), N->getVTList(), {Sym, Chain});
+      ReplaceNode(N, Push);
+      return;
+    }
+  }
+fallthrough_pushl:
+
   if (N->getOpcode() == VAXISD::CALL) {
     SDValue Chain   = N->getOperand(0);
     SDValue NumArgs = N->getOperand(1);

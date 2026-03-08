@@ -50,3 +50,40 @@ define ptr @return_local_addr() {
   %buf = alloca [16 x i8]
   ret ptr %buf
 }
+
+; --- ISel PUSHAL patterns (global/external addresses) ---
+
+@gvar = global i32 0
+
+; Test: pushing a global address → PUSHAL (ISel, not peephole)
+define void @push_global_addr() {
+; CHECK-LABEL: push_global_addr:
+; CHECK:       pushal gvar
+; CHECK-NEXT:  calls $1, use_ptr
+  call void @use_ptr(ptr @gvar)
+  ret void
+}
+
+declare void @use_int(i32)
+
+; Test: loading a global value → NOT PUSHAL (value, not address)
+define void @push_global_value() {
+; CHECK-LABEL: push_global_value:
+; CHECK-NOT:   pushal
+; CHECK:       movl gvar
+  %v = load i32, ptr @gvar
+  call void @use_int(i32 %v)
+  ret void
+}
+
+; Test: global address used twice → each call gets PUSHAL
+define void @push_global_twice() {
+; CHECK-LABEL: push_global_twice:
+; CHECK:       pushal gvar
+; CHECK:       calls $1, use_ptr
+; CHECK:       pushal gvar
+; CHECK:       calls $1, use_ptr
+  call void @use_ptr(ptr @gvar)
+  call void @use_ptr(ptr @gvar)
+  ret void
+}

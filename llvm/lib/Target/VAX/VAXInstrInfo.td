@@ -1021,6 +1021,23 @@ def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
     "pushaq\t$src", []>;
 }
 
+// PUSHAL with PC-relative symbol operand — ISel patterns for pushing addresses.
+// Parallel to MOVAL_ga/cp/ba but push instead of move-to-register.
+let Defs = [SP, PSW], Uses = [SP] in {
+def PUSHAL_ga : InstVAX<0xDF, (outs), (ins i32imm:$sym),
+    "pushal\t$sym",
+    [(vax_pushl (vax_pcrelwrapper tglobaladdr:$sym))]>;
+def PUSHAL_cp : InstVAX<0xDF, (outs), (ins i32imm:$sym),
+    "pushal\t$sym",
+    [(vax_pushl (vax_pcrelwrapper tconstpool:$sym))]>;
+def PUSHAL_ba : InstVAX<0xDF, (outs), (ins i32imm:$sym),
+    "pushal\t$sym",
+    [(vax_pushl (vax_pcrelwrapper tblockaddress:$sym))]>;
+def PUSHAL_es : InstVAX<0xDF, (outs), (ins i32imm:$sym),
+    "pushal\t$sym",
+    [(vax_pushl (vax_pcrelwrapper texternalsym:$sym))]>;
+}
+
 // CALLS — call subroutine with stack arguments  opcode 0xFB
 // CALLS clears all condition codes and clobbers R0-R5, SP, AP, FP.
 let isCall = 1, Uses = [SP],
