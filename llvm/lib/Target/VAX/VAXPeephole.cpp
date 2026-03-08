@@ -401,6 +401,12 @@ bool VAXPeephole::tryPushAddressCombine(MachineBasicBlock &MBB,
   if (Next->getOperand(0).getReg() != DstReg)
     return false;
 
+  // The LEA_FI defines DstReg. If DstReg is used after the PUSHL (i.e., it's
+  // still live), we can't eliminate the LEA_FI — the PUSHAL won't produce the
+  // register value. Check that DstReg is killed by the PUSHL.
+  if (!Next->getOperand(0).isKill())
+    return false;
+
   // Build PUSHAL with the same memory operand as LEA_FI.
   Register BaseReg = MI.getOperand(1).getReg();
   int64_t Disp = MI.getOperand(2).getImm();
