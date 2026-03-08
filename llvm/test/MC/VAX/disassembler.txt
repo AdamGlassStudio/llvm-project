@@ -1,0 +1,84 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# Basic instructions: register-to-register, immediate, memory
+
+# halt
+# CHECK: halt
+0x00
+
+# ret
+# CHECK: ret
+0x04
+
+# nop
+# CHECK: nop
+0x01
+
+# movl %r0, %r1
+# CHECK: movl %r0, %r1
+0xd0,0x50,0x51
+
+# movl $42, %r0  (short literal)
+# CHECK: movl $42, %r0
+0xd0,0x2a,0x50
+
+# movl $256, %r0  (full immediate: 0x8F + 4 bytes)
+# CHECK: movl $256, %r0
+0xd0,0x8f,0x00,0x01,0x00,0x00,0x50
+
+# movl 8(%ap), %r0  (byte displacement)
+# CHECK: movl 8(%ap), %r0
+0xd0,0xac,0x08,0x50
+
+# movl %r1, (%r0)  (register deferred destination)
+# CHECK: movl %r1, (%r0)
+0xd0,0x51,0x60
+
+# addl3 4(%ap), %r0, %r0
+# CHECK: addl3 4(%ap), %r0, %r0
+0xc1,0xac,0x04,0x50,0x50
+
+# subl3 %r1, %r0, %r2
+# CHECK: subl3 %r1, %r0, %r2
+0xc3,0x51,0x50,0x52
+
+# cmpl %r0, $11
+# CHECK: cmpl %r0, $11
+0xd1,0x50,0x0b
+
+# mull2 $3, %r0
+# CHECK: mull2 $3, %r0
+0xc4,0x03,0x50
+
+# decl %r0
+# CHECK: decl %r0
+0xd7,0x50
+
+# incl %r0
+# CHECK: incl %r0
+0xd6,0x50
+
+# clrl/clrf share opcode 0xD4 - both are same hardware instruction
+# CHECK: clr{{[lf]}} %r0
+0xd4,0x50
+
+# Branch instructions (targets are absolute addresses from base 0)
+# blss +4 from end of instruction
+# CHECK: blss
+0x19,0x04
+
+# beql -2
+# CHECK: beql
+0x13,0xfe
+
+# brb +10
+# CHECK: brb
+0x11,0x0a
+
+# brw +256
+# CHECK: brw
+0x31,0x00,0x01
+
+# Autodecrement: movl %r0, -(%sp)
+# CHECK: movl %r0, -(%sp)
+0xd0,0x50,0x7e
