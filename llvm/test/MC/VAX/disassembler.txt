@@ -82,3 +82,119 @@
 # Autodecrement: movl %r0, -(%sp)
 # CHECK: movl %r0, -(%sp)
 0xd0,0x50,0x7e
+
+# --- All addressing modes ---
+
+# Autoincrement: movl (%r3)+, %r0
+# CHECK: movl (%r3)+, %r0
+0xd0,0x83,0x50
+
+# Autoincrement deferred: movl *(%r3)+, %r0
+# CHECK: movl *(%r3)+, %r0
+0xd0,0x93,0x50
+
+# Word displacement: movl 512(%fp), %r0
+# CHECK: movl 512(%fp), %r0
+0xd0,0xcd,0x00,0x02,0x50
+
+# Word displacement deferred: movl *256(%r4), %r0
+# CHECK: movl *256(%r4), %r0
+0xd0,0xd4,0x00,0x01,0x50
+
+# Longword displacement: movl 65536(%r2), %r0
+# CHECK: movl 65536(%r2), %r0
+0xd0,0xe2,0x00,0x00,0x01,0x00,0x50
+
+# Longword displacement deferred: movl *131072(%r0), %r1
+# CHECK: movl *131072(%r0), %r1
+0xd0,0xf0,0x00,0x00,0x02,0x00,0x51
+
+# Absolute: movl *$0x12345678, %r0
+# CHECK: movl *$305419896, %r0
+0xd0,0x9f,0x78,0x56,0x34,0x12,0x50
+
+# Indexed: movl 4(%r2)[%r3], %r0
+# CHECK: movl 4(%r2)[%r3], %r0
+0xd0,0x43,0xa2,0x04,0x50
+
+# --- New instructions: BVC/BVS ---
+
+# bvc +8
+# CHECK: bvc
+0x1c,0x08
+
+# bvs -4
+# CHECK: bvs
+0x1d,0xfc
+
+# --- Conversion instructions ---
+
+# cvtlb %r0, %r1
+# CHECK: cvtlb %r0, %r1
+0xf6,0x50,0x51
+
+# cvtlw %r1, %r2
+# CHECK: cvtlw %r1, %r2
+0xf7,0x51,0x52
+
+# cvtwb %r0, %r1
+# CHECK: cvtwb %r0, %r1
+0x33,0x50,0x51
+
+# cvtfb %r0, %r1
+# CHECK: cvtfb %r0, %r1
+0x48,0x50,0x51
+
+# cvtbd %r0, %r1
+# CHECK: cvtbd %r0, %r1
+0x6c,0x50,0x51
+
+# --- Byte/word arithmetic ---
+
+# divw2 %r0, %r1
+# CHECK: divw2 %r0, %r1
+0xa6,0x50,0x51
+
+# mulb3 %r0, %r1, %r2
+# CHECK: mulb3 %r0, %r1, %r2
+0x85,0x50,0x51,0x52
+
+# --- All-memory variants: memory operands decode any addressing mode ---
+
+# pushl 8(%ap) — displacement mode (previously failed)
+# CHECK: pushl 8(%ap)
+0xdd,0xac,0x08
+
+# tstb (%r0) — register deferred (previously failed)
+# CHECK: tstb (%r0)
+0x95,0x60
+
+# incl 4(%fp) — byte displacement
+# CHECK: incl 4(%fp)
+0xd6,0xad,0x04
+
+# decl (%sp)+ — autoincrement
+# CHECK: decl (%sp)+
+0xd7,0x8e
+
+# addl2 8(%ap), 12(%fp) — both operands memory
+# CHECK: addl2 8(%ap), 12(%fp)
+0xc0,0xac,0x08,0xad,0x0c
+
+# movl 4(%r0), -8(%fp) — memory-to-memory
+# CHECK: movl 4(%r0), -8(%fp)
+0xd0,0xa0,0x04,0xad,0xf8
+
+# cmpl (%r0), (%r1) — both register deferred
+# CHECK: cmpl (%r0), (%r1)
+0xd1,0x60,0x61
+
+# --- PSW/privileged instructions ---
+
+# bispsw $7
+# CHECK: bispsw $7
+0xb8,0x07
+
+# bicpsw $15
+# CHECK: bicpsw $15
+0xb9,0x0f
