@@ -19,7 +19,7 @@ define void @make_pair(ptr sret(%struct.pair) %out, i32 %x, i32 %y) {
 ; Caller: allocates struct, passes address as sret arg
 define i32 @use_pair() {
 ; CHECK-LABEL: use_pair:
-; CHECK: addl3 {{.*}}, %fp, %r0
+; CHECK: pushal {{.*}}(%fp)
 ; CHECK: calls $3, make_pair
   %p = alloca %struct.pair
   call void @make_pair(ptr sret(%struct.pair) %p, i32 3, i32 4)
