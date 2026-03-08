@@ -88,6 +88,9 @@ private:
                       const TargetInstrInfo *TII);
   bool tryEliminateRedundantTST(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator &II);
+  bool tryPushAddressCombine(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator &II,
+                             const TargetInstrInfo *TII);
 };
 
 char VAXPeephole::ID = 0;
@@ -370,6 +373,55 @@ bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
   return false;
 }
 
+/// Try to combine LEA_FI + PUSHL_r into PUSHAL.
+/// Pattern: $rN = LEA_FI $base, disp, $noreg, flags
+///          PUSHL_r killed $rN
+/// Result:  PUSHAL $base, disp, $noreg, flags
+bool VAXPeephole::tryPushAddressCombine(MachineBasicBlock &MBB,
+                                        MachineBasicBlock::iterator &II,
+                                        const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  if (MI.getOpcode() != VAX::LEA_FI)
+    return false;
+
+  // LEA_FI operands: (outs GPRnoPC:$dst), (ins VAXMemOp:$addr)
+  // op0 = dst reg, op1 = base, op2 = disp, op3 = index, op4 = flags
+  Register DstReg = MI.getOperand(0).getReg();
+
+  // Look ahead for PUSHL_r of the same register.
+  auto Next = std::next(II);
+  while (Next != MBB.end() &&
+         (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+  if (Next == MBB.end())
+    return false;
+
+  if (Next->getOpcode() != VAX::PUSHL_r)
+    return false;
+  if (Next->getOperand(0).getReg() != DstReg)
+    return false;
+
+  // Build PUSHAL with the same memory operand as LEA_FI.
+  Register BaseReg = MI.getOperand(1).getReg();
+  int64_t Disp = MI.getOperand(2).getImm();
+  Register IdxReg = MI.getOperand(3).getReg();
+  int64_t Flags = MI.getOperand(4).getImm();
+
+  MachineInstrBuilder MIB =
+      BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::PUSHAL));
+  MIB.addReg(BaseReg).addImm(Disp).addReg(IdxReg).addImm(Flags);
+  // PUSHAL implicitly defs SP and PSW.
+  MIB.addReg(VAX::SP, RegState::ImplicitDefine);
+
+  LLVM_DEBUG(dbgs() << "VAXPeephole: LEA_FI+PUSHL→PUSHAL " << MI << "  + "
+                    << *Next);
+  auto Erase1 = II;
+  II = std::next(Next);
+  Erase1->eraseFromParent();
+  Next->eraseFromParent();
+  return true;
+}
+
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -458,6 +510,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
           }
         }
       }
+
+      if (!Converted)
+        Converted = tryPushAddressCombine(MBB, II, TII);
 
       if (!Converted)
         Converted = tryEliminateRedundantTST(MBB, II);
