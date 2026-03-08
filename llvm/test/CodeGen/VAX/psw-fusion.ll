@@ -21,7 +21,7 @@
 ; CHECK-LABEL: search_list:
 ; CHECK:       cmpl (%r1), %r0
 ; CHECK-NEXT:  beql
-; CHECK:       tstl %r1
+; CHECK:       movl 4(%r1), %r1
 ; CHECK-NEXT:  bneq
 define i32 @search_list(ptr %node, i32 %key) {
 entry:
@@ -140,7 +140,7 @@ else:
 ; ---------------------------------------------------------------------------
 
 ; CHECK-LABEL: tstf_branch:
-; CHECK:       tstf %r0
+; CHECK:       movf 4(%ap), %r0
 ; CHECK-NEXT:  bneq
 define i32 @tstf_branch(float %x) {
   %cmp = fcmp oeq float %x, 0.0
@@ -154,7 +154,7 @@ nonzero:
 }
 
 ; CHECK-LABEL: tstd_branch:
-; CHECK:       tstd %r0
+; CHECK:       movd 4(%ap), %r0
 ; CHECK-NEXT:  bneq
 define i32 @tstd_branch(double %x) {
   %cmp = fcmp oeq double %x, 0.0

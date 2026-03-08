@@ -5,8 +5,8 @@
 
 define i32 @tstf_branch(float %a) {
 ; CHECK-LABEL: tstf_branch:
-; CHECK:       tstf %r0
-; CHECK:       bleq
+; CHECK:       movf 4(%ap), %r0
+; CHECK-NEXT:  bleq
   %c = fcmp ogt float %a, 0.0
   br i1 %c, label %pos, label %neg
 pos:
@@ -19,8 +19,8 @@ neg:
 
 define i32 @tstd_branch(double %a) {
 ; CHECK-LABEL: tstd_branch:
-; CHECK:       tstd %r0
-; CHECK:       bgeq
+; CHECK:       movd 4(%ap), %r0
+; CHECK-NEXT:  bgeq
   %c = fcmp olt double %a, 0.0
   br i1 %c, label %neg, label %pos
 neg:

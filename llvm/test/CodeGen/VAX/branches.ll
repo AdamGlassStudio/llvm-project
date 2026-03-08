@@ -67,10 +67,10 @@ else:
   ret i32 0
 }
 
-; Compare vs zero: should use tstl (not cmpl with immediate 0).
+; Compare vs zero: movl sets PSW, so tstl is elided by peephole.
 ; CHECK-LABEL: test_tstl_eq:
-; CHECK:       tstl {{%r[0-9]+}}
-; CHECK:       b{{[a-z]+}}
+; CHECK:       movl a, %r0
+; CHECK-NEXT:  beql
 ; CHECK:       ret
 define i32 @test_tstl_eq() {
   %va = load i32, ptr @a
