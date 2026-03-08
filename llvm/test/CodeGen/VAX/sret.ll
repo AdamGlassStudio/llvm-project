@@ -5,9 +5,10 @@
 ; Callee: receives sret pointer at 4(%ap), stores through it
 define void @make_pair(ptr sret(%struct.pair) %out, i32 %x, i32 %y) {
 ; CHECK-LABEL: make_pair:
-; CHECK: movl 4(%ap), %r{{[0-9]+}}
-; CHECK: movl{{.*}}(%r{{[0-9]+}})
-; CHECK: movl{{.*}}(%r{{[0-9]+}})
+; CHECK: movl 12(%ap), %r0
+; CHECK: movq 4(%ap), %r1
+; CHECK: movl %r2, (%r1)
+; CHECK: movl %r0, 4(%r1)
   %a = getelementptr inbounds %struct.pair, ptr %out, i32 0, i32 0
   store i32 %x, ptr %a
   %b = getelementptr inbounds %struct.pair, ptr %out, i32 0, i32 1

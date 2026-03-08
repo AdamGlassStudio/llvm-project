@@ -32,8 +32,7 @@ define i32 @abs_val(i32 %a) {
 ; Signed minimum
 define i32 @min_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: min_i32:
-; CHECK: movl	8(%ap), %r1
-; CHECK-NEXT: movl	4(%ap), %r0
+; CHECK: movq	4(%ap), %r0
 ; CHECK-NEXT: cmpl	%r0, %r1
 ; CHECK-NEXT: blss	{{.*}}
 ; CHECK: movl	%r1, %r0
@@ -47,8 +46,7 @@ define i32 @min_i32(i32 %a, i32 %b) {
 ; Signed maximum
 define i32 @max_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: max_i32:
-; CHECK: movl	8(%ap), %r1
-; CHECK-NEXT: movl	4(%ap), %r0
+; CHECK: movq	4(%ap), %r0
 ; CHECK-NEXT: cmpl	%r0, %r1
 ; CHECK-NEXT: bgtr	{{.*}}
 ; CHECK: movl	%r1, %r0
