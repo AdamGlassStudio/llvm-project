@@ -41,18 +41,18 @@ define i32 @mul_power_of_2(i32 %a) {
 define i32 @add_constant(i32 %a) {
 ; CHECK-LABEL: add_constant:
 ; CHECK: movl	$42, %r0
-; CHECK-NEXT: addl3	4(%ap), %r0, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
 ; CHECK-NEXT: ret
 ; CHECK-NEXT: .Lfunc_end3:
   %r = add i32 %a, 42
   ret i32 %r
 }
 
-; Sub constant — lowered as addl3 with negative immediate
+; Sub constant — lowered as addl2 with negative immediate
 define i32 @sub_constant(i32 %a) {
 ; CHECK-LABEL: sub_constant:
 ; CHECK: movl	$-42, %r0
-; CHECK-NEXT: addl3	4(%ap), %r0, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
 ; CHECK-NEXT: ret
 ; CHECK-NEXT: .Lfunc_end4:
   %r = sub i32 %a, 42
@@ -80,8 +80,8 @@ define void @nop() {
 define i32 @add3(i32 %a, i32 %b, i32 %c) {
 ; CHECK-LABEL: add3:
 ; CHECK: movl	8(%ap), %r0
-; CHECK-NEXT: addl3	4(%ap), %r0, %r0
-; CHECK-NEXT: addl3	12(%ap), %r0, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
+; CHECK-NEXT: addl2	12(%ap), %r0
 ; CHECK-NEXT: ret
 ; CHECK-NEXT: .Lfunc_end7:
   %ab = add i32 %a, %b

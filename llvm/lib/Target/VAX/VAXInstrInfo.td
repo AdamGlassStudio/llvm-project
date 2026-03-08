@@ -211,6 +211,13 @@ multiclass VAXAlu2<bits<16> opc, string mn> {
       mn # "\t$s, $dst", []> {
     let Constraints = "$src = $dst";
   }
+  // Memory source: addl2 mem, dst. Used by peephole (3op→2op with mem source).
+  let HasMemOp = 1 in
+  def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
+      (ins VAXMemOp:$s, GPRnoPC:$src),
+      mn # "\t$s, $dst", []> {
+    let Constraints = "$src = $dst";
+  }
 }
 
 // 2-operand byte ALU: dst OP= src (byte). Used by peephole.

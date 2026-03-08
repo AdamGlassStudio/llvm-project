@@ -44,15 +44,19 @@ static const Alu3To2 Alu3To2Table[] = {
     // Longword integer
     {VAX::ADDL3_rr, VAX::ADDL2_rr, true},
     {VAX::ADDL3_ri, VAX::ADDL2_ri, true},
+    {VAX::ADDL3_rm, VAX::ADDL2_rm, true},
     {VAX::SUBL3_rr, VAX::SUBL2_rr, false},
     {VAX::SUBL3_ri, VAX::SUBL2_ri, false},
     {VAX::MULL3_rr, VAX::MULL2_rr, true},
     {VAX::MULL3_ri, VAX::MULL2_ri, true},
+    {VAX::MULL3_rm, VAX::MULL2_rm, true},
     {VAX::DIVL3_rr, VAX::DIVL2_rr, false},
     {VAX::BISL3_rr, VAX::BISL2_rr, true},
     {VAX::BISL3_ri, VAX::BISL2_ri, true},
+    {VAX::BISL3_rm, VAX::BISL2_rm, true},
     {VAX::XORL3_rr, VAX::XORL2_rr, true},
     {VAX::XORL3_ri, VAX::XORL2_ri, true},
+    {VAX::XORL3_rm, VAX::XORL2_rm, true},
     {VAX::BICL3_rr, VAX::BICL2_rr, false},
     {VAX::BICL3_ri, VAX::BICL2_ri, false},
     // Byte
@@ -442,51 +446,77 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
         if (MI.getOpcode() != Entry.Opc3)
           continue;
 
-        // 3-op layout: dst = op(src1, src2)
-        //   Operand 0: dst (def)
-        //   Operand 1: src1
-        //   Operand 2: src2
-        // 2-op layout: dst = op(src, dst)  i.e. dst OP= src
-        //   Operand 0: dst (def, tied to src_tied)
-        //   Operand 1: src
-        //   Operand 2: src_tied (tied to dst)
         MachineOperand &Dst = MI.getOperand(0);
-        MachineOperand &Src1 = MI.getOperand(1);
-        MachineOperand &Src2 = MI.getOperand(2);
-
         if (!Dst.isReg())
           break;
 
         Register DstReg = Dst.getReg();
 
-        // Check if dst == src2 (the natural case: dst OP= src1)
-        if (Src2.isReg() && Src2.getReg() == DstReg) {
-          MachineInstrBuilder MIB =
-              BuildMI(MBB, II, MI.getDebugLoc(), TII->get(Entry.Opc2));
-          MIB.addDef(DstReg);
-          MIB.add(Src1);
-          MIB.addReg(DstReg);
-          LLVM_DEBUG(dbgs() << "VAXPeephole: 3op→2op " << MI);
-          auto EraseIt = II++;
-          EraseIt->eraseFromParent();
-          Changed = true;
-          Converted = true;
-          break;
-        }
+        // Detect _rm forms: operand[1] is the start of a VAXMemOp (4 sub-ops),
+        // operand[5] is the register source. For _rr/_ri: operand layout is
+        // [0]=dst, [1]=src1, [2]=src2.
+        bool IsRM = MI.getNumOperands() > 5 && MI.getOperand(1).isReg() &&
+                    MI.getOperand(5).isReg();
 
-        // Check if dst == src1 AND commutative (swap operands)
-        if (Entry.Commutative && Src1.isReg() && Src1.getReg() == DstReg) {
-          MachineInstrBuilder MIB =
-              BuildMI(MBB, II, MI.getDebugLoc(), TII->get(Entry.Opc2));
-          MIB.addDef(DstReg);
-          MIB.add(Src2);
-          MIB.addReg(DstReg);
-          LLVM_DEBUG(dbgs() << "VAXPeephole: 3op→2op(swap) " << MI);
-          auto EraseIt = II++;
-          EraseIt->eraseFromParent();
-          Changed = true;
-          Converted = true;
-          break;
+        if (IsRM) {
+          // _rm layout: [0]=dst, [1..4]=memop, [5]=reg_src
+          // Convert to _rm 2-op: [0]=dst, [1..4]=memop, [5]=tied_src
+          MachineOperand &RegSrc = MI.getOperand(5);
+
+          if (RegSrc.getReg() == DstReg) {
+            // dst == reg_src: opl3 mem, reg, reg → opl2 mem, reg
+            MachineInstrBuilder MIB =
+                BuildMI(MBB, II, MI.getDebugLoc(), TII->get(Entry.Opc2));
+            MIB.addDef(DstReg);
+            // Copy the 4 memop sub-operands.
+            for (unsigned i = 1; i <= 4; ++i)
+              MIB.add(MI.getOperand(i));
+            MIB.addReg(DstReg);
+            // Preserve memory operand info.
+            MIB.cloneMemRefs(MI);
+            LLVM_DEBUG(dbgs() << "VAXPeephole: 3op→2op(rm) " << MI);
+            auto EraseIt = II++;
+            EraseIt->eraseFromParent();
+            Changed = true;
+            Converted = true;
+            break;
+          }
+          // For commutative ops, dst == mem_src doesn't apply (dst is a reg,
+          // mem_src is an address — they can't match).
+        } else {
+          // _rr/_ri layout: [0]=dst, [1]=src1, [2]=src2
+          MachineOperand &Src1 = MI.getOperand(1);
+          MachineOperand &Src2 = MI.getOperand(2);
+
+          // Check if dst == src2 (the natural case: dst OP= src1)
+          if (Src2.isReg() && Src2.getReg() == DstReg) {
+            MachineInstrBuilder MIB =
+                BuildMI(MBB, II, MI.getDebugLoc(), TII->get(Entry.Opc2));
+            MIB.addDef(DstReg);
+            MIB.add(Src1);
+            MIB.addReg(DstReg);
+            LLVM_DEBUG(dbgs() << "VAXPeephole: 3op→2op " << MI);
+            auto EraseIt = II++;
+            EraseIt->eraseFromParent();
+            Changed = true;
+            Converted = true;
+            break;
+          }
+
+          // Check if dst == src1 AND commutative (swap operands)
+          if (Entry.Commutative && Src1.isReg() && Src1.getReg() == DstReg) {
+            MachineInstrBuilder MIB =
+                BuildMI(MBB, II, MI.getDebugLoc(), TII->get(Entry.Opc2));
+            MIB.addDef(DstReg);
+            MIB.add(Src2);
+            MIB.addReg(DstReg);
+            LLVM_DEBUG(dbgs() << "VAXPeephole: 3op→2op(swap) " << MI);
+            auto EraseIt = II++;
+            EraseIt->eraseFromParent();
+            Changed = true;
+            Converted = true;
+            break;
+          }
         }
 
         break; // Found matching entry but can't convert
