@@ -19,6 +19,8 @@
 
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "TargetInfo/VAXTargetInfo.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDecoderOps.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -54,6 +56,14 @@ public:
                               ArrayRef<uint8_t> Bytes, uint64_t Address,
                               raw_ostream &CStream) const override;
 
+  /// Handle VAX function entry masks. Every CALLS/CALLG function starts
+  /// with a 2-byte register save mask (.word). When we see a STT_FUNC
+  /// symbol, consume those 2 bytes as data so they don't cascade into
+  /// misaligned instruction decodes.
+  Expected<bool> onSymbolStart(SymbolInfoTy &Symbol, uint64_t &Size,
+                               ArrayRef<uint8_t> Bytes,
+                               uint64_t Address) const override;
+
   /// Decode a single operand specifier starting at Bytes[Offset].
   /// Returns the number of bytes consumed, or 0 on failure/mode mismatch.
   /// Adds operand(s) to Instr.
@@ -70,26 +80,6 @@ static MCRegister GPRDecoderTable[] = {
     VAX::R6, VAX::R7, VAX::R8,  VAX::R9,  VAX::R10, VAX::R11,
     VAX::AP, VAX::FP, VAX::SP,  VAX::PC,
 };
-
-/// Collect all LLVM opcodes matching a given hardware opcode.
-/// VAX instructions have multiple variants per mnemonic (e.g., MOVL_rr,
-/// MOVL_rm, MOVL_mr) that share the same HW opcode — the disassembler
-/// must try each to find the one whose operand types match the byte stream.
-static SmallVector<unsigned, 8> lookupOpcodes(const MCInstrInfo &MCII,
-                                              uint16_t HWOpcode) {
-  SmallVector<unsigned, 8> Result;
-  unsigned NumOpcodes = MCII.getNumOpcodes();
-  for (unsigned i = 0; i < NumOpcodes; ++i) {
-    const MCInstrDesc &Desc = MCII.get(i);
-    if (Desc.isPseudo())
-      continue;
-    uint64_t TSFlags = Desc.TSFlags;
-    uint16_t OpcVal = (TSFlags >> 1) & 0xFFFF;
-    if (OpcVal == HWOpcode)
-      Result.push_back(i);
-  }
-  return Result;
-}
 
 /// Return the operand data size in bytes for the given MCInstrDesc operand.
 /// Defaults to 4 (longword).
@@ -115,13 +105,51 @@ static bool isMemOpStart(const MCInstrDesc &Desc, unsigned OpIdx) {
          Desc.operands()[OpIdx + 3].RegClass < 0;
 }
 
+/// Count the number of memory (4-slot) operands in an MCInstrDesc.
+static unsigned countMemOps(const MCInstrDesc &Desc) {
+  unsigned Count = 0;
+  unsigned NumOps = Desc.getNumOperands();
+  for (unsigned i = 0; i < NumOps;) {
+    if (isMemOpStart(Desc, i)) {
+      ++Count;
+      i += 4;
+    } else {
+      ++i;
+    }
+  }
+  return Count;
+}
+
+/// Collect all LLVM opcodes matching a given hardware opcode.
+/// Sorted so that specific variants (fewer memory operands) are tried first,
+/// and all-memory variants (most permissive) serve as fallbacks.
+static SmallVector<unsigned, 8> lookupOpcodes(const MCInstrInfo &MCII,
+                                              uint16_t HWOpcode) {
+  SmallVector<unsigned, 8> Result;
+  unsigned NumOpcodes = MCII.getNumOpcodes();
+  for (unsigned i = 0; i < NumOpcodes; ++i) {
+    const MCInstrDesc &Desc = MCII.get(i);
+    if (Desc.isPseudo())
+      continue;
+    uint64_t TSFlags = Desc.TSFlags;
+    uint16_t OpcVal = (TSFlags >> 1) & 0xFFFF;
+    if (OpcVal == HWOpcode)
+      Result.push_back(i);
+  }
+  // Sort: fewer memory operands first (specific matches before fallbacks).
+  llvm::sort(Result, [&](unsigned A, unsigned B) {
+    return countMemOps(MCII.get(A)) < countMemOps(MCII.get(B));
+  });
+  return Result;
+}
+
 /// Check if this LLVM opcode is a branch with direct displacement.
 static bool isBranch(unsigned Opcode) {
   switch (Opcode) {
   case VAX::BRB: case VAX::BRW:
   case VAX::BEQL: case VAX::BNEQ: case VAX::BGTR: case VAX::BGEQ:
   case VAX::BLSS: case VAX::BLEQ: case VAX::BGTRU: case VAX::BGEQU:
-  case VAX::BLSSU: case VAX::BLEQU:
+  case VAX::BLSSU: case VAX::BLEQU: case VAX::BVC: case VAX::BVS:
     return true;
   default:
     return false;
@@ -482,6 +510,27 @@ static bool tryDecodeCandidate(const VAXDisassembler &Dis,
 
   BytesConsumed = Offset;
   return true;
+}
+
+Expected<bool>
+VAXDisassembler::onSymbolStart(SymbolInfoTy &Symbol, uint64_t &Size,
+                               ArrayRef<uint8_t> Bytes,
+                               uint64_t Address) const {
+  // VAX functions using CALLS/CALLG convention start with a 2-byte entry mask
+  // (.word) that encodes which registers to save. This is data, not an
+  // instruction. If we don't skip it, the disassembler will try to decode
+  // it as an instruction, often consuming subsequent real instruction bytes
+  // and causing a cascade of decode failures.
+  //
+  // We skip the entry mask for STT_FUNC symbols. The mask uses bits 0-11
+  // for R0-R11; bits 12-13 must be 0 (AP/FP saved implicitly by CALLS);
+  // bit 14 is IV (integer overflow trap enable); bit 15 is DV (decimal
+  // overflow trap enable).
+  if (Symbol.Type == ELF::STT_FUNC && Bytes.size() >= 2) {
+    Size = 2;
+    return true;
+  }
+  return false;
 }
 
 MCDisassembler::DecodeStatus
