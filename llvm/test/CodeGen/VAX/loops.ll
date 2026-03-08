@@ -41,9 +41,7 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       clrl	%r0
 ; CHECK:       movl	8(%ap), %r1
 ; CHECK:       cmpl	%r1, $1
-; CHECK:       bgeq	.LBB1_1
-; CHECK:       brw	.LBB1_5
-; CHECK:       .LBB1_1:
+; CHECK:       blss	.LBB1_5
 ; CHECK:       movl	4(%ap), %r2
 ; CHECK:       clrl	%r3
 ; CHECK:       movl	$1, %r4
@@ -60,7 +58,7 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       tstl	(%r2)
 ; CHECK:       bneq	.LBB1_2
 ; CHECK:       movl	%r3, %r5
-; CHECK:       brw	.LBB1_2
+; CHECK:       brb	.LBB1_2
 ; CHECK:       .LBB1_5:
 ; CHECK:       ret
 entry:
