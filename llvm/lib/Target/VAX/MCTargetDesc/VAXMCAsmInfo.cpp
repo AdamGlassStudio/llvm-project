@@ -37,6 +37,9 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   UseIntegratedAssembler = true;
   // VAX GAS does not support the `.bss` shorthand; use `.section .bss`.
   UsesELFSectionDirectiveForBSS = true;
+  // VAX instructions are variable-length (1–37 bytes). Typical instructions
+  // are 2–10 bytes. Used by getInlineAsmLength to estimate inline asm size.
+  MaxInstLength = 10;
 
   initializeAtSpecifiers(atSpecifiers);
 }
