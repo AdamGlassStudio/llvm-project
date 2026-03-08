@@ -77,8 +77,7 @@ define i32 @load_disp(ptr %p) {
 ; Store to pointer with displacement
 define void @store_disp(ptr %p, i32 %v) {
 ; CHECK-LABEL: store_disp:
-; CHECK: movl 4(%ap), %r0
-; CHECK: movl 8(%ap), %r1
+; CHECK: movq 4(%ap), %r0
 ; CHECK: movl %r1, 12(%r0)
   %gep = getelementptr i32, ptr %p, i32 3
   store i32 %v, ptr %gep

@@ -18,8 +18,7 @@ define i32 @extract_field(ptr %p) {
 ; Store to struct field
 define void @store_field(ptr %p, i32 %v) {
 ; CHECK-LABEL: store_field:
-; CHECK: movl 4(%ap), %r0
-; CHECK: movl 8(%ap), %r1
+; CHECK: movq 4(%ap), %r0
 ; CHECK: movl %r1, 4(%r0)
   %gep = getelementptr %struct.Point, ptr %p, i32 0, i32 1
   store i32 %v, ptr %gep

@@ -9,6 +9,8 @@
 // Post-RA peephole pass for VAX:
 //   - Convert 3-operand ALU to 2-operand when dst == one source
 //     (addl3 %rX, %rY, %rY → addl2 %rX, %rY)
+//   - Combine adjacent CLRL pairs into CLRQ (quadword clear)
+//   - Combine adjacent MOVL load/store pairs into MOVQ (quadword move)
 //
 //===----------------------------------------------------------------------===//
 
@@ -17,6 +19,7 @@
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -77,9 +80,229 @@ public:
   StringRef getPassName() const override { return "VAX Peephole"; }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
+
+private:
+  bool tryQuadCombine(MachineBasicBlock &MBB,
+                      MachineBasicBlock::iterator &II,
+                      const TargetInstrInfo *TII);
 };
 
 char VAXPeephole::ID = 0;
+
+/// Get the memory operand base from a CLRL_ms, MOVL_mr, or MOVL_rm instruction.
+/// Returns the starting operand index of the VAXMemOp (4-slot: base, disp,
+/// index, flags), or -1 if not applicable.
+static int getMemOpIdx(const MachineInstr &MI) {
+  unsigned Opc = MI.getOpcode();
+  if (Opc == VAX::CLRL_ms)
+    return 0; // (outs), (ins VAXMemOp:$dst) → operand 0
+  if (Opc == VAX::MOVL_mr)
+    return 1; // (outs), (ins GPRnoPC:$src, VAXMemOp:$dst) → operand 1
+  if (Opc == VAX::MOVL_rm)
+    return 1; // (outs GPRnoPC:$dst), (ins VAXMemOp:$src) → operand 1
+  return -1;
+}
+
+/// Check if two memory operands refer to the same base address with
+/// displacements that differ by exactly 4 bytes. If so, return the lower
+/// displacement value (i.e., the MOVQ/CLRQ target address).
+/// MemIdx is the operand index where the 4-slot VAXMemOp starts.
+static bool isAdjacentQuadword(const MachineInstr &A, int MemIdxA,
+                               const MachineInstr &B, int MemIdxB,
+                               int64_t &LowDisp) {
+  // VAXMemOp: [base_reg, disp, index_reg, flags]
+  const MachineOperand &BaseA = A.getOperand(MemIdxA);
+  const MachineOperand &DispA = A.getOperand(MemIdxA + 1);
+  const MachineOperand &IdxA  = A.getOperand(MemIdxA + 2);
+  const MachineOperand &FlagA = A.getOperand(MemIdxA + 3);
+
+  const MachineOperand &BaseB = B.getOperand(MemIdxB);
+  const MachineOperand &DispB = B.getOperand(MemIdxB + 1);
+  const MachineOperand &IdxB  = B.getOperand(MemIdxB + 2);
+  const MachineOperand &FlagB = B.getOperand(MemIdxB + 3);
+
+  // Both must be register-based with immediate displacement.
+  if (!BaseA.isReg() || !BaseB.isReg())
+    return false;
+  if (!DispA.isImm() || !DispB.isImm())
+    return false;
+
+  // Same base register, same index register, same flags.
+  if (BaseA.getReg() != BaseB.getReg())
+    return false;
+  if (IdxA.getReg() != IdxB.getReg())
+    return false;
+  if (FlagA.getImm() != FlagB.getImm())
+    return false;
+
+  // No index register — MOVQ with indexed mode is unusual and risky.
+  if (IdxA.getReg() != 0)
+    return false;
+
+  int64_t DA = DispA.getImm();
+  int64_t DB = DispB.getImm();
+
+  if (DA + 4 == DB) {
+    LowDisp = DA;
+    return true;
+  }
+  if (DB + 4 == DA) {
+    LowDisp = DB;
+    return true;
+  }
+  return false;
+}
+
+/// Check that the base register of a memory operand is not modified between
+/// instructions First and Second (exclusive).
+static bool baseNotModified(const MachineInstr &First, int MemIdx,
+                            const MachineInstr &Second) {
+  Register BaseReg = First.getOperand(MemIdx).getReg();
+  auto It = std::next(MachineBasicBlock::const_iterator(First));
+  auto End = MachineBasicBlock::const_iterator(Second);
+  for (; It != End; ++It) {
+    if (It->modifiesRegister(BaseReg, /*TRI=*/nullptr))
+      return false;
+  }
+  return true;
+}
+
+bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator &II,
+                                 const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  unsigned Opc = MI.getOpcode();
+  int MemIdx = getMemOpIdx(MI);
+  if (MemIdx < 0)
+    return false;
+
+  // Look ahead for a matching instruction.
+  auto Next = std::next(II);
+  // Skip debug values / CFI between the pair.
+  while (Next != MBB.end() && (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+  if (Next == MBB.end())
+    return false;
+
+  MachineInstr &MI2 = *Next;
+
+  // --- CLRL_ms + CLRL_ms → CLRQ ---
+  if (Opc == VAX::CLRL_ms && MI2.getOpcode() == VAX::CLRL_ms) {
+    int64_t LowDisp;
+    if (!isAdjacentQuadword(MI, 0, MI2, 0, LowDisp))
+      return false;
+    if (!baseNotModified(MI, 0, MI2))
+      return false;
+
+    Register BaseReg = MI.getOperand(0).getReg();
+    Register IdxReg  = MI.getOperand(2).getReg();
+    int64_t Flags    = MI.getOperand(3).getImm();
+
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::CLRQ));
+    MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+    MIB->setMemRefs(*MBB.getParent(), {});
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: CLRL+CLRL→CLRQ " << MI << "  + "
+                      << MI2);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- MOVL_mr + MOVL_mr → MOVQ (store pair) ---
+  // Two stores to adjacent locations from consecutive registers.
+  if (Opc == VAX::MOVL_mr && MI2.getOpcode() == VAX::MOVL_mr) {
+    int64_t LowDisp;
+    if (!isAdjacentQuadword(MI, 1, MI2, 1, LowDisp))
+      return false;
+    if (!baseNotModified(MI, 1, MI2))
+      return false;
+
+    // Determine which store targets the low address.
+    int64_t DispA = MI.getOperand(2).getImm();
+    const MachineInstr &LowMI  = (DispA == LowDisp) ? MI : MI2;
+    const MachineInstr &HighMI = (DispA == LowDisp) ? MI2 : MI;
+
+    Register SrcLo = LowMI.getOperand(0).getReg();
+    Register SrcHi = HighMI.getOperand(0).getReg();
+
+    // The source registers must be a consecutive pair (Rn, Rn+1).
+    if (SrcHi != SrcLo + 1)
+      return false;
+
+    Register BaseReg = MI.getOperand(1).getReg();
+    Register IdxReg  = MI.getOperand(3).getReg();
+    int64_t Flags    = MI.getOperand(4).getImm();
+
+    // Emit MOVQ as memory-to-memory form: src is register-direct, dst is mem.
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVQ));
+    // Source: register-direct via VAXMemOp (base=SrcLo, disp=0, idx=noreg,
+    //         flags=RegDirect)
+    MIB.addReg(SrcLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+    // Destination: memory
+    MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(store) " << MI << "  + "
+                      << MI2);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- MOVL_rm + MOVL_rm → MOVQ (load pair) ---
+  // Two loads from adjacent locations into consecutive registers.
+  if (Opc == VAX::MOVL_rm && MI2.getOpcode() == VAX::MOVL_rm) {
+    int64_t LowDisp;
+    if (!isAdjacentQuadword(MI, 1, MI2, 1, LowDisp))
+      return false;
+    if (!baseNotModified(MI, 1, MI2))
+      return false;
+
+    // Determine which load targets the low address.
+    int64_t DispA = MI.getOperand(2).getImm();
+    const MachineInstr &LowMI  = (DispA == LowDisp) ? MI : MI2;
+    const MachineInstr &HighMI = (DispA == LowDisp) ? MI2 : MI;
+
+    Register DstLo = LowMI.getOperand(0).getReg();
+    Register DstHi = HighMI.getOperand(0).getReg();
+
+    // The destination registers must be a consecutive pair (Rn, Rn+1).
+    if (DstHi != DstLo + 1)
+      return false;
+
+    // Make sure the first load doesn't clobber the base register of the second.
+    Register BaseReg = MI.getOperand(1).getReg();
+    if (MI.getOperand(0).getReg() == BaseReg)
+      return false;
+
+    Register IdxReg  = MI.getOperand(3).getReg();
+    int64_t Flags    = MI.getOperand(4).getImm();
+
+    // Emit MOVQ: src is memory, dst is register-direct.
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVQ));
+    // Source: memory
+    MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+    // Destination: register-direct via VAXMemOp
+    MIB.addReg(DstLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(load) " << MI << "  + "
+                      << MI2);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  return false;
+}
 
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
@@ -169,6 +392,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
           }
         }
       }
+
+      if (!Converted)
+        Converted = tryQuadCombine(MBB, II, TII);
 
       if (!Converted)
         ++II;
