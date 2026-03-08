@@ -332,11 +332,19 @@ static unsigned estimateOperandSize(const MachineInstr &MI, unsigned OpIdx) {
 }
 
 /// Estimate the size of a VAXMemOp 4-tuple (base, disp, index, flags) in bytes.
-/// Returns the number of bytes for this operand specifier.
+/// Returns the number of bytes for this operand specifier, including the
+/// optional index prefix byte (0x4n) when an index register is present.
 static unsigned estimateMemOpSize(const MachineInstr &MI, unsigned StartIdx) {
   const MachineOperand &Flags = MI.getOperand(StartIdx + 3);
   if (!Flags.isImm())
-    return 5; // conservative
+    return 6; // conservative: index(1) + longword displacement(5)
+
+  // Indexed mode prefix: if Index operand is a non-zero register, the encoder
+  // emits 0x40|Rx before the base specifier — add 1 byte.
+  unsigned IndexExtra = 0;
+  const MachineOperand &Index = MI.getOperand(StartIdx + 2);
+  if (Index.isReg() && Index.getReg())
+    IndexExtra = 1;
 
   unsigned Mode = Flags.getImm();
   switch (Mode) {
@@ -345,20 +353,20 @@ static unsigned estimateMemOpSize(const MachineInstr &MI, unsigned StartIdx) {
   case VAXAM::AutoDec:     // 0x7n → 1 byte
   case VAXAM::AutoInc:     // 0x8n → 1 byte
   case VAXAM::AutoIncDef:  // 0x9n → 1 byte
-    return 1;
+    return 1 + IndexExtra;
 
   case VAXAM::Imm: {
     // Literal (0-63) → 1 byte, else immediate (0x8F + 4 bytes) → 5 bytes.
     const MachineOperand &Disp = MI.getOperand(StartIdx + 1);
     if (Disp.isImm()) {
       int64_t Val = Disp.getImm();
-      return (Val >= 0 && Val <= 63) ? 1 : 5;
+      return ((Val >= 0 && Val <= 63) ? 1 : 5) + IndexExtra;
     }
-    return 5; // expression → longword
+    return 5 + IndexExtra; // expression → longword
   }
 
   case VAXAM::Absolute: // 0x9F + 4-byte address → 5 bytes
-    return 5;
+    return 5 + IndexExtra;
 
   case VAXAM::Disp:
   case VAXAM::DispDeferred: {
@@ -366,22 +374,29 @@ static unsigned estimateMemOpSize(const MachineInstr &MI, unsigned StartIdx) {
     const MachineOperand &Disp = MI.getOperand(StartIdx + 1);
     if (Disp.isImm()) {
       int64_t Val = Disp.getImm();
-      if (Val == 0) return 1; // register deferred (no displacement byte)
-      if (Val >= -128 && Val <= 127) return 2;   // byte displacement
-      if (Val >= -32768 && Val <= 32767) return 3; // word displacement
-      return 5; // longword displacement
+      if (Val >= -128 && Val <= 127) return 2 + IndexExtra;
+      if (Val >= -32768 && Val <= 32767) return 3 + IndexExtra;
+      return 5 + IndexExtra; // longword displacement
     }
     // Expression (global, etc.) → longword displacement.
-    return 5;
+    return 5 + IndexExtra;
   }
 
   default:
-    return 5; // conservative
+    return 5 + IndexExtra; // conservative
   }
 }
 
 unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   unsigned Opc = MI.getOpcode();
+
+  // Inline assembly: delegate to getInlineAsmLength which counts instruction
+  // lines and multiplies by MaxInstLength from MCAsmInfo.
+  if (Opc == TargetOpcode::INLINEASM || Opc == TargetOpcode::INLINEASM_BR) {
+    const MachineFunction *MF = MI.getParent()->getParent();
+    const auto *MAI = MF->getTarget().getMCAsmInfo();
+    return getInlineAsmLength(MI.getOperand(0).getSymbolName(), *MAI);
+  }
 
   // Pseudos that expand later.
   if (MI.isMetaInstruction())
@@ -420,31 +435,38 @@ unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
 
   unsigned Size = OpcodeSize;
 
-  if (HasMemOp) {
-    // Walk explicit operands. VAXMemOp is a 4-tuple.
-    // Skip explicit def operands (output registers at the start).
-    unsigned NumExplicitDefs = Desc.getNumDefs();
-    unsigned NumOps = Desc.getNumOperands();
-    unsigned i = NumExplicitDefs;
+  // VAX encodes ALL operands (sources AND destinations) as specifier bytes.
+  // Unlike RISC targets, the def register is NOT part of the opcode—it has
+  // its own specifier in the byte stream. We must count def operands too,
+  // but skip tied defs (the tied use already accounts for the specifier).
+  unsigned NumOps = Desc.getNumOperands();
+  unsigned NumDefs = Desc.getNumDefs();
+  unsigned i = 0;
 
-    while (i < NumOps) {
-      const MachineOperand &MO = MI.getOperand(i);
-      // Detect VAXMemOp: 4 consecutive operands where [i+3] is the flags imm.
-      if (i + 3 < NumOps && MO.isReg() && MI.getOperand(i + 3).isImm()) {
-        Size += estimateMemOpSize(MI, i);
-        i += 4;
-      } else {
-        Size += estimateOperandSize(MI, i);
-        i++;
-      }
+  // Count untied def operands (their specifiers are encoded in the stream).
+  for (; i < NumDefs && i < NumOps; ++i) {
+    int TiedTo = Desc.getOperandConstraint(i, MCOI::TIED_TO);
+    if (TiedTo >= 0)
+      continue; // tied def—the tied use will account for this specifier
+    if (HasMemOp && i + 3 < NumOps && MI.getOperand(i).isReg() &&
+        MI.getOperand(i + 3).isImm()) {
+      Size += estimateMemOpSize(MI, i);
+      i += 3; // will be incremented to i+4 by the for-loop
+    } else {
+      Size += estimateOperandSize(MI, i);
     }
-  } else {
-    // Non-memory instruction: all operands are register or immediate.
-    unsigned NumExplicitDefs = Desc.getNumDefs();
-    unsigned NumOps = Desc.getNumOperands();
-    for (unsigned i = NumExplicitDefs; i < NumOps; ++i) {
+  }
+
+  // Count source operands.
+  while (i < NumOps) {
+    if (HasMemOp && i + 3 < NumOps && MI.getOperand(i).isReg() &&
+        MI.getOperand(i + 3).isImm()) {
+      Size += estimateMemOpSize(MI, i);
+      i += 4;
+    } else {
       if (i < MI.getNumOperands())
         Size += estimateOperandSize(MI, i);
+      i++;
     }
   }
 
