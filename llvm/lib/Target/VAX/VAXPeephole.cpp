@@ -12,6 +12,7 @@
 //   - Eliminate redundant TSTL/TSTB/TSTW after flag-setting instructions
 //   - Combine adjacent CLRL pairs into CLRQ (quadword clear)
 //   - Combine adjacent MOVL load/store pairs into MOVQ (quadword move)
+//   - Combine adjacent PUSHL register pairs into MOVQ reg, -(SP)
 //
 //===----------------------------------------------------------------------===//
 
@@ -95,6 +96,9 @@ private:
   bool tryPushAddressCombine(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator &II,
                              const TargetInstrInfo *TII);
+  bool tryPushPairCombine(MachineBasicBlock &MBB,
+                          MachineBasicBlock::iterator &II,
+                          const TargetInstrInfo *TII);
 };
 
 char VAXPeephole::ID = 0;
@@ -377,6 +381,59 @@ bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
   return false;
 }
 
+/// Combine consecutive PUSHL_r of adjacent registers into MOVQ reg, -(SP).
+/// Pattern: PUSHL_r $rN+1   (pushed first → higher address)
+///          PUSHL_r $rN     (pushed second → lower address)
+/// Result:  MOVQ $rN, -(SP)  (decrements SP by 8, stores rN:rN+1)
+bool VAXPeephole::tryPushPairCombine(MachineBasicBlock &MBB,
+                                     MachineBasicBlock::iterator &II,
+                                     const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  if (MI.getOpcode() != VAX::PUSHL_r)
+    return false;
+
+  // Look ahead for a second PUSHL_r.
+  auto Next = std::next(II);
+  while (Next != MBB.end() && (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+  if (Next == MBB.end() || Next->getOpcode() != VAX::PUSHL_r)
+    return false;
+
+  Register HiReg = MI.getOperand(0).getReg();   // first push = higher address
+  Register LoReg = Next->getOperand(0).getReg(); // second push = lower address
+
+  // Must be consecutive: HiReg == LoReg + 1 (i.e., rN+1 then rN).
+  if (HiReg != LoReg + 1)
+    return false;
+
+  // Only combine R0-R11 pairs (not AP/FP/SP).
+  if (LoReg < VAX::R0 || LoReg > VAX::R10)
+    return false;
+
+  // Build MOVQ $rN, -(%sp)
+  // MOVQ: (outs), (ins VAXMemOp:$src, VAXMemOp:$dst)
+  // Source: register-direct (LoReg)
+  // Destination: autodecrement (SP)
+  MachineInstrBuilder MIB =
+      BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVQ));
+  MIB.addReg(LoReg).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+  MIB.addReg(VAX::SP).addImm(0).addReg(0).addImm(VAXAM::AutoDec);
+
+  // MOVQ reads both LoReg and HiReg (quadword), and autodecrement modifies SP.
+  // MOVQ also sets condition codes (N/Z/V/C) on VAX.
+  MIB.addReg(HiReg, RegState::Implicit);
+  MIB->addRegisterDefined(VAX::SP);
+  MIB->addRegisterDefined(VAX::PSW);
+
+  LLVM_DEBUG(dbgs() << "VAXPeephole: PUSHL+PUSHL→MOVQ " << MI << "  + "
+                    << *Next);
+  auto Erase1 = II;
+  II = std::next(Next);
+  Erase1->eraseFromParent();
+  Next->eraseFromParent();
+  return true;
+}
+
 /// Try to combine LEA_FI + PUSHL_r into PUSHAL.
 /// Pattern: $rN = LEA_FI $base, disp, $noreg, flags
 ///          PUSHL_r killed $rN
@@ -555,6 +612,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
 
       if (!Converted)
         Converted = tryQuadCombine(MBB, II, TII);
+
+      if (!Converted)
+        Converted = tryPushPairCombine(MBB, II, TII);
 
       if (!Converted)
         ++II;
