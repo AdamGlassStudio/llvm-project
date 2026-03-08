@@ -1,0 +1,145 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# Floating point instructions: F_float and D_float.
+
+# --- F_float arithmetic ---
+
+# addf2 %r0, %r1
+# CHECK: addf2 %r0, %r1
+0x40,0x50,0x51
+
+# addf3 %r0, %r1, %r2
+# CHECK: addf3 %r0, %r1, %r2
+0x41,0x50,0x51,0x52
+
+# subf2 %r0, %r1
+# CHECK: subf2 %r0, %r1
+0x42,0x50,0x51
+
+# mulf2 %r0, %r1
+# CHECK: mulf2 %r0, %r1
+0x44,0x50,0x51
+
+# divf2 %r0, %r1
+# CHECK: divf2 %r0, %r1
+0x46,0x50,0x51
+
+# cmpf %r0, %r1
+# CHECK: cmpf %r0, %r1
+0x51,0x50,0x51
+
+# tstf %r0
+# CHECK: tstf %r0
+0x53,0x50
+
+# movf %r0, %r1
+# CHECK: movf %r0, %r1
+0x50,0x50,0x51
+
+# mnegf %r0, %r1
+# CHECK: mnegf %r0, %r1
+0x52,0x50,0x51
+
+# --- D_float arithmetic ---
+
+# addd2 %r0, %r2
+# CHECK: addd2 %r0, %r2
+0x60,0x50,0x52
+
+# addd3 %r0, %r2, %r4
+# CHECK: addd3 %r0, %r2, %r4
+0x61,0x50,0x52,0x54
+
+# subd2 %r0, %r2
+# CHECK: subd2 %r0, %r2
+0x62,0x50,0x52
+
+# muld2 %r0, %r2
+# CHECK: muld2 %r0, %r2
+0x64,0x50,0x52
+
+# divd2 %r0, %r2
+# CHECK: divd2 %r0, %r2
+0x66,0x50,0x52
+
+# cmpd %r0, %r2
+# CHECK: cmpd %r0, %r2
+0x71,0x50,0x52
+
+# tstd %r0
+# CHECK: tstd %r0
+0x73,0x50
+
+# movd %r0, %r2
+# CHECK: movd %r0, %r2
+0x70,0x50,0x52
+
+# mnegd %r0, %r2
+# CHECK: mnegd %r0, %r2
+0x72,0x50,0x52
+
+# --- Floating point conversions ---
+
+# cvtfl %r0, %r1
+# CHECK: cvtfl %r0, %r1
+0x4a,0x50,0x51
+
+# cvtlf %r0, %r1
+# CHECK: cvtlf %r0, %r1
+0x4e,0x50,0x51
+
+# cvtdl %r0, %r1
+# CHECK: cvtdl %r0, %r1
+0x6a,0x50,0x51
+
+# cvtld %r0, %r2
+# CHECK: cvtld %r0, %r2
+0x6e,0x50,0x52
+
+# cvtfd %r0, %r2
+# CHECK: cvtfd %r0, %r2
+0x56,0x50,0x52
+
+# cvtdf %r0, %r1
+# CHECK: cvtdf %r0, %r1
+0x76,0x50,0x51
+
+# cvtfb %r0, %r1
+# CHECK: cvtfb %r0, %r1
+0x48,0x50,0x51
+
+# cvtfw %r0, %r1
+# CHECK: cvtfw %r0, %r1
+0x49,0x50,0x51
+
+# cvtbd %r0, %r1
+# CHECK: cvtbd %r0, %r1
+0x6c,0x50,0x51
+
+# cvtbf %r0, %r1
+# CHECK: cvtbf %r0, %r1
+0x4c,0x50,0x51
+
+# cvtwf %r0, %r1
+# CHECK: cvtwf %r0, %r1
+0x4d,0x50,0x51
+
+# cvtwd %r0, %r1
+# CHECK: cvtwd %r0, %r1
+0x6d,0x50,0x51
+
+# cvtdb %r0, %r1
+# CHECK: cvtdb %r0, %r1
+0x68,0x50,0x51
+
+# cvtdw %r0, %r1
+# CHECK: cvtdw %r0, %r1
+0x69,0x50,0x51
+
+# cvtrfl %r0, %r1
+# CHECK: cvtrfl %r0, %r1
+0x4b,0x50,0x51
+
+# cvtrdl %r0, %r1
+# CHECK: cvtrdl %r0, %r1
+0x6b,0x50,0x51
