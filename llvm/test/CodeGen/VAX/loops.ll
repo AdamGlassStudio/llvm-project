@@ -5,17 +5,16 @@
 ; Sum array elements
 define i32 @sum_array(ptr %arr, i32 %n) {
 ; CHECK-LABEL: sum_array:
-; CHECK:       movl	8(%ap), %r1
 ; CHECK:       clrl	%r0
+; CHECK:       movl	8(%ap), %r1
 ; CHECK:       cmpl	%r1, $1
 ; CHECK:       blss	.LBB0_3
 ; CHECK:       movl	4(%ap), %r2
 ; CHECK:       clrl	%r0
 ; CHECK:       .LBB0_2:
 ; CHECK:       addl3	(%r2), %r0, %r0
-; CHECK:       decl	%r1
 ; CHECK:       addl2	$4, %r2
-; CHECK:       tstl	%r1
+; CHECK:       decl	%r1
 ; CHECK:       bneq	.LBB0_2
 ; CHECK:       .LBB0_3:
 ; CHECK:       ret
@@ -39,8 +38,8 @@ exit:
 ; Count nonzero elements
 define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK-LABEL: count_nonzero:
-; CHECK:       movl	8(%ap), %r1
 ; CHECK:       clrl	%r0
+; CHECK:       movl	8(%ap), %r1
 ; CHECK:       cmpl	%r1, $1
 ; CHECK:       bgeq	.LBB1_1
 ; CHECK:       brw	.LBB1_5
@@ -53,9 +52,8 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       .LBB1_2:
 ; CHECK:       bicl2	$-2, %r5
 ; CHECK:       addl2	%r5, %r0
-; CHECK:       decl	%r1
 ; CHECK:       addl2	$4, %r2
-; CHECK:       tstl	%r1
+; CHECK:       decl	%r1
 ; CHECK:       beql	.LBB1_5
 ; CHECK:       .LBB1_3:
 ; CHECK:       movl	%r4, %r5
