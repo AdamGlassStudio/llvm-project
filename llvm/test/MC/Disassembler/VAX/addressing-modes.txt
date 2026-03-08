@@ -1,0 +1,142 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# All 13 VAX addressing modes tested with MOVL (opcode 0xD0).
+
+# --- Mode 0-3: Short literal (0x00-0x3F) ---
+# movl $0, %r0
+# CHECK: movl $0, %r0
+0xd0,0x00,0x50
+
+# movl $42, %r0
+# CHECK: movl $42, %r0
+0xd0,0x2a,0x50
+
+# movl $63, %r0  (max short literal)
+# CHECK: movl $63, %r0
+0xd0,0x3f,0x50
+
+# --- Mode 5: Register direct (0x5R) ---
+# movl %r0, %r1
+# CHECK: movl %r0, %r1
+0xd0,0x50,0x51
+
+# movl %r11, %r0
+# CHECK: movl %r11, %r0
+0xd0,0x5b,0x50
+
+# movl %ap, %r0  (R12=AP)
+# CHECK: movl %ap, %r0
+0xd0,0x5c,0x50
+
+# movl %fp, %r0  (R13=FP)
+# CHECK: movl %fp, %r0
+0xd0,0x5d,0x50
+
+# movl %sp, %r0  (R14=SP)
+# CHECK: movl %sp, %r0
+0xd0,0x5e,0x50
+
+# --- Mode 6: Register deferred (0x6R) ---
+# movl (%r0), %r1
+# CHECK: movl (%r0), %r1
+0xd0,0x60,0x51
+
+# movl (%ap), %r0
+# CHECK: movl (%ap), %r0
+0xd0,0x6c,0x50
+
+# movl %r0, (%r1)  (deferred as destination)
+# CHECK: movl %r0, (%r1)
+0xd0,0x50,0x61
+
+# --- Mode 7: Autodecrement (0x7R) ---
+# movl %r0, -(%sp)  (push)
+# CHECK: movl %r0, -(%sp)
+0xd0,0x50,0x7e
+
+# movl -(%r3), %r0
+# CHECK: movl -(%r3), %r0
+0xd0,0x73,0x50
+
+# --- Mode 8: Autoincrement (0x8R) ---
+# movl (%r3)+, %r0
+# CHECK: movl (%r3)+, %r0
+0xd0,0x83,0x50
+
+# movl (%sp)+, %r0  (pop)
+# CHECK: movl (%sp)+, %r0
+0xd0,0x8e,0x50
+
+# --- Mode 8, Reg=PC: Immediate (0x8F + data) ---
+# movl $256, %r0  (longword immediate)
+# CHECK: movl $256, %r0
+0xd0,0x8f,0x00,0x01,0x00,0x00,0x50
+
+# movl $-1, %r0
+# CHECK: movl $-1, %r0
+0xd0,0x8f,0xff,0xff,0xff,0xff,0x50
+
+# --- Mode 9: Autoincrement deferred (0x9R) ---
+# movl *(%r3)+, %r0
+# CHECK: movl *(%r3)+, %r0
+0xd0,0x93,0x50
+
+# --- Mode 9, Reg=PC: Absolute (0x9F + 4 bytes) ---
+# movl *$305419896, %r0  (absolute address 0x12345678)
+# CHECK: movl *$305419896, %r0
+0xd0,0x9f,0x78,0x56,0x34,0x12,0x50
+
+# --- Mode A: Byte displacement (0xAR + 1 byte) ---
+# movl 8(%ap), %r0
+# CHECK: movl 8(%ap), %r0
+0xd0,0xac,0x08,0x50
+
+# movl -4(%fp), %r0  (negative displacement)
+# CHECK: movl -4(%fp), %r0
+0xd0,0xad,0xfc,0x50
+
+# movl 127(%r0), %r1  (max positive byte disp)
+# CHECK: movl 127(%r0), %r1
+0xd0,0xa0,0x7f,0x51
+
+# --- Mode B: Byte displacement deferred (0xBR + 1 byte) ---
+# movl *4(%r2), %r0
+# CHECK: movl *4(%r2), %r0
+0xd0,0xb2,0x04,0x50
+
+# --- Mode C: Word displacement (0xCR + 2 bytes) ---
+# movl 512(%fp), %r0
+# CHECK: movl 512(%fp), %r0
+0xd0,0xcd,0x00,0x02,0x50
+
+# movl -256(%r0), %r1
+# CHECK: movl -256(%r0), %r1
+0xd0,0xc0,0x00,0xff,0x51
+
+# --- Mode D: Word displacement deferred (0xDR + 2 bytes) ---
+# movl *256(%r4), %r0
+# CHECK: movl *256(%r4), %r0
+0xd0,0xd4,0x00,0x01,0x50
+
+# --- Mode E: Longword displacement (0xER + 4 bytes) ---
+# movl 65536(%r2), %r0
+# CHECK: movl 65536(%r2), %r0
+0xd0,0xe2,0x00,0x00,0x01,0x00,0x50
+
+# --- Mode F: Longword displacement deferred (0xFR + 4 bytes) ---
+# movl *131072(%r0), %r1
+# CHECK: movl *131072(%r0), %r1
+0xd0,0xf0,0x00,0x00,0x02,0x00,0x51
+
+# --- Mode 4: Indexed (0x4R + base operand specifier) ---
+# movl 4(%r2)[%r3], %r0  (indexed with byte displacement base)
+# CHECK: movl 4(%r2)[%r3], %r0
+0xd0,0x43,0xa2,0x04,0x50
+
+# movl (%r5)[%r0], %r1  (indexed with register deferred base)
+# CHECK: movl (%r5)[%r0], %r1
+0xd0,0x40,0x65,0x51
+
+# movl 512(%r1)[%r4], %r0  (indexed with word displacement base)
+# CHECK: movl 512(%r1)[%r4], %r0
+0xd0,0x44,0xc1,0x00,0x02,0x50

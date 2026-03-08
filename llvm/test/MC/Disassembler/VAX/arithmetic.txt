@@ -1,0 +1,177 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# Integer arithmetic: ADD, SUB, MUL, DIV in longword, word, and byte sizes.
+
+# --- Longword (32-bit) ---
+
+# addl2 $3, %r0
+# CHECK: addl2 $3, %r0
+0xc0,0x03,0x50
+
+# addl3 4(%ap), %r0, %r1
+# CHECK: addl3 4(%ap), %r0, %r1
+0xc1,0xac,0x04,0x50,0x51
+
+# subl2 %r1, %r0
+# CHECK: subl2 %r1, %r0
+0xc2,0x51,0x50
+
+# subl3 %r1, %r0, %r2
+# CHECK: subl3 %r1, %r0, %r2
+0xc3,0x51,0x50,0x52
+
+# mull2 $3, %r0
+# CHECK: mull2 $3, %r0
+0xc4,0x03,0x50
+
+# mull3 %r0, %r1, %r2
+# CHECK: mull3 %r0, %r1, %r2
+0xc5,0x50,0x51,0x52
+
+# divl2 %r1, %r0
+# CHECK: divl2 %r1, %r0
+0xc6,0x51,0x50
+
+# divl3 %r1, %r0, %r2
+# CHECK: divl3 %r1, %r0, %r2
+0xc7,0x51,0x50,0x52
+
+# --- Word (16-bit) ---
+
+# addw2 %r0, %r1
+# CHECK: addw2 %r0, %r1
+0xa0,0x50,0x51
+
+# addw3 %r0, %r1, %r2
+# CHECK: addw3 %r0, %r1, %r2
+0xa1,0x50,0x51,0x52
+
+# subw2 %r0, %r1
+# CHECK: subw2 %r0, %r1
+0xa2,0x50,0x51
+
+# mulw2 %r0, %r1
+# CHECK: mulw2 %r0, %r1
+0xa4,0x50,0x51
+
+# mulw3 %r0, %r1, %r2
+# CHECK: mulw3 %r0, %r1, %r2
+0xa5,0x50,0x51,0x52
+
+# divw2 %r0, %r1
+# CHECK: divw2 %r0, %r1
+0xa6,0x50,0x51
+
+# divw3 %r0, %r1, %r2
+# CHECK: divw3 %r0, %r1, %r2
+0xa7,0x50,0x51,0x52
+
+# --- Byte (8-bit) ---
+
+# addb2 %r0, %r1
+# CHECK: addb2 %r0, %r1
+0x80,0x50,0x51
+
+# addb3 %r0, %r1, %r2
+# CHECK: addb3 %r0, %r1, %r2
+0x81,0x50,0x51,0x52
+
+# subb2 %r0, %r1
+# CHECK: subb2 %r0, %r1
+0x82,0x50,0x51
+
+# mulb2 %r0, %r1
+# CHECK: mulb2 %r0, %r1
+0x84,0x50,0x51
+
+# mulb3 %r0, %r1, %r2
+# CHECK: mulb3 %r0, %r1, %r2
+0x85,0x50,0x51,0x52
+
+# divb2 %r0, %r1
+# CHECK: divb2 %r0, %r1
+0x86,0x50,0x51
+
+# divb3 %r0, %r1, %r2
+# CHECK: divb3 %r0, %r1, %r2
+0x87,0x50,0x51,0x52
+
+# --- Unary ---
+
+# incl %r0
+# CHECK: incl %r0
+0xd6,0x50
+
+# decl %r0
+# CHECK: decl %r0
+0xd7,0x50
+
+# incw %r0
+# CHECK: incw %r0
+0xb6,0x50
+
+# decw %r0
+# CHECK: decw %r0
+0xb7,0x50
+
+# incb %r0
+# CHECK: incb %r0
+0x96,0x50
+
+# decb %r0
+# CHECK: decb %r0
+0x97,0x50
+
+# --- Compare ---
+
+# cmpl %r0, $11
+# CHECK: cmpl %r0, $11
+0xd1,0x50,0x0b
+
+# cmpw %r0, %r1
+# CHECK: cmpw %r0, %r1
+0xb1,0x50,0x51
+
+# cmpb %r0, %r1
+# CHECK: cmpb %r0, %r1
+0x91,0x50,0x51
+
+# tstl %r0
+# CHECK: tstl %r0
+0xd5,0x50
+
+# tstw %r0
+# CHECK: tstw %r0
+0xb5,0x50
+
+# tstb %r0
+# CHECK: tstb %r0
+0x95,0x50
+
+# --- Bit operations ---
+
+# bisl2 $1, %r0
+# CHECK: bisl2 $1, %r0
+0xc8,0x01,0x50
+
+# bicl2 $1, %r0
+# CHECK: bicl2 $1, %r0
+0xca,0x01,0x50
+
+# bitl %r0, %r1
+# CHECK: bitl %r0, %r1
+0xd3,0x50,0x51
+
+# xorl2 %r0, %r1
+# CHECK: xorl2 %r0, %r1
+0xcc,0x50,0x51
+
+# --- PSW ---
+
+# bispsw $7
+# CHECK: bispsw $7
+0xb8,0x07
+
+# bicpsw $15
+# CHECK: bicpsw $15
+0xb9,0x0f

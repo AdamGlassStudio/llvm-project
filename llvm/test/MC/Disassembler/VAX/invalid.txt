@@ -1,0 +1,25 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf 2>&1 | FileCheck %s
+
+# Test handling of invalid and undefined encodings.
+
+# --- Undefined/reserved single-byte opcodes ---
+
+# 0xFE (reserved)
+# CHECK: warning: invalid instruction encoding
+0xfe
+
+# 0xFF (reserved)
+# CHECK: warning: invalid instruction encoding
+0xff
+
+# --- Undefined FD-prefix opcodes ---
+
+# 0xFD 0xFF (undefined two-byte opcode)
+# CHECK: warning: invalid instruction encoding
+0xfd,0xff
+
+# --- Truncated instruction: FD prefix with no second byte ---
+
+# 0xFD with no second byte (truncated two-byte opcode)
+# CHECK: warning: invalid instruction encoding
+0xfd
