@@ -28,7 +28,7 @@ declare i32 @add_two(i32, i32)
 define i32 @add_impl(i32 %a, i32 %b) {
 ; CHECK-LABEL: add_impl:
 ; CHECK: movl	8(%ap), %r0
-; CHECK-NEXT: addl3	4(%ap), %r0, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
 ; CHECK-NEXT: ret
   %r = add i32 %a, %b
   ret i32 %r

@@ -3,10 +3,10 @@
 ; Test redundant TST elimination: when the preceding instruction already
 ; sets N/Z flags on the same register, the TST is eliminated.
 
-; ADDL3 sets flags on result — TSTL is redundant.
+; ADDL2 sets flags on result — TSTL is redundant.
 define i32 @add_branch(i32 %a, i32 %b) {
 ; CHECK-LABEL: add_branch:
-; CHECK: addl3
+; CHECK: addl2
 ; CHECK-NOT: tstl
 ; CHECK-NEXT: beql
   %sum = add i32 %a, %b

@@ -12,8 +12,7 @@
 
 define i32 @add_reg_mem(i32 %a, ptr %p) nounwind {
 ; CHECK-LABEL: add_reg_mem:
-; CHECK:       addl3 4(%ap),
-; CHECK-SAME:  %r0
+; CHECK:       addl2 4(%ap), %r0
   %val = load i32, ptr %p
   %sum = add i32 %a, %val
   ret i32 %sum
@@ -21,7 +20,7 @@ define i32 @add_reg_mem(i32 %a, ptr %p) nounwind {
 
 define i32 @add_mem_reg(ptr %p, i32 %b) nounwind {
 ; CHECK-LABEL: add_mem_reg:
-; CHECK:       addl3 {{.*}}, {{.*}}, %r0
+; CHECK:       addl2 (%r{{[0-9]+}}), %r0
   %val = load i32, ptr %p
   %sum = add i32 %val, %b
   ret i32 %sum
@@ -31,8 +30,7 @@ define i32 @add_mem_reg(ptr %p, i32 %b) nounwind {
 
 define i32 @mul_reg_mem(i32 %a, ptr %p) nounwind {
 ; CHECK-LABEL: mul_reg_mem:
-; CHECK:       mull3 4(%ap),
-; CHECK-SAME:  %r0
+; CHECK:       mull2 4(%ap), %r0
   %val = load i32, ptr %p
   %sum = mul i32 %a, %val
   ret i32 %sum
@@ -42,8 +40,7 @@ define i32 @mul_reg_mem(i32 %a, ptr %p) nounwind {
 
 define i32 @or_reg_mem(i32 %a, ptr %p) nounwind {
 ; CHECK-LABEL: or_reg_mem:
-; CHECK:       bisl3 4(%ap),
-; CHECK-SAME:  %r0
+; CHECK:       bisl2 4(%ap), %r0
   %val = load i32, ptr %p
   %res = or i32 %a, %val
   ret i32 %res
@@ -53,8 +50,7 @@ define i32 @or_reg_mem(i32 %a, ptr %p) nounwind {
 
 define i32 @xor_reg_mem(i32 %a, ptr %p) nounwind {
 ; CHECK-LABEL: xor_reg_mem:
-; CHECK:       xorl3 4(%ap),
-; CHECK-SAME:  %r0
+; CHECK:       xorl2 4(%ap), %r0
   %val = load i32, ptr %p
   %res = xor i32 %a, %val
   ret i32 %res
@@ -97,7 +93,7 @@ define i32 @cmp_mem_reg(ptr %p, i32 %b) nounwind {
 
 define i32 @add_stack_args(i32 %a, i32 %b) nounwind {
 ; CHECK-LABEL: add_stack_args:
-; CHECK:       addl3 4(%ap), {{.*}}, %r0
+; CHECK:       addl2 4(%ap), %r0
 ; CHECK-NEXT:  ret
   %sum = add i32 %a, %b
   ret i32 %sum
