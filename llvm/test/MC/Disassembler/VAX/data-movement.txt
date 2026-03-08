@@ -1,0 +1,105 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# Data movement and conversion instructions.
+
+# --- MOV longword/word/byte ---
+
+# movl %r0, %r1
+# CHECK: movl %r0, %r1
+0xd0,0x50,0x51
+
+# movw %r0, %r1
+# CHECK: movw %r0, %r1
+0xb0,0x50,0x51
+
+# movb %r0, %r1
+# CHECK: movb %r0, %r1
+0x90,0x50,0x51
+
+# --- MOV with sign-extension ---
+
+# movzwl %r0, %r1
+# CHECK: movzwl %r0, %r1
+0x3c,0x50,0x51
+
+# movzbl %r0, %r1
+# CHECK: movzbl %r0, %r1
+0x9a,0x50,0x51
+
+# cvtwl %r0, %r1
+# CHECK: cvtwl %r0, %r1
+0x32,0x50,0x51
+
+# cvtbl %r0, %r1
+# CHECK: cvtbl %r0, %r1
+0x98,0x50,0x51
+
+# --- Conversion: narrowing ---
+
+# cvtlb %r0, %r1
+# CHECK: cvtlb %r0, %r1
+0xf6,0x50,0x51
+
+# cvtlw %r1, %r2
+# CHECK: cvtlw %r1, %r2
+0xf7,0x51,0x52
+
+# cvtwb %r0, %r1
+# CHECK: cvtwb %r0, %r1
+0x33,0x50,0x51
+
+# --- Clear ---
+
+# clrl %r0
+# CHECK: clr{{[lf]}} %r0
+0xd4,0x50
+
+# clrw %r0
+# CHECK: clrw %r0
+0xb4,0x50
+
+# clrb %r0
+# CHECK: clrb %r0
+0x94,0x50
+
+# --- Push ---
+
+# pushl $5
+# CHECK: pushl $5
+0xdd,0x05
+
+# pushl %r0
+# CHECK: pushl %r0
+0xdd,0x50
+
+# pushl 8(%ap)  (memory operand)
+# CHECK: pushl 8(%ap)
+0xdd,0xac,0x08
+
+# --- MOV address ---
+
+# moval (%r0), %r1
+# CHECK: moval (%r0), %r1
+0xde,0x60,0x51
+
+# movaw (%r2), %r3
+# CHECK: movaw (%r2), %r3
+0x3e,0x62,0x53
+
+# movab (%r4), %r5
+# CHECK: movab (%r4), %r5
+0x9e,0x64,0x55
+
+# --- Push address ---
+
+# pushal (%r0)
+# CHECK: pushal (%r0)
+0xdf,0x60
+
+# pushaw (%r1)
+# CHECK: pushaw (%r1)
+0x3f,0x61
+
+# pushab (%r2)
+# CHECK: pushab (%r2)
+0x9f,0x62

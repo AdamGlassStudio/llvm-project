@@ -1,0 +1,91 @@
+# RUN: llvm-mc --disassemble %s -triple=vax-unknown-netbsdelf | FileCheck %s
+
+# Branch instructions and control flow.
+
+# --- Byte-displacement conditional branches ---
+
+# beql +4
+# CHECK: beql
+0x13,0x04
+
+# bneq -2
+# CHECK: bneq
+0x12,0xfe
+
+# bgtr +16
+# CHECK: bgtr
+0x14,0x10
+
+# bgeq +8
+# CHECK: bgeq
+0x18,0x08
+
+# blss +4
+# CHECK: blss
+0x19,0x04
+
+# bleq -10
+# CHECK: bleq
+0x15,0xf6
+
+# bgtru +12
+# CHECK: bgtru
+0x1a,0x0c
+
+# bgequ +6
+# CHECK: bgequ
+0x1e,0x06
+
+# blssu +2
+# CHECK: blssu
+0x1f,0x02
+
+# blequ -4
+# CHECK: blequ
+0x1b,0xfc
+
+# bvc +8
+# CHECK: bvc
+0x1c,0x08
+
+# bvs -4
+# CHECK: bvs
+0x1d,0xfc
+
+# --- Unconditional branches ---
+
+# brb +10
+# CHECK: brb
+0x11,0x0a
+
+# brw +256
+# CHECK: brw
+0x31,0x00,0x01
+
+# --- Subroutine calls ---
+
+# jsb target (BRB-style displacement)
+# CHECK: jsb
+0x16,0x20
+
+# --- Special ---
+
+# halt
+# CHECK: halt
+0x00
+
+# nop
+# CHECK: nop
+0x01
+
+# ret
+# CHECK: ret
+0x04
+
+# rsb
+# CHECK: rsb
+0x05
+
+# --- Loop instructions ---
+# (SOBGEQ/SOBGTR use mixed operand + branch displacement format;
+#  not yet supported by disassembler — tracked for future work)
