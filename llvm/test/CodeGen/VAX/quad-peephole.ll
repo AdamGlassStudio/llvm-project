@@ -16,8 +16,8 @@ define void @zero_i64(ptr %p) {
 
 define void @zero_two_i64(ptr %p) {
 ; CHECK-LABEL: zero_two_i64:
-; CHECK: clrq (%r0)
 ; CHECK: clrq 8(%r0)
+; CHECK: clrq (%r0)
 ; CHECK: ret
   store i64 0, ptr %p
   %p2 = getelementptr i64, ptr %p, i32 1
@@ -61,11 +61,16 @@ define i64 @return_i64_arg(i64 %x) {
   ret i64 %x
 }
 
-; Two pointer args loaded via movq
+; Two pointer args: load from src, store to dst
 define void @copy_i64(ptr %dst, ptr %src) {
 ; CHECK-LABEL: copy_i64:
-; Load both pointer args in one movq
-; CHECK: movq 4(%ap), %r0
+; CHECK: movl 8(%ap), %r0
+; CHECK: movl (%r0), %r1
+; CHECK: movl 4(%r0), %r0
+; CHECK: movl 4(%ap), %r2
+; CHECK: movl %r0, 4(%r2)
+; CHECK: movl %r1, (%r2)
+; CHECK: ret
   %v = load i64, ptr %src
   store i64 %v, ptr %dst
   ret void
@@ -78,7 +83,8 @@ define void @copy_i64(ptr %dst, ptr %src) {
 ; register allocator may or may not assign consecutive pair.
 define void @store_const_i64(ptr %p) {
 ; CHECK-LABEL: store_const_i64:
-; Just verify it compiles and stores both halves (MOVQ not guaranteed).
+; CHECK: movl $256, 4(%r0)
+; CHECK: clrl (%r0)
 ; CHECK: ret
   store i64 1099511627776, ptr %p  ; 0x100_0000_0000
   ret void

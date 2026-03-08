@@ -60,21 +60,16 @@ define i32 @max_i32(i32 %a, i32 %b) {
 ; Clamp to range [lo, hi]
 define i32 @clamp(i32 %x, i32 %lo, i32 %hi) {
 ; CHECK-LABEL: clamp:
-; CHECK: movl	12(%ap), %r0
-; CHECK-NEXT: movl	4(%ap), %r2
-; CHECK-NEXT: movl	8(%ap), %r1
-; CHECK-NEXT: cmpl	%r2, %r1
-; CHECK-NEXT: bgeq	{{.*}}
-; CHECK: cmpl	%r1, %r0
-; CHECK-NEXT: bleq	{{.*}}
-; CHECK-NEXT: {{.*}}:
-; CHECK-NEXT: ret
-; CHECK-NEXT: {{.*}}:
-; CHECK-NEXT: movl	%r2, %r1
+; CHECK: movq	4(%ap), %r0
+; CHECK-NEXT: cmpl	%r0, %r1
+; CHECK-NEXT: blss	.LBB4_2
+; CHECK: movl	%r0, %r1
+; CHECK: .LBB4_2:
+; CHECK-NEXT: movl	12(%ap), %r0
 ; CHECK-NEXT: cmpl	%r1, %r0
-; CHECK-NEXT: bgtr	{{.*}}
-; CHECK-NEXT: {{.*}}:
-; CHECK-NEXT: movl	%r1, %r0
+; CHECK-NEXT: bgtr	.LBB4_4
+; CHECK: movl	%r1, %r0
+; CHECK: .LBB4_4:
 ; CHECK-NEXT: ret
   %c1 = icmp slt i32 %x, %lo
   %v1 = select i1 %c1, i32 %lo, i32 %x
