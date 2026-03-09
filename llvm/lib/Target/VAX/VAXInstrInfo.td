@@ -194,16 +194,17 @@ def vax_bicl : SDNode<"VAXISD::BICL", SDT_VAXBICL>;
 
 // Multiclass for 3-operand commutative ALU operations.
 // LLVM canonicalises commutative ops so constants appear as the RHS operand.
-multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
+multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp,
+                        SchedWrite sched = WriteALU> {
   def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
       [(set GPRnoPC:$dst, (SDOp GPRnoPC:$a, GPRnoPC:$b))]>,
-    Sched<[WriteALU]>;
+    Sched<[sched]>;
   // Constant is RHS after LLVM's commutative canonicalisation.
   def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
       [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>,
-    Sched<[WriteALU]>;
+    Sched<[sched]>;
   // Fold a load into one source operand: addl3 mem, reg, dst.
   // Commutative, so either operand can be the load.
   let HasMemOp = 1 in
@@ -211,24 +212,24 @@ multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
       (ins VAXMemOp:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
       [(set GPRnoPC:$dst, (SDOp (load VAXMemLong:$a), GPRnoPC:$b))]>,
-    Sched<[WriteALU]>;
+    Sched<[sched]>;
 }
 
 // Multiclass for 2-operand ALU: dst OP= src. Used by all xyzL2 instructions.
-multiclass VAXAlu2<bits<16> opc, string mn> {
+multiclass VAXAlu2<bits<16> opc, string mn, SchedWrite sched = WriteALU> {
   def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
+      mn # "\t$s, $dst", []>, Sched<[sched]> {
     let Constraints = "$src = $dst";
   }
   def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
+      mn # "\t$s, $dst", []>, Sched<[sched]> {
     let Constraints = "$src = $dst";
   }
   // Memory source: addl2 mem, dst. Used by peephole (3op→2op with mem source).
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
       (ins VAXMemOp:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
+      mn # "\t$s, $dst", []>, Sched<[sched]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -343,7 +344,7 @@ multiclass VAXFpMov<bits<16> opc, string mn, RegisterClass RC,
 // All integer ALU instructions set PSW condition codes.
 let Defs = [PSW] in {
 defm ADDL3 : VAXAlu3_comm<0xC1, "addl3", add>;
-defm MULL3 : VAXAlu3_comm<0xC5, "mull3", mul>;
+defm MULL3 : VAXAlu3_comm<0xC5, "mull3", mul, WriteMULL>;
 defm BISL3 : VAXAlu3_comm<0xC9, "bisl3", or>;
 defm XORL3 : VAXAlu3_comm<0xCD, "xorl3", xor>;
 
@@ -1055,8 +1056,8 @@ def ADJCALLSTACKUP : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 let Defs = [PSW] in {
 defm ADDL2 : VAXAlu2<0xC0, "addl2">;
 defm SUBL2 : VAXAlu2<0xC2, "subl2">;
-defm MULL2 : VAXAlu2<0xC4, "mull2">;
-defm DIVL2 : VAXAlu2<0xC6, "divl2">;
+defm MULL2 : VAXAlu2<0xC4, "mull2", WriteMULL>;
+defm DIVL2 : VAXAlu2<0xC6, "divl2", WriteDIVL>;
 defm BISL2 : VAXAlu2<0xC8, "bisl2">;
 defm BICL2 : VAXAlu2<0xCA, "bicl2">;
 defm XORL2 : VAXAlu2<0xCC, "xorl2">;
@@ -1289,12 +1290,12 @@ def SUBF2_rr : InstVAX<0x42, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
 }
 // MULF2 (0x44) — Multiply F_float 2-op: dst *= src.
 def MULF2_rr : InstVAX<0x44, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
-    "mulf2\t$s, $dst", []> {
+    "mulf2\t$s, $dst", []>, Sched<[WriteFPALU]> {
   let Constraints = "$src = $dst";
 }
 // DIVF2 (0x46) — Divide F_float 2-op: dst /= src.
 def DIVF2_rr : InstVAX<0x46, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
-    "divf2\t$s, $dst", []> {
+    "divf2\t$s, $dst", []>, Sched<[WriteFPDIV]> {
   let Constraints = "$src = $dst";
 }
 
@@ -1309,11 +1310,11 @@ def SUBF3_rr : InstVAX<0x43, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$m),
 // MULF3 (0x45) — Multiply F_float: dst = src1 * src2.
 def MULF3_rr : InstVAX<0x45, (outs GPRI:$dst), (ins GPRI:$a, GPRI:$b),
     "mulf3\t$a, $b, $dst",
-    [(set GPRI:$dst, (fmul GPRI:$a, GPRI:$b))]>;
+    [(set GPRI:$dst, (fmul GPRI:$a, GPRI:$b))]>, Sched<[WriteFPALU]>;
 // DIVF3 (0x47) — Divide F_float: dst = src2 / src1.
 def DIVF3_rr : InstVAX<0x47, (outs GPRI:$dst), (ins GPRI:$dv, GPRI:$dd),
     "divf3\t$dv, $dd, $dst",
-    [(set GPRI:$dst, (fdiv GPRI:$dd, GPRI:$dv))]>;
+    [(set GPRI:$dst, (fdiv GPRI:$dd, GPRI:$dv))]>, Sched<[WriteFPDIV]>;
 
 // MNEGF (0x52) — Negate F_float: dst = -src.
 def MNEGF : InstVAX<0x52, (outs GPRI:$dst), (ins GPRI:$src),
@@ -1388,12 +1389,12 @@ def SUBD2_rr : InstVAX<0x62, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
 }
 // MULD2 (0x64) — Multiply D_float 2-op: dst *= src.
 def MULD2_rr : InstVAX<0x64, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
-    "muld2\t$s, $dst", []> {
+    "muld2\t$s, $dst", []>, Sched<[WriteFPDALU]> {
   let Constraints = "$src = $dst";
 }
 // DIVD2 (0x66) — Divide D_float 2-op: dst /= src.
 def DIVD2_rr : InstVAX<0x66, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
-    "divd2\t$s, $dst", []> {
+    "divd2\t$s, $dst", []>, Sched<[WriteFPDDIV]> {
   let Constraints = "$src = $dst";
 }
 
@@ -1408,11 +1409,11 @@ def SUBD3_rr : InstVAX<0x63, (outs QPR:$dst), (ins QPR:$s, QPR:$m),
 // MULD3 (0x65) — Multiply D_float: dst = src1 * src2.
 def MULD3_rr : InstVAX<0x65, (outs QPR:$dst), (ins QPR:$a, QPR:$b),
     "muld3\t$a, $b, $dst",
-    [(set QPR:$dst, (fmul QPR:$a, QPR:$b))]>;
+    [(set QPR:$dst, (fmul QPR:$a, QPR:$b))]>, Sched<[WriteFPDALU]>;
 // DIVD3 (0x67) — Divide D_float: dst = src2 / src1.
 def DIVD3_rr : InstVAX<0x67, (outs QPR:$dst), (ins QPR:$dv, QPR:$dd),
     "divd3\t$dv, $dd, $dst",
-    [(set QPR:$dst, (fdiv QPR:$dd, QPR:$dv))]>;
+    [(set QPR:$dst, (fdiv QPR:$dd, QPR:$dv))]>, Sched<[WriteFPDDIV]>;
 
 // MNEGD (0x72) — Negate D_float: dst = -src.
 def MNEGD : InstVAX<0x72, (outs QPR:$dst), (ins QPR:$src),
@@ -1657,13 +1658,13 @@ def INCB : InstVAX<0x96, (outs),
 let Defs = [PSW] in
 def DIVL2 : InstVAX<0xC6, (outs),
     (ins VAXMemOp:$divisor, VAXMemOp:$dividend),
-    "divl2\t$divisor, $dividend", []>;
+    "divl2\t$divisor, $dividend", []>, Sched<[WriteDIVL]>;
 
 // MULL2 (0xC4): multiply longword 2-operand. mulr.rl, prod.ml
 let Defs = [PSW] in
 def MULL2 : InstVAX<0xC4, (outs),
     (ins VAXMemOp:$mulr, VAXMemOp:$prod),
-    "mull2\t$mulr, $prod", []>;
+    "mull2\t$mulr, $prod", []>, Sched<[WriteMULL]>;
 
 // SUBL3 with MemOp operands (e.g., subl3 %r2, 4(%ap), %r0)
 let Defs = [PSW] in
@@ -2219,9 +2220,9 @@ def ADDL2_mm : InstVAX<0xC0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 def SUBL2_mm : InstVAX<0xC2, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "subl2\t$src, $dst", []>;
 def MULL2_mm : InstVAX<0xC4, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "mull2\t$src, $dst", []>;
+    "mull2\t$src, $dst", []>, Sched<[WriteMULL]>;
 def DIVL2_mm : InstVAX<0xC6, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "divl2\t$src, $dst", []>;
+    "divl2\t$src, $dst", []>, Sched<[WriteDIVL]>;
 def BISL2_mm : InstVAX<0xC8, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "bisl2\t$src, $dst", []>;
 def BICL2_mm : InstVAX<0xCA, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2257,9 +2258,9 @@ def ADDF2_mm : InstVAX<0x40, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 def SUBF2_mm : InstVAX<0x42, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "subf2\t$src, $dst", []>;
 def MULF2_mm : InstVAX<0x44, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "mulf2\t$src, $dst", []>;
+    "mulf2\t$src, $dst", []>, Sched<[WriteFPALU]>;
 def DIVF2_mm : InstVAX<0x46, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "divf2\t$src, $dst", []>;
+    "divf2\t$src, $dst", []>, Sched<[WriteFPDIV]>;
 
 // 2-operand D_float ALU: all-memory.
 def ADDD2_mm : InstVAX<0x60, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2267,9 +2268,9 @@ def ADDD2_mm : InstVAX<0x60, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 def SUBD2_mm : InstVAX<0x62, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "subd2\t$src, $dst", []>;
 def MULD2_mm : InstVAX<0x64, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "muld2\t$src, $dst", []>;
+    "muld2\t$src, $dst", []>, Sched<[WriteFPDALU]>;
 def DIVD2_mm : InstVAX<0x66, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
-    "divd2\t$src, $dst", []>;
+    "divd2\t$src, $dst", []>, Sched<[WriteFPDDIV]>;
 
 // ROTL/ASHL: shift. 3-operand, all-memory.
 def ASHL_mm : InstVAX<0x78, (outs), (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
@@ -2287,9 +2288,9 @@ def ADDL3_mm : InstVAX<0xC1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
 def SUBL3_mm : InstVAX<0xC3, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "subl3\t$a, $b, $dst", []>;
 def MULL3_mm : InstVAX<0xC5, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "mull3\t$a, $b, $dst", []>;
+    "mull3\t$a, $b, $dst", []>, Sched<[WriteMULL]>;
 def DIVL3_mm : InstVAX<0xC7, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "divl3\t$a, $b, $dst", []>;
+    "divl3\t$a, $b, $dst", []>, Sched<[WriteDIVL]>;
 def BISL3_mm : InstVAX<0xC9, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "bisl3\t$a, $b, $dst", []>;
 def BICL3_mm : InstVAX<0xCB, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2327,9 +2328,9 @@ def ADDF3_mm : InstVAX<0x41, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
 def SUBF3_mm : InstVAX<0x43, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "subf3\t$a, $b, $dst", []>;
 def MULF3_mm : InstVAX<0x45, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "mulf3\t$a, $b, $dst", []>;
+    "mulf3\t$a, $b, $dst", []>, Sched<[WriteFPALU]>;
 def DIVF3_mm : InstVAX<0x47, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "divf3\t$a, $b, $dst", []>;
+    "divf3\t$a, $b, $dst", []>, Sched<[WriteFPDIV]>;
 
 // 3-operand D_float ALU: all-memory.
 def ADDD3_mm : InstVAX<0x61, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2337,9 +2338,9 @@ def ADDD3_mm : InstVAX<0x61, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
 def SUBD3_mm : InstVAX<0x63, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "subd3\t$a, $b, $dst", []>;
 def MULD3_mm : InstVAX<0x65, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "muld3\t$a, $b, $dst", []>;
+    "muld3\t$a, $b, $dst", []>, Sched<[WriteFPDALU]>;
 def DIVD3_mm : InstVAX<0x67, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "divd3\t$a, $b, $dst", []>;
+    "divd3\t$a, $b, $dst", []>, Sched<[WriteFPDDIV]>;
 
 // CALLS: all-memory variant (call with args count + memory target).
 def CALLS_mm : InstVAX<0xFB, (outs), (ins VAXMemOp:$args, VAXMemOp:$target),

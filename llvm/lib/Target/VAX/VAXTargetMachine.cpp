@@ -58,7 +58,8 @@ VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
                                getEffectiveRelocModel(RM),
                                getVAXEffectiveCodeModel(CM), OL),
       TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
-      Subtarget(TT, std::string(CPU), std::string(FS), *this) {
+      Subtarget(TT, CPU.empty() ? "generic" : std::string(CPU),
+                std::string(FS), *this) {
   // VAX has no user-accessible per-thread register (unlike x86 %fs/%gs or
   // ARM TPIDR_EL0), so native TLS models are impossible. Force emulated TLS,
   // which lowers __thread variables to __emutls_* runtime calls — matching
