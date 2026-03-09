@@ -76,24 +76,27 @@ def VAXMemLong : ComplexPattern<iPTR, 4, "SelectVAXAddrLong",
 //===----------------------------------------------------------------------===//
 
 // NOP — kept as a known-good no-op; also satisfies old TableGen min-instruction req
-def NOP : InstVAX<0x01, (outs), (ins), "nop", []>;
+def NOP : InstVAX<0x01, (outs), (ins), "nop", []>, Sched<[WriteNOP]>;
 
 // RET — return from CALLS/CALLG frame (hardware restores saved regs, pops frame)
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
-def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>;
+def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>,
+    Sched<[WriteRET]>;
 
 // CLRL — zero a longword register; cheapest way to load the constant 0
 // Nearly all VAX data-manipulation instructions set condition codes (N/Z/V/C
 // in PSW). Each instruction or block below explicitly declares Defs = [PSW].
 let Defs = [PSW] in
 def CLRL : InstVAX<0xD4, (outs GPRnoPC:$dst), (ins),
-    "clrl\t$dst", [(set GPRnoPC:$dst, (i32 0))]>;
+    "clrl\t$dst", [(set GPRnoPC:$dst, (i32 0))]>,
+    Sched<[WriteALU]>;
 // CLRL to memory: store zero without an intermediate register.
 // Matches (store 0, addr) with higher specificity than MOVL_mi.
 let Defs = [PSW], HasMemOp = 1 in
 def CLRL_ms : InstVAX<0xD4, (outs), (ins VAXMemOp:$dst),
     "clrl\t$dst",
-    [(store (i32 0), VAXMemLong:$dst)]>;
+    [(store (i32 0), VAXMemLong:$dst)]>,
+    Sched<[WriteALU]>;
 
 //===----------------------------------------------------------------------===//
 // Phase 4 — MOV instructions + basic addressing
@@ -106,66 +109,73 @@ let Defs = [PSW] in {
 
 // reg <- reg  (register copy; no DAG pattern — emitted by copyPhysReg)
 def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
-    "movl\t$src, $dst", []>;
+    "movl\t$src, $dst", []>, Sched<[WriteMOV]>;
 
 // reg <- immediate  (assembler emits $imm literal)
 def MOVL_ri : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$imm),
     "movl\t$imm, $dst",
-    [(set GPRnoPC:$dst, (i32 imm:$imm))]>;
+    [(set GPRnoPC:$dst, (i32 imm:$imm))]>, Sched<[WriteMOV]>;
 
 // reg <- memory  (displacement/deferred load)
 let HasMemOp = 1 in
 def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "movl\t$src, $dst",
-    [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>;
+    [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>, Sched<[WriteMOV]>;
 
 // memory <- reg  (displacement/deferred store)
 let HasMemOp = 1 in
 def MOVL_mr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
     "movl\t$src, $dst",
-    [(store GPRnoPC:$src, VAXMemLong:$dst)]>;
+    [(store GPRnoPC:$src, VAXMemLong:$dst)]>, Sched<[WriteMOV]>;
 
 // memory <- immediate  (store constant to memory without register)
 let HasMemOp = 1 in
 def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
     "movl\t$imm, $dst",
-    [(store (i32 imm:$imm), VAXMemLong:$dst)]>;
+    [(store (i32 imm:$imm), VAXMemLong:$dst)]>, Sched<[WriteMOV]>;
 
 // reg <- global  (PC-relative load from global/extern data)
 def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+    [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>,
+    Sched<[WriteMOV]>;
 
 // reg <- constant pool entry (PC-relative load)
 def MOVL_rcp : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
-    [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tconstpool:$sym)))]>;
+    [(set GPRnoPC:$dst, (load (vax_pcrelwrapper tconstpool:$sym)))]>,
+    Sched<[WriteMOV]>;
 
 // global <- reg  (PC-relative store to global/extern data)
 def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
     "movl\t$src, $sym",
-    [(store GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+    [(store GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>,
+    Sched<[WriteMOV]>;
 
 // Materialize a jump table address into a register (PC-relative).
 // Emits: moval JT_sym, $dst
 def MOVAL_jt : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$jt),
     "moval\t$jt, $dst",
-    [(set GPRnoPC:$dst, (vax_pcrelwrapper tjumptable:$jt))]>;
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tjumptable:$jt))]>,
+    Sched<[WriteMOV]>;
 
 // Address-of-global: moval global_sym, $dst
 def MOVAL_ga : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
-    [(set GPRnoPC:$dst, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tglobaladdr:$sym))]>,
+    Sched<[WriteMOV]>;
 
 // Address-of-constant-pool entry: moval .LCPI_n, $dst
 def MOVAL_cp : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
-    [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>;
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tconstpool:$sym))]>,
+    Sched<[WriteMOV]>;
 
 // Address-of-block (computed goto): moval .Ltmp_n, $dst
 def MOVAL_ba : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
-    [(set GPRnoPC:$dst, (vax_pcrelwrapper tblockaddress:$sym))]>;
+    [(set GPRnoPC:$dst, (vax_pcrelwrapper tblockaddress:$sym))]>,
+    Sched<[WriteMOV]>;
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
 // Atomic load/store: VAX aligned loads/stores are naturally atomic.
@@ -187,35 +197,38 @@ def vax_bicl : SDNode<"VAXISD::BICL", SDT_VAXBICL>;
 multiclass VAXAlu3_comm<bits<16> opc, string mn, SDNode SDOp> {
   def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
-      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$a, GPRnoPC:$b))]>;
+      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$a, GPRnoPC:$b))]>,
+    Sched<[WriteALU]>;
   // Constant is RHS after LLVM's commutative canonicalisation.
   def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
-      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>;
+      [(set GPRnoPC:$dst, (SDOp GPRnoPC:$b, (i32 imm:$a)))]>,
+    Sched<[WriteALU]>;
   // Fold a load into one source operand: addl3 mem, reg, dst.
   // Commutative, so either operand can be the load.
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
       (ins VAXMemOp:$a, GPRnoPC:$b),
       mn # "\t$a, $b, $dst",
-      [(set GPRnoPC:$dst, (SDOp (load VAXMemLong:$a), GPRnoPC:$b))]>;
+      [(set GPRnoPC:$dst, (SDOp (load VAXMemLong:$a), GPRnoPC:$b))]>,
+    Sched<[WriteALU]>;
 }
 
 // Multiclass for 2-operand ALU: dst OP= src. Used by all xyzL2 instructions.
 multiclass VAXAlu2<bits<16> opc, string mn> {
   def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
     let Constraints = "$src = $dst";
   }
   def _ri : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
     let Constraints = "$src = $dst";
   }
   // Memory source: addl2 mem, dst. Used by peephole (3op→2op with mem source).
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
       (ins VAXMemOp:$s, GPRnoPC:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -223,7 +236,7 @@ multiclass VAXAlu2<bits<16> opc, string mn> {
 // 2-operand byte ALU: dst OP= src (byte). Used by peephole.
 multiclass VAXAlu2B<bits<16> opc, string mn> {
   def _rr : InstVAX<opc, (outs GPRB:$dst), (ins GPRB:$s, GPRB:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -231,7 +244,7 @@ multiclass VAXAlu2B<bits<16> opc, string mn> {
 // 2-operand word ALU: dst OP= src (word). Used by peephole.
 multiclass VAXAlu2W<bits<16> opc, string mn> {
   def _rr : InstVAX<opc, (outs GPRW:$dst), (ins GPRW:$s, GPRW:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteALU]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -239,7 +252,7 @@ multiclass VAXAlu2W<bits<16> opc, string mn> {
 // 2-operand F_float ALU: dst OP= src. Used by peephole.
 multiclass VAXAlu2F<bits<16> opc, string mn> {
   def _rr : InstVAX<opc, (outs GPRI:$dst), (ins GPRI:$s, GPRI:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteFPALU]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -247,7 +260,7 @@ multiclass VAXAlu2F<bits<16> opc, string mn> {
 // 2-operand D_float ALU: dst OP= src. Used by peephole.
 multiclass VAXAlu2D<bits<16> opc, string mn> {
   def _rr : InstVAX<opc, (outs QPR:$dst), (ins QPR:$s, QPR:$src),
-      mn # "\t$s, $dst", []> {
+      mn # "\t$s, $dst", []>, Sched<[WriteFPDALU]> {
     let Constraints = "$src = $dst";
   }
 }
@@ -257,17 +270,19 @@ multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload> {
   let HasMemOp = 1 in {
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
       mn # "\t$src, $dst",
-      [(set GPRnoPC:$dst, (zload VAXMem:$src))]>;
+      [(set GPRnoPC:$dst, (zload VAXMem:$src))]>, Sched<[WriteCVT]>;
   def _rm_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
       mn # "\t$src, $dst",
-      [(set GPRnoPC:$dst, (eload VAXMem:$src))]>;
+      [(set GPRnoPC:$dst, (eload VAXMem:$src))]>, Sched<[WriteCVT]>;
   }
   def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
-      [(set GPRnoPC:$dst, (zload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+      [(set GPRnoPC:$dst, (zload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
+    Sched<[WriteCVT]>;
   def _rg_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
-      [(set GPRnoPC:$dst, (eload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+      [(set GPRnoPC:$dst, (eload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
+    Sched<[WriteCVT]>;
 }
 
 // Multiclass for sign-extending conversions: CVTBL, CVTWL.
@@ -275,13 +290,15 @@ multiclass VAXSextConv<bits<16> opc, string mn, PatFrag sload, ValueType subvt> 
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
       mn # "\t$src, $dst",
-      [(set GPRnoPC:$dst, (sload VAXMem:$src))]>;
+      [(set GPRnoPC:$dst, (sload VAXMem:$src))]>, Sched<[WriteCVT]>;
   def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
-      [(set GPRnoPC:$dst, (sload (vax_pcrelwrapper tglobaladdr:$sym)))]>;
+      [(set GPRnoPC:$dst, (sload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
+    Sched<[WriteCVT]>;
   def _rr : InstVAX<opc, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
       mn # "\t$src, $dst",
-      [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, subvt))]>;
+      [(set GPRnoPC:$dst, (sext_inreg GPRnoPC:$src, subvt))]>,
+    Sched<[WriteCVT]>;
 }
 
 // Multiclass for truncating stores: MOVB, MOVW.
@@ -289,10 +306,11 @@ multiclass VAXTruncStore<bits<16> opc, string mn, PatFrag tstore> {
   let HasMemOp = 1 in
   def _mr : InstVAX<opc, (outs), (ins GPRnoPC:$src, VAXMemOp:$dst),
       mn # "\t$src, $dst",
-      [(tstore GPRnoPC:$src, VAXMem:$dst)]>;
+      [(tstore GPRnoPC:$src, VAXMem:$dst)]>, Sched<[WriteMOV]>;
   def _mg : InstVAX<opc, (outs), (ins GPRnoPC:$src, i32imm:$sym),
       mn # "\t$src, $sym",
-      [(tstore GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+      [(tstore GPRnoPC:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>,
+    Sched<[WriteMOV]>;
 }
 
 // Multiclass for FP data moves (load/store/copy variants).
@@ -301,22 +319,25 @@ multiclass VAXFpMov<bits<16> opc, string mn, RegisterClass RC,
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs RC:$dst), (ins MemOp:$src),
       mn # "\t$src, $dst",
-      [(set RC:$dst, (VT (load VAXMem:$src)))]>;
+      [(set RC:$dst, (VT (load VAXMem:$src)))]>, Sched<[WriteFPMOV]>;
   def _rcp : InstVAX<opc, (outs RC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
-      [(set RC:$dst, (VT (load (vax_pcrelwrapper tconstpool:$sym))))]>;
+      [(set RC:$dst, (VT (load (vax_pcrelwrapper tconstpool:$sym))))]>,
+    Sched<[WriteFPMOV]>;
   def _rga : InstVAX<opc, (outs RC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
-      [(set RC:$dst, (VT (load (vax_pcrelwrapper tglobaladdr:$sym))))]>;
+      [(set RC:$dst, (VT (load (vax_pcrelwrapper tglobaladdr:$sym))))]>,
+    Sched<[WriteFPMOV]>;
   let HasMemOp = 1 in
   def _mr : InstVAX<opc, (outs), (ins RC:$src, MemOp:$dst),
       mn # "\t$src, $dst",
-      [(store (VT RC:$src), VAXMem:$dst)]>;
+      [(store (VT RC:$src), VAXMem:$dst)]>, Sched<[WriteFPMOV]>;
   def _mga : InstVAX<opc, (outs), (ins RC:$src, i32imm:$sym),
       mn # "\t$src, $sym",
-      [(store (VT RC:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>;
+      [(store (VT RC:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>,
+    Sched<[WriteFPMOV]>;
   def _rr : InstVAX<opc, (outs RC:$dst), (ins RC:$src),
-      mn # "\t$src, $dst", []>;
+      mn # "\t$src, $dst", []>, Sched<[WriteFPMOV]>;
 }
 
 // All integer ALU instructions set PSW condition codes.
@@ -331,67 +352,80 @@ defm XORL3 : VAXAlu3_comm<0xCD, "xorl3", xor>;
 //   $s = subtrahend (src1), $m = minuend (src2).
 def SUBL3_rr : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, GPRnoPC:$m),
     "subl3\t$s, $m, $dst",
-    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, GPRnoPC:$s))]>;
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, GPRnoPC:$s))]>,
+    Sched<[WriteALU]>;
 // reg - imm  (subtrahend is immediate)
 def SUBL3_ri : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins i32imm:$s, GPRnoPC:$m),
     "subl3\t$s, $m, $dst",
-    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (i32 imm:$s)))]>;
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (i32 imm:$s)))]>,
+    Sched<[WriteALU]>;
 // imm - reg  (minuend is immediate)
 def SUBL3_ir : InstVAX<0xC3, (outs GPRnoPC:$dst), (ins GPRnoPC:$s, i32imm:$m),
     "subl3\t$s, $m, $dst",
-    [(set GPRnoPC:$dst, (sub (i32 imm:$m), GPRnoPC:$s))]>;
+    [(set GPRnoPC:$dst, (sub (i32 imm:$m), GPRnoPC:$s))]>,
+    Sched<[WriteALU]>;
 // reg - mem  (subtrahend loaded from memory): dst = reg - (load addr)
 let HasMemOp = 1 in
 def SUBL3_rm : InstVAX<0xC3, (outs GPRnoPC:$dst),
     (ins VAXMemOp:$s, GPRnoPC:$m),
     "subl3\t$s, $m, $dst",
-    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (load VAXMemLong:$s)))]>;
+    [(set GPRnoPC:$dst, (sub GPRnoPC:$m, (load VAXMemLong:$s)))]>,
+    Sched<[WriteALU]>;
 // mem - reg  (minuend loaded from memory): dst = (load addr) - reg
 let HasMemOp = 1 in
 def SUBL3_mr : InstVAX<0xC3, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$s, VAXMemOp:$m),
     "subl3\t$s, $m, $dst",
-    [(set GPRnoPC:$dst, (sub (load VAXMemLong:$m), GPRnoPC:$s))]>;
+    [(set GPRnoPC:$dst, (sub (load VAXMemLong:$m), GPRnoPC:$s))]>,
+    Sched<[WriteALU]>;
 
 // DIVL3 — signed divide: dst = dividend / divisor.
 // VAX encoding: divl3 src1, src2, dst  →  dst = src2 / src1.
 def DIVL3_rr : InstVAX<0xC7, (outs GPRnoPC:$dst), (ins GPRnoPC:$dv, GPRnoPC:$dd),
     "divl3\t$dv, $dd, $dst",
-    [(set GPRnoPC:$dst, (sdiv GPRnoPC:$dd, GPRnoPC:$dv))]>;
+    [(set GPRnoPC:$dst, (sdiv GPRnoPC:$dd, GPRnoPC:$dv))]>,
+    Sched<[WriteDIVL]>;
 
 // MNEGL — negate longword: dst = -src  (matches ISD ineg = sub 0, x)
 def MNEGL : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "mnegl\t$src, $dst",
-    [(set GPRnoPC:$dst, (ineg GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (ineg GPRnoPC:$src))]>,
+    Sched<[WriteMCOM]>;
 let HasMemOp = 1 in
 def MNEGL_m : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "mnegl\t$src, $dst",
-    [(set GPRnoPC:$dst, (ineg (load VAXMemLong:$src)))]>;
+    [(set GPRnoPC:$dst, (ineg (load VAXMemLong:$src)))]>,
+    Sched<[WriteMCOM]>;
 
 // MCOML — ones complement: dst = ~src  (matches not = xor x, -1)
 def MCOML : InstVAX<0xD2, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "mcoml\t$src, $dst",
-    [(set GPRnoPC:$dst, (not GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (not GPRnoPC:$src))]>,
+    Sched<[WriteMCOM]>;
 let HasMemOp = 1 in
 def MCOML_m : InstVAX<0xD2, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "mcoml\t$src, $dst",
-    [(set GPRnoPC:$dst, (not (load VAXMemLong:$src)))]>;
+    [(set GPRnoPC:$dst, (not (load VAXMemLong:$src)))]>,
+    Sched<[WriteMCOM]>;
 
 // BICL3 — bit clear: dst = src & ~mask  (selected from VAXISD::BICL)
 def BICL3_rr : InstVAX<0xCB, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$mask, GPRnoPC:$src),
     "bicl3\t$mask, $src, $dst",
-    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, GPRnoPC:$src))]>,
+    Sched<[WriteALU]>;
 def BICL3_ri : InstVAX<0xCB, (outs GPRnoPC:$dst),
     (ins i32imm:$mask, GPRnoPC:$src),
     "bicl3\t$mask, $src, $dst",
-    [(set GPRnoPC:$dst, (vax_bicl (i32 imm:$mask), GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (vax_bicl (i32 imm:$mask), GPRnoPC:$src))]>,
+    Sched<[WriteALU]>;
 // Fold load into source operand: dst = (load addr) & ~mask
 let HasMemOp = 1 in
 def BICL3_rm : InstVAX<0xCB, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$mask, VAXMemOp:$src),
     "bicl3\t$mask, $src, $dst",
-    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, (load VAXMemLong:$src)))]>;
+    [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, (load VAXMemLong:$src)))]>,
+    Sched<[WriteALU]>;
 
 // MOVZBL — zero-extend byte to longword.
 defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8>;
@@ -439,46 +473,55 @@ def VAXCC_LEQU : PatLeaf<(i32 9)>;   // less or equal (unsigned)
 let Defs = [PSW] in {
 def CMPL_rr : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, GPRnoPC:$b),
     "cmpl\t$a, $b",
-    [(vax_cmp GPRnoPC:$a, GPRnoPC:$b)]>;
+    [(vax_cmp GPRnoPC:$a, GPRnoPC:$b)]>,
+    Sched<[WriteALU]>;
 def CMPL_ri : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, i32imm:$b),
     "cmpl\t$a, $b",
-    [(vax_cmp GPRnoPC:$a, (i32 imm:$b))]>;
+    [(vax_cmp GPRnoPC:$a, (i32 imm:$b))]>,
+    Sched<[WriteALU]>;
 // Compare register against memory operand.
 let HasMemOp = 1 in
 def CMPL_rm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, GPRnoPC:$b),
     "cmpl\t$a, $b",
-    [(vax_cmp (load VAXMemLong:$a), GPRnoPC:$b)]>;
+    [(vax_cmp (load VAXMemLong:$a), GPRnoPC:$b)]>,
+    Sched<[WriteALU]>;
 // TSTL — Test Longword: equivalent to cmpl reg, $0 but one byte shorter.
 def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
     "tstl\t$a",
-    [(vax_cmp GPRnoPC:$a, (i32 0))]>;
+    [(vax_cmp GPRnoPC:$a, (i32 0))]>,
+    Sched<[WriteALU]>;
 let HasMemOp = 1 in
 def TSTL_m : InstVAX<0xD5, (outs), (ins VAXMemOp:$a),
     "tstl\t$a",
-    [(vax_cmp (load VAXMemLong:$a), (i32 0))]>;
+    [(vax_cmp (load VAXMemLong:$a), (i32 0))]>,
+    Sched<[WriteALU]>;
 }
 
 // Unconditional branch — use BRW (16-bit displacement, ±32 KB) as the
 // default form; the assembler will shorten to BRB when possible.
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
 def BRW : InstVAX<0x31, (outs), (ins brtarget:$dst), "brw\t$dst",
-    [(br bb:$dst)]>;
+    [(br bb:$dst)]>,
+    Sched<[WriteBR]>;
 
 // 8-bit unconditional branch (used when assembler / relaxation pass shortens).
 let isBranch = 1, isTerminator = 1, isBarrier = 1 in
-def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>;
+def BRB : InstVAX<0x11, (outs), (ins brtarget:$dst), "brb\t$dst", []>,
+    Sched<[WriteBR]>;
 
 // JMP — indirect branch through register (for jump tables / computed goto).
 // VAX JMP opcode 0x17; operand is an address specifier.
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1 in
 def JMP : InstVAX<0x17, (outs), (ins GPRnoPC:$target), "jmp\t(${target})",
-    [(brind GPRnoPC:$target)]>;
+    [(brind GPRnoPC:$target)]>,
+    Sched<[WriteJMP]>;
 
 // JMP_mem — for AsmPrinter expansion: JMP with memory operand encoding.
 let isBranch = 1, isTerminator = 1, isBarrier = 1, isIndirectBranch = 1,
     HasMemOp = 1 in
 def JMP_mem : InstVAX<0x17, (outs), (ins VAXMemOp:$target), "jmp\t$target",
-    []>;
+    []>,
+    Sched<[WriteJMP]>;
 
 // CASEL — hardware switch dispatch via inline word-displacement table.
 // Pseudo: lowered in AsmPrinter to CASEL_L MCInst + .word entries.
@@ -491,31 +534,42 @@ def CASEL : Pseudo<(outs), (ins GPRnoPC:$index, i32imm:$limit, i32imm:$jti),
 // Used by AsmPrinter expansion of the CASEL pseudo and parseable by AsmParser.
 def CASEL_L : InstVAX<0xCF, (outs),
     (ins GPRnoPC:$selector, i32imm:$base, i32imm:$limit),
-    "casel\t$selector, $base, $limit", []>;
+    "casel\t$selector, $base, $limit", []>,
+    Sched<[WriteCASE]>;
 
 // Conditional branches (8-bit signed displacement ±127 B; all use PSW).
 // Each is a separate def so the opcode byte is fixed at instruction level.
 let Uses = [PSW], isBranch = 1, isTerminator = 1 in {
 def BEQL  : InstVAX<0x13, (outs), (ins brtarget:$dst), "beql\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_EQL)]>;
+    [(vax_brcc bb:$dst, VAXCC_EQL)]>,
+    Sched<[WriteBRcc]>;
 def BNEQ  : InstVAX<0x12, (outs), (ins brtarget:$dst), "bneq\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_NEQ)]>;
+    [(vax_brcc bb:$dst, VAXCC_NEQ)]>,
+    Sched<[WriteBRcc]>;
 def BGTR  : InstVAX<0x14, (outs), (ins brtarget:$dst), "bgtr\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_GTR)]>;
+    [(vax_brcc bb:$dst, VAXCC_GTR)]>,
+    Sched<[WriteBRcc]>;
 def BGEQ  : InstVAX<0x18, (outs), (ins brtarget:$dst), "bgeq\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_GEQ)]>;
+    [(vax_brcc bb:$dst, VAXCC_GEQ)]>,
+    Sched<[WriteBRcc]>;
 def BLSS  : InstVAX<0x19, (outs), (ins brtarget:$dst), "blss\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_LSS)]>;
+    [(vax_brcc bb:$dst, VAXCC_LSS)]>,
+    Sched<[WriteBRcc]>;
 def BLEQ  : InstVAX<0x15, (outs), (ins brtarget:$dst), "bleq\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_LEQ)]>;
+    [(vax_brcc bb:$dst, VAXCC_LEQ)]>,
+    Sched<[WriteBRcc]>;
 def BGTRU : InstVAX<0x1A, (outs), (ins brtarget:$dst), "bgtru\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_GTRU)]>;
+    [(vax_brcc bb:$dst, VAXCC_GTRU)]>,
+    Sched<[WriteBRcc]>;
 def BGEQU : InstVAX<0x1E, (outs), (ins brtarget:$dst), "bgequ\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_GEQU)]>;
+    [(vax_brcc bb:$dst, VAXCC_GEQU)]>,
+    Sched<[WriteBRcc]>;
 def BLSSU : InstVAX<0x1F, (outs), (ins brtarget:$dst), "blssu\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_LSSU)]>;
+    [(vax_brcc bb:$dst, VAXCC_LSSU)]>,
+    Sched<[WriteBRcc]>;
 def BLEQU : InstVAX<0x1B, (outs), (ins brtarget:$dst), "blequ\t$dst",
-    [(vax_brcc bb:$dst, VAXCC_LEQU)]>;
+    [(vax_brcc bb:$dst, VAXCC_LEQU)]>,
+    Sched<[WriteBRcc]>;
 }
 
 // Fused compare-branch pseudos: prevent the RA from inserting PSW-clobbering
@@ -877,31 +931,37 @@ let Defs = [PSW] in {
 def ASHL_rr : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, GPRnoPC:$cnt))]>;
+    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, GPRnoPC:$cnt))]>,
+    Sched<[WriteShift]>;
 def ASHL_ir : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins ByteImm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>;
+    [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>,
+    Sched<[WriteShift]>;
 
 // ASHL for custom SRA lowering (cnt is already negated by LowerSRA).
 def ASHL_rr_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (vax_ashl GPRnoPC:$cnt, GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (vax_ashl GPRnoPC:$cnt, GPRnoPC:$src))]>,
+    Sched<[WriteShift]>;
 def ASHL_ir_sra : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins ByteImm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (vax_ashl (i32 imm:$cnt), GPRnoPC:$src))]>;
+    [(set GPRnoPC:$dst, (vax_ashl (i32 imm:$cnt), GPRnoPC:$src))]>,
+    Sched<[WriteShift]>;
 
 // ROTL (0x9C) — Rotate Longword: dst = rotl(src, cnt).
 def ROTL_rr : InstVAX<0x9C, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$cnt, GPRnoPC:$src),
     "rotl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, GPRnoPC:$cnt))]>;
+    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, GPRnoPC:$cnt))]>,
+    Sched<[WriteROTL]>;
 def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
     (ins ByteImm:$cnt, GPRnoPC:$src),
     "rotl\t$cnt, $src, $dst",
-    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>;
+    [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>,
+    Sched<[WriteROTL]>;
 } // let Defs = [PSW] — end of shift/rotate block
 
 // ROTL — assembly-only form with all MemOp operands (for hand-written .S)
@@ -925,7 +985,8 @@ def EXTZV_iir : InstVAX<0xEF, (outs GPRnoPC:$dst),
     (ins ByteImm:$pos, ByteImm:$size, GPRnoPC:$base),
     "extzv\t$pos, $size, $base, $dst",
     [(set GPRnoPC:$dst, (vax_extzv (i32 imm:$pos), (i32 imm:$size),
-                                     GPRnoPC:$base))]>;
+                                     GPRnoPC:$base))]>,
+    Sched<[WriteEXTZV]>;
 
 // EXTZV with register pos/size — variable lshr.
 let Defs = [PSW] in
@@ -936,7 +997,8 @@ def EXTZV_rrr : InstVAX<0xEF, (outs GPRnoPC:$dst),
     (ins GPRnoPC:$pos, GPRnoPC:$size, GPRnoPC:$base),
     "extzv\t$pos, $size, $base, $dst",
     [(set GPRnoPC:$dst, (vax_extzv GPRnoPC:$pos, GPRnoPC:$size,
-                                     GPRnoPC:$base))]>;
+                                     GPRnoPC:$base))]>,
+    Sched<[WriteEXTZV]>;
 
 // EXTZV with memory base — load + shift folded.
 let Defs = [PSW], HasMemOp = 1 in
@@ -944,7 +1006,8 @@ def EXTZV_iim : InstVAX<0xEF, (outs GPRnoPC:$dst),
     (ins ByteImm:$pos, ByteImm:$size, VAXMemOp:$base),
     "extzv\t$pos, $size, $base, $dst",
     [(set GPRnoPC:$dst, (vax_extzv (i32 imm:$pos), (i32 imm:$size),
-                                     (load VAXMemLong:$base)))]>;
+                                     (load VAXMemLong:$base)))]>,
+    Sched<[WriteEXTZV]>;
 
 //===----------------------------------------------------------------------===//
 // FFS — Find First Set bit (ISel form for cttz)
@@ -954,11 +1017,13 @@ def EXTZV_iim : InstVAX<0xEF, (outs GPRnoPC:$dst),
 let Defs = [PSW] in {
 def FFS_rr : InstVAX<0xEA, (outs GPRnoPC:$dst),
     (ins ByteImm:$pos, ByteImm:$size, GPRnoPC:$base),
-    "ffs\t$pos, $size, $base, $dst", []>;
+    "ffs\t$pos, $size, $base, $dst", []>,
+    Sched<[WriteFFS]>;
 let HasMemOp = 1 in
 def FFS_rm : InstVAX<0xEA, (outs GPRnoPC:$dst),
     (ins ByteImm:$pos, ByteImm:$size, VAXMemOp:$base),
-    "ffs\t$pos, $size, $base, $dst", []>;
+    "ffs\t$pos, $size, $base, $dst", []>,
+    Sched<[WriteFFS]>;
 }
 def : Pat<(cttz_zero_undef i32:$src),
           (FFS_rr (i32 0), (i32 32), GPRnoPC:$src)>;
@@ -1010,20 +1075,24 @@ def vax_pushl : SDNode<"VAXISD::PUSHL", SDT_VAXPushL,
 
 let Defs = [SP, PSW], Uses = [SP] in {
 def PUSHL_r : InstVAX<0xDD, (outs), (ins GPRnoPC:$src),
-    "pushl\t$src", [(vax_pushl GPRnoPC:$src)]>;
+    "pushl\t$src", [(vax_pushl GPRnoPC:$src)]>,
+    Sched<[WritePUSH]>;
 def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
-    "pushl\t$imm", [(vax_pushl (i32 imm:$imm))]>;
+    "pushl\t$imm", [(vax_pushl (i32 imm:$imm))]>,
+    Sched<[WritePUSH]>;
 }
 
 // PUSHAx — push address onto stack (SP autodecrement)
 // These are assembly-only (used in hand-written .S files like crtbegin.S)
 let Defs = [SP], Uses = [SP], HasMemOp = 1 in {
 def PUSHAB : InstVAX<0x9F, (outs), (ins VAXMemOp:$src),
-    "pushab\t$src", []>;
+    "pushab\t$src", []>,
+    Sched<[WritePUSHA]>;
 def PUSHAW : InstVAX<0x3F, (outs), (ins VAXMemOp:$src),
     "pushaw\t$src", []>;
 def PUSHAL : InstVAX<0xDF, (outs), (ins VAXMemOp:$src),
-    "pushal\t$src", []>;
+    "pushal\t$src", []>,
+    Sched<[WritePUSHA]>;
 def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
     "pushaq\t$src", []>;
 }
@@ -1033,16 +1102,20 @@ def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
 let Defs = [SP, PSW], Uses = [SP] in {
 def PUSHAL_ga : InstVAX<0xDF, (outs), (ins i32imm:$sym),
     "pushal\t$sym",
-    [(vax_pushl (vax_pcrelwrapper tglobaladdr:$sym))]>;
+    [(vax_pushl (vax_pcrelwrapper tglobaladdr:$sym))]>,
+    Sched<[WritePUSHA]>;
 def PUSHAL_cp : InstVAX<0xDF, (outs), (ins i32imm:$sym),
     "pushal\t$sym",
-    [(vax_pushl (vax_pcrelwrapper tconstpool:$sym))]>;
+    [(vax_pushl (vax_pcrelwrapper tconstpool:$sym))]>,
+    Sched<[WritePUSHA]>;
 def PUSHAL_ba : InstVAX<0xDF, (outs), (ins i32imm:$sym),
     "pushal\t$sym",
-    [(vax_pushl (vax_pcrelwrapper tblockaddress:$sym))]>;
+    [(vax_pushl (vax_pcrelwrapper tblockaddress:$sym))]>,
+    Sched<[WritePUSHA]>;
 def PUSHAL_es : InstVAX<0xDF, (outs), (ins i32imm:$sym),
     "pushal\t$sym",
-    [(vax_pushl (vax_pcrelwrapper texternalsym:$sym))]>;
+    [(vax_pushl (vax_pcrelwrapper texternalsym:$sym))]>,
+    Sched<[WritePUSHA]>;
 }
 
 // CALLS — call subroutine with stack arguments  opcode 0xFB
@@ -1052,17 +1125,20 @@ let isCall = 1, Uses = [SP],
 // Direct call: callee is a global address or external symbol
 def CALLS_direct : InstVAX<0xFB, (outs),
     (ins i32imm:$count, i32imm:$callee),
-    "calls\t$count, $callee", []>;
+    "calls\t$count, $callee", []>,
+    Sched<[WriteCALL]>;
 // Indirect call: callee address is in a register (register deferred addressing)
 let isCodeGenOnly = 1 in
 def CALLS_indir : InstVAX<0xFB, (outs),
     (ins i32imm:$count, GPRnoPC:$callee),
-    "calls\t$count, (${callee})", []>;
+    "calls\t$count, (${callee})", []>,
+    Sched<[WriteCALL]>;
 // Indirect call (assembler form): callee is a memory operand (%reg deferred)
 let HasMemOp = 1 in
 def CALLS_mem : InstVAX<0xFB, (outs),
     (ins i32imm:$count, VAXMemOp:$callee),
-    "calls\t$count, $callee", []>;
+    "calls\t$count, $callee", []>,
+    Sched<[WriteCALL]>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1143,10 +1219,12 @@ let Defs = [PSW] in {
 let Constraints = "@earlyclobber $dst" in {
 def ASHQ : InstVAX<0x79, (outs QPR:$dst),
     (ins GPRnoPC:$cnt, QPR:$src),
-    "ashq\t$cnt, $src, $dst", []>;
+    "ashq\t$cnt, $src, $dst", []>,
+    Sched<[WriteShiftQ]>;
 def ASHQ_i : InstVAX<0x79, (outs QPR:$dst),
     (ins i32imm:$cnt, QPR:$src),
-    "ashq\t$cnt, $src, $dst", []>;
+    "ashq\t$cnt, $src, $dst", []>,
+    Sched<[WriteShiftQ]>;
 }
 }
 
@@ -1162,7 +1240,8 @@ def vax_emul : SDNode<"VAXISD::EMUL", SDT_VAXEMUL>;
 let Defs = [PSW], Constraints = "@earlyclobber $dst" in
 def EMUL : InstVAX<0x7A, (outs QPR:$dst),
     (ins GPRnoPC:$mulr, GPRnoPC:$muld, i32imm:$add),
-    "emul\t$mulr, $muld, $add, $dst", []>;
+    "emul\t$mulr, $muld, $add, $dst", []>,
+    Sched<[WriteEMUL]>;
 
 // EDIV (0x7B) — Extended Divide: dividend_quad / divisor → quotient, remainder
 // Selected via custom ISel in VAXISelDAGToDAG (builds QPR from i32 halves).
@@ -1175,7 +1254,8 @@ def vax_ediv : SDNode<"VAXISD::EDIV", SDT_VAXEDIV>;
 let Defs = [PSW], Constraints = "@earlyclobber $quo,@earlyclobber $rem" in
 def EDIV : InstVAX<0x7B, (outs GPRnoPC:$quo, GPRnoPC:$rem),
     (ins GPRnoPC:$divisor, QPR:$dividend),
-    "ediv\t$divisor, $dividend, $quo, $rem", []>;
+    "ediv\t$divisor, $dividend, $quo, $rem", []>,
+    Sched<[WriteEDIV]>;
 
 //===----------------------------------------------------------------------===//
 // Phase 14B — F_float (32-bit floating point)
@@ -1502,15 +1582,18 @@ def MOVQ : InstVAX<0x7D, (outs),
     "movq\t$src, $dst", []>;
 // MOVQ register-register (QPR copy for i64 / register allocation).
 def MOVQ_rr : InstVAX<0x7D, (outs QPR:$dst), (ins QPR:$src),
-    "movq\t$src, $dst", []>;
+    "movq\t$src, $dst", []>,
+    Sched<[WriteMOV]>;
 // MOVQ register-from-memory (QPR reload from stack slot).
 let HasMemOp = 1 in
 def MOVQ_rm : InstVAX<0x7D, (outs QPR:$dst), (ins VAXDMemOp:$src),
-    "movq\t$src, $dst", []>;
+    "movq\t$src, $dst", []>,
+    Sched<[WriteMOV]>;
 // MOVQ memory-from-register (QPR spill to stack slot).
 let HasMemOp = 1 in
 def MOVQ_mr : InstVAX<0x7D, (outs), (ins QPR:$src, VAXDMemOp:$dst),
-    "movq\t$src, $dst", []>;
+    "movq\t$src, $dst", []>,
+    Sched<[WriteMOV]>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
 def EXTZV : InstVAX<0xEF, (outs),
@@ -2277,8 +2360,10 @@ def JSB_m : InstVAX<0x16, (outs), (ins VAXMemOp:$target),
 //===----------------------------------------------------------------------===//
 
 // BVC/BVS: branch on overflow clear/set (0x1C/0x1D).
-def BVC : InstVAX<0x1C, (outs), (ins brtarget:$dst), "bvc\t$dst", []>;
-def BVS : InstVAX<0x1D, (outs), (ins brtarget:$dst), "bvs\t$dst", []>;
+def BVC : InstVAX<0x1C, (outs), (ins brtarget:$dst), "bvc\t$dst", []>,
+    Sched<[WriteBRcc]>;
+def BVS : InstVAX<0x1D, (outs), (ins brtarget:$dst), "bvs\t$dst", []>,
+    Sched<[WriteBRcc]>;
 
 let HasMemOp = 1 in {
 
