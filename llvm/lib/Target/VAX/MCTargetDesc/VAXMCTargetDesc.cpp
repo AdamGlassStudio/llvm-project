@@ -11,6 +11,7 @@
 #include "VAXMCAsmInfo.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
@@ -42,7 +43,10 @@ static MCRegisterInfo *createVAXMCRegisterInfo(const Triple &TT) {
 
 static MCSubtargetInfo *createVAXMCSubtargetInfo(const Triple &TT,
                                                   StringRef CPU, StringRef FS) {
-  return createVAXMCSubtargetInfoImpl(TT, CPU, /*TuneCPU=*/CPU, FS);
+  std::string CPUName = std::string(CPU);
+  if (CPUName.empty())
+    CPUName = "generic";
+  return createVAXMCSubtargetInfoImpl(TT, CPUName, /*TuneCPU=*/CPUName, FS);
 }
 
 static MCAsmInfo *createVAXMCAsmInfo(const MCRegisterInfo &MRI,
@@ -63,9 +67,15 @@ static MCInstPrinter *createVAXMCInstPrinter(const Triple &T,
   return new VAXInstPrinter(MAI, MII, MRI);
 }
 
+static MCInstrAnalysis *createVAXMCInstrAnalysis(const MCInstrInfo *Info) {
+  return new MCInstrAnalysis(Info);
+}
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTargetMC() {
   RegisterMCAsmInfoFn X(getTheVAXTarget(), createVAXMCAsmInfo);
   TargetRegistry::RegisterMCInstrInfo(getTheVAXTarget(), createVAXMCInstrInfo);
+  TargetRegistry::RegisterMCInstrAnalysis(getTheVAXTarget(),
+                                          createVAXMCInstrAnalysis);
   TargetRegistry::RegisterMCRegInfo(getTheVAXTarget(), createVAXMCRegisterInfo);
   TargetRegistry::RegisterMCSubtargetInfo(getTheVAXTarget(),
                                           createVAXMCSubtargetInfo);

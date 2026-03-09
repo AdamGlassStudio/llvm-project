@@ -82,7 +82,13 @@ def CVAXModel : SchedMachineModel {
   let LoopMicroOpBufferSize = 0;
   let LoadLatency = 1;          // Cache hit = 1 microcycle; miss adds more
   let MispredictPenalty = 3;    // Branch taken = 3+1r cycles
-  let PostRAScheduler = 0;      // Disabled for now; enable when validated
+  let PostRAScheduler = 0;      // Disabled: CVAX is single-issue in-order, so PostRA
+                              // reordering cannot hide latency. It also inserts
+                              // extra TSTL instructions to preserve PSW liveness
+                              // across reordered flag-setting ops, increasing code
+                              // size with no cycle benefit. Re-evaluate for OOO
+                              // VAX implementations (if any) or with a smarter
+                              // PSW-aware scheduler.
   let CompleteModel = 0;        // Unmodeled instructions get defaults
   let Itineraries = CVAXItinerary;
 }
