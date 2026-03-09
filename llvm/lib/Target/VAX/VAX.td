@@ -10,6 +10,7 @@ include "llvm/Target/Target.td"
 
 include "VAXRegisterInfo.td"
 include "VAXCallingConv.td"
+include "VAXSchedule.td"
 include "VAXInstrInfo.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GPR>;
@@ -20,10 +21,12 @@ def VAXInstrInfo : InstrInfo;
 // VAX processors
 //===----------------------------------------------------------------------===//
 
-class Proc<string Name, list<SubtargetFeature> Features>
-    : Processor<Name, NoItineraries, Features>;
+// CVAX (DC580) — MicroVAX 3800/3900 (KA655 module), simulated by SIMH.
+// Timing data from DEC engineering note 166.1 (Mike Phipps, 24-JUL-1992).
+def : ProcessorModel<"cvax", CVAXModel, []>;
 
-def : Proc<"generic", []>;
+// Default processor uses the CVAX model.
+def : ProcessorModel<"generic", CVAXModel, []>;
 
 def VAXAsmParser : AsmParser {
   let AllowDuplicateRegisterNames = 1;
