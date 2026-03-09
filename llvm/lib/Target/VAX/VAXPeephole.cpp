@@ -13,6 +13,9 @@
 //   - Combine adjacent CLRL pairs into CLRQ (quadword clear)
 //   - Combine adjacent MOVL load/store pairs into MOVQ (quadword move)
 //   - Combine adjacent PUSHL register pairs into MOVQ reg, -(SP)
+//   - Convert MOVL_ri + ADDL3_rm [+ PUSHL_r] to MOVL_rm + MOVAL/PUSHAL
+//   - Convert ADDL3_ri to MOVAL (shorter encoding for imm outside 0-63)
+//   - Convert ADDL3_ri + PUSHL_r to PUSHAL (one instruction instead of two)
 //
 //===----------------------------------------------------------------------===//
 
@@ -99,6 +102,12 @@ private:
   bool tryPushPairCombine(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator &II,
                           const TargetInstrInfo *TII);
+  bool tryConvertAddToMOVA(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator &II,
+                           const TargetInstrInfo *TII);
+  bool tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
+                                   MachineBasicBlock::iterator &II,
+                                   const TargetInstrInfo *TII);
 };
 
 char VAXPeephole::ID = 0;
@@ -489,6 +498,193 @@ bool VAXPeephole::tryPushAddressCombine(MachineBasicBlock &MBB,
   return true;
 }
 
+/// Try to convert MOVL_ri + ADDL3_rm [+ PUSHL_r] into MOVL_rm + MOVAL/PUSHAL.
+///
+/// ISel often produces: $rT = MOVL_ri $imm; $rD = ADDL3_rm mem, $rT
+/// when computing base+offset where the base comes from memory.
+/// This can be converted to: $rD = MOVL_rm mem; MOVAL imm($rD), $rD
+/// saving bytes (large imm) or: $rD = MOVL_rm mem; PUSHAL imm($rD) saving
+/// an entire instruction when followed by PUSHL.
+bool VAXPeephole::tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
+                                              MachineBasicBlock::iterator &II,
+                                              const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  if (MI.getOpcode() != VAX::MOVL_ri)
+    return false;
+
+  Register ImmReg = MI.getOperand(0).getReg();
+  int64_t Imm = MI.getOperand(1).getImm();
+
+  // Find next real instruction — must be ADDL3_rm using ImmReg.
+  auto Next = std::next(II);
+  while (Next != MBB.end() &&
+         (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+  if (Next == MBB.end() || Next->getOpcode() != VAX::ADDL3_rm)
+    return false;
+
+  // ADDL3_rm layout: [0]=dst(def), [1..4]=memop, [5]=reg_src
+  Register AddDst = Next->getOperand(0).getReg();
+  Register MemBase = Next->getOperand(1).getReg();
+  int64_t MemDisp = Next->getOperand(2).getImm();
+  Register MemIdx = Next->getOperand(3).getReg();
+  int64_t MemFlags = Next->getOperand(4).getImm();
+  MachineOperand &RegSrc = Next->getOperand(5);
+
+  if (RegSrc.getReg() != ImmReg)
+    return false;
+
+  // ImmReg must be killed by ADDL3 (dead after), so removing MOVL_ri is safe.
+  if (!RegSrc.isKill())
+    return false;
+
+  // The memory operand must not reference AddDst, because we'll load into
+  // AddDst before the MOVAL reads it as displacement base. (If mem uses AddDst,
+  // the load would clobber the base before address computation.)
+  // Actually, MOVL_rm evaluates the source EA before writing dst, so mem
+  // referencing AddDst is safe — it reads the old AddDst value.
+  // But mem must NOT reference ImmReg, since we're removing the MOVL_ri that
+  // defines it.
+  if (MemBase == ImmReg || (MemIdx.isValid() && MemIdx == ImmReg))
+    return false;
+
+  // --- Check for trailing PUSHL_r (killed) → fold into PUSHAL ---
+  auto AfterAdd = std::next(Next);
+  while (AfterAdd != MBB.end() &&
+         (AfterAdd->isDebugInstr() || AfterAdd->isCFIInstruction()))
+    ++AfterAdd;
+
+  bool HasPUSHL = (AfterAdd != MBB.end() &&
+                   AfterAdd->getOpcode() == VAX::PUSHL_r &&
+                   AfterAdd->getOperand(0).getReg() == AddDst &&
+                   AfterAdd->getOperand(0).isKill());
+
+  if (HasPUSHL) {
+    // MOVL_ri + ADDL3_rm + PUSHL → MOVL_rm + PUSHAL (saves 1 instruction)
+    MachineInstrBuilder Load =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVL_rm));
+    Load.addDef(AddDst);
+    Load.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    Load.cloneMemRefs(*Next);
+
+    MachineInstrBuilder Push =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::PUSHAL));
+    Push.addReg(AddDst, RegState::Kill).addImm(Imm).addReg(0).addImm(VAXAM::Disp);
+    Push.addReg(VAX::SP, RegState::ImplicitDefine);
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_ri+ADDL3_rm+PUSHL→MOVL_rm+PUSHAL "
+                      << MI << "  + " << *Next << "  + " << *AfterAdd);
+    auto Erase1 = II;
+    II = std::next(AfterAdd);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    AfterAdd->eraseFromParent();
+    return true;
+  }
+
+  // Non-push case: only worthwhile when imm is outside short-literal range.
+  // For 0–63, MOVL_ri uses a 1-byte literal (total MOVL_ri = 3 bytes) which
+  // combined with ADDL3_rm is no worse than MOVL_rm + MOVAL.
+  if (Imm >= 0 && Imm <= 63)
+    return false;
+
+  // MOVL_ri + ADDL3_rm → MOVL_rm + MOVAL
+  MachineInstrBuilder Load =
+      BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVL_rm));
+  Load.addDef(AddDst);
+  Load.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+  Load.cloneMemRefs(*Next);
+
+  MachineInstrBuilder Mova =
+      BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVAL));
+  // src: disp(AddDst)
+  Mova.addReg(AddDst).addImm(Imm).addReg(0).addImm(VAXAM::Disp);
+  // dst: register direct
+  Mova.addReg(AddDst).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+
+  LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_ri+ADDL3_rm→MOVL_rm+MOVAL " << MI
+                    << "  + " << *Next);
+  auto Erase1 = II;
+  II = std::next(Next);
+  Erase1->eraseFromParent();
+  Next->eraseFromParent();
+  return true;
+}
+
+/// Try to convert ADDL3_ri to MOVAL (shorter encoding), and
+/// ADDL3_ri + PUSHL_r to PUSHAL (eliminates one instruction).
+///
+/// MOVAL disp(%rSrc), %rDst encodes the displacement in the addressing-mode
+/// specifier (1–4 bytes via byte/word/long displacement), while ADDL3 encodes
+/// the immediate as a separate operand (1 byte for 0–63 literal, else 5 bytes
+/// for a longword immediate). For values outside 0–63, MOVAL is shorter.
+///
+/// Additionally, ADDL3_ri + PUSHL_r (killed) can collapse to a single PUSHAL.
+bool VAXPeephole::tryConvertAddToMOVA(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator &II,
+                                      const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  if (MI.getOpcode() != VAX::ADDL3_ri)
+    return false;
+
+  // ADDL3_ri layout: [0]=dst(reg), [1]=imm, [2]=src(reg)
+  Register DstReg = MI.getOperand(0).getReg();
+  int64_t Imm = MI.getOperand(1).getImm();
+  Register SrcReg = MI.getOperand(2).getReg();
+
+  // MOVAL only saves bytes when the immediate is outside VAX short-literal
+  // range (0–63). For 0–63, ADDL3 uses a 1-byte literal specifier which is
+  // the same size as or smaller than byte-displacement mode (2 bytes).
+  // However, if we can fold into PUSHAL below, it's always a win (saves an
+  // entire instruction), so check PUSHAL first.
+
+  // --- Pattern 2: ADDL3_ri + PUSHL_r (killed) → PUSHAL ---
+  auto Next = std::next(II);
+  while (Next != MBB.end() &&
+         (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+
+  if (Next != MBB.end() && Next->getOpcode() == VAX::PUSHL_r &&
+      Next->getOperand(0).getReg() == DstReg &&
+      Next->getOperand(0).isKill()) {
+    // DstReg is produced by ADDL3 and consumed+killed by PUSHL — safe to fold.
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::PUSHAL));
+    MIB.addReg(SrcReg).addImm(Imm).addReg(0).addImm(VAXAM::Disp);
+    MIB.addReg(VAX::SP, RegState::ImplicitDefine);
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: ADDL3+PUSHL→PUSHAL " << MI << "  + "
+                      << *Next);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 1: ADDL3_ri → MOVAL (encoding size win) ---
+  // Only convert when immediate is outside short-literal range.
+  if (Imm >= 0 && Imm <= 63)
+    return false;
+
+  // Build: MOVAL Imm(SrcReg), DstReg
+  // MOVAL takes two VAXMemOp operands (src, dst), each with 4 sub-operands:
+  //   (base, disp, index, flags)
+  // src = disp(SrcReg): base=SrcReg, disp=Imm, index=0, flags=Disp
+  // dst = register mode: base=DstReg, disp=0, index=0, flags=RegDirect
+  MachineInstrBuilder MIB =
+      BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVAL));
+  // Source operand: displacement addressing
+  MIB.addReg(SrcReg).addImm(Imm).addReg(0).addImm(VAXAM::Disp);
+  // Destination operand: register direct
+  MIB.addReg(DstReg).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+
+  LLVM_DEBUG(dbgs() << "VAXPeephole: ADDL3_ri→MOVAL " << MI);
+  auto EraseIt = II++;
+  EraseIt->eraseFromParent();
+  return true;
+}
+
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -497,8 +693,12 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
     for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*below*/) {
       MachineInstr &MI = *II;
 
+      // Try MOVL_ri + ADDL3_rm [+ PUSHL] → MOVL_rm + MOVAL/PUSHAL
+      // Must run before 3→2 conversion to see the original ADDL3_rm.
+      bool Converted = tryConvertImmLoadAddToMOVA(MBB, II, TII);
+
       // Try 3-op → 2-op conversion
-      bool Converted = false;
+      if (!Converted)
       for (const auto &Entry : Alu3To2Table) {
         if (MI.getOpcode() != Entry.Opc3)
           continue;
@@ -603,6 +803,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
           }
         }
       }
+
+      if (!Converted)
+        Converted = tryConvertAddToMOVA(MBB, II, TII);
 
       if (!Converted)
         Converted = tryPushAddressCombine(MBB, II, TII);
