@@ -143,9 +143,49 @@ static bool definesRegWithFlags(const MachineInstr &MI, Register Reg) {
   return false;
 }
 
+/// Check if MI sets N/Z flags based on Reg's value (as a source, not
+/// destination). This handles the spill pattern: MOVL %rX, disp(%fp) sets
+/// N/Z from %rX without modifying %rX — a subsequent TST of %rX is redundant.
+/// Only matches longword MOV/PUSH for TSTL; extend for TSTB/TSTW as needed.
+static bool setsFlagsFromSource(const MachineInstr &MI, Register Reg,
+                                unsigned TstOpc) {
+  unsigned Opc = MI.getOpcode();
+
+  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr))
+    return false;
+
+  Register SrcReg;
+  switch (TstOpc) {
+  case VAX::TSTL:
+    if (Opc == VAX::MOVL_mr)
+      SrcReg = MI.getOperand(0).getReg(); // (ins GPRnoPC:$src, VAXMemOp:$dst)
+    else if (Opc == VAX::MOVL_rr)
+      SrcReg = MI.getOperand(1).getReg(); // (outs $dst), (ins $src)
+    else if (Opc == VAX::PUSHL_r)
+      SrcReg = MI.getOperand(0).getReg(); // (ins GPRnoPC:$src)
+    else
+      return false;
+    break;
+  default:
+    return false;
+  }
+
+  return SrcReg == Reg;
+}
+
 /// Try to eliminate a redundant TSTL/TSTB/TSTW/TSTF/TSTD by checking if the
 /// immediately preceding (non-debug) instruction already set N/Z on the same
 /// register. Within a basic block, no other path can enter between instructions.
+/// Two cases:
+///  1. Instruction defines TstReg and sets PSW (e.g., ADDL2 → %rX; TSTL %rX)
+///  2. Instruction uses TstReg as source and sets PSW from it
+///     (e.g., MOVL %rX, disp(%fp) [spill]; TSTL %rX)
+///
+/// NOTE: We intentionally do NOT scan past real instructions. On VAX, nearly
+/// all instructions set PSW, but many instruction definitions are missing
+/// Defs=[PSW] in TableGen. Scanning past such instructions would incorrectly
+/// assume flags are preserved. Until all instruction definitions are audited
+/// for PSW, we limit elimination to the immediately preceding instruction.
 bool VAXPeephole::tryEliminateRedundantTST(MachineBasicBlock &MBB,
                                            MachineBasicBlock::iterator &II) {
   MachineInstr &MI = *II;
@@ -153,22 +193,37 @@ bool VAXPeephole::tryEliminateRedundantTST(MachineBasicBlock &MBB,
   if (!TstReg.isValid())
     return false;
 
-  // Walk backward skipping debug/CFI.
+  unsigned TstOpc = MI.getOpcode();
+
+  // Walk backward skipping debug/CFI to find the preceding real instruction.
   auto Prev = II;
   while (Prev != MBB.begin()) {
     --Prev;
     if (Prev->isDebugInstr() || Prev->isCFIInstruction())
       continue;
 
-    // If the previous real instruction defines TstReg and sets PSW, the
-    // TST is redundant — N/Z flags already reflect TstReg's value.
+    // Case 1: Instruction defines TstReg AND sets PSW → TST is redundant.
     if (definesRegWithFlags(*Prev, TstReg)) {
       LLVM_DEBUG(dbgs() << "VAXPeephole: eliminating redundant " << MI
-                        << "  (flags set by " << *Prev << ")\n");
+                        << "  (flags set by def: " << *Prev << ")\n");
       auto EraseIt = II++;
       EraseIt->eraseFromParent();
       return true;
     }
+
+    // Case 2: Instruction uses TstReg as source and sets N/Z from it
+    // (e.g., MOVL %rX, mem [spill]) → TST is redundant.
+    // MOVL sets N/Z identically to TSTL, V←0 (same). Only C differs
+    // (MOVL preserves C, TSTL clears C) — benign since no sane code reads C
+    // after TST.
+    if (setsFlagsFromSource(*Prev, TstReg, TstOpc)) {
+      LLVM_DEBUG(dbgs() << "VAXPeephole: eliminating redundant " << MI
+                        << "  (flags set by src: " << *Prev << ")\n");
+      auto EraseIt = II++;
+      EraseIt->eraseFromParent();
+      return true;
+    }
+
     // Hit a non-matching real instruction — stop.
     break;
   }

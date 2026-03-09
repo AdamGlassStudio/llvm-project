@@ -48,6 +48,25 @@ nonzero:
   ret i32 0
 }
 
+; Broader TST elimination: MOVL_mr (store) of %r0 sets N/Z from %r0.
+; The intervening store makes TST redundant even though it's not the
+; immediately preceding instruction.
+define i32 @store_tst(i32 %a, i32 %b, ptr %p) {
+; CHECK-LABEL: store_tst:
+; CHECK: addl2
+; CHECK: movl %r0, (%r1)
+; CHECK-NOT: tstl
+; CHECK-NEXT: beql
+  %sum = add i32 %a, %b
+  store i32 %sum, ptr %p
+  %cmp = icmp eq i32 %sum, 0
+  br i1 %cmp, label %zero, label %nonzero
+zero:
+  ret i32 0
+nonzero:
+  ret i32 %sum
+}
+
 ; SUBL3 sets flags — but comparison is slt (not eq/ne), so CMPL is used
 ; instead of TSTL. The CMPL should NOT be eliminated.
 define i32 @sub_slt_branch(i32 %a, i32 %b) {
