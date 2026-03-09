@@ -94,6 +94,9 @@ private:
   bool tryQuadCombine(MachineBasicBlock &MBB,
                       MachineBasicBlock::iterator &II,
                       const TargetInstrInfo *TII);
+  bool tryQuadCombineNonAdjacent(MachineBasicBlock &MBB,
+                                  MachineBasicBlock::iterator &II,
+                                  const TargetInstrInfo *TII);
   bool tryEliminateRedundantTST(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator &II);
   bool tryPushAddressCombine(MachineBasicBlock &MBB,
@@ -308,6 +311,7 @@ static bool baseNotModified(const MachineInstr &First, int MemIdx,
   return true;
 }
 
+
 bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator &II,
                                  const TargetInstrInfo *TII) {
@@ -386,6 +390,8 @@ bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
     MIB.addReg(SrcLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
     // Destination: memory
     MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+    // MOVQ reads the quadword pair: mark high register as implicit use.
+    MIB.addReg(SrcHi, RegState::Implicit);
 
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(store) " << MI << "  + "
                       << MI2);
@@ -432,6 +438,8 @@ bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
     MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
     // Destination: register-direct via VAXMemOp
     MIB.addReg(DstLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+    // MOVQ writes the quadword pair: mark high register as implicit def.
+    MIB->addRegisterDefined(DstHi);
 
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(load) " << MI << "  + "
                       << MI2);
@@ -740,6 +748,159 @@ bool VAXPeephole::tryConvertAddToMOVA(MachineBasicBlock &MBB,
   return true;
 }
 
+/// Try to combine non-adjacent MOVL pairs into MOVQ.
+/// Scans forward from MI up to MaxScanDist real instructions, skipping safe
+/// instructions including other MOVL spills/reloads through the same base
+/// register with non-overlapping displacements.
+bool VAXPeephole::tryQuadCombineNonAdjacent(MachineBasicBlock &MBB,
+                                             MachineBasicBlock::iterator &II,
+                                             const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  unsigned Opc = MI.getOpcode();
+
+  if (Opc != VAX::MOVL_mr && Opc != VAX::MOVL_rm)
+    return false;
+
+  int MemIdx = getMemOpIdx(MI);
+  if (MemIdx < 0)
+    return false;
+
+  Register BaseReg = MI.getOperand(MemIdx).getReg();
+
+  static constexpr unsigned MaxScanDist = 4;
+  SmallVector<MachineInstr *, 4> Intervening;
+  unsigned Dist = 0;
+
+  for (auto Scan = std::next(II); Scan != MBB.end(); ++Scan) {
+    if (Scan->isDebugInstr() || Scan->isCFIInstruction())
+      continue;
+
+    MachineInstr &MI2 = *Scan;
+
+    // Try to match MI2 as a quad partner (same opcode, adjacent quadword).
+    if (MI2.getOpcode() == Opc) {
+      int MI2MemIdx = getMemOpIdx(MI2);
+      if (MI2MemIdx >= 0) {
+        int64_t LowDisp;
+        if (isAdjacentQuadword(MI, MemIdx, MI2, MI2MemIdx, LowDisp)) {
+          int64_t DispA = MI.getOperand(MemIdx + 1).getImm();
+          const MachineInstr &LowMI = (DispA == LowDisp) ? MI : MI2;
+          const MachineInstr &HighMI = (DispA == LowDisp) ? MI2 : MI;
+
+          // Verify all intervening instructions are safe w.r.t. the quadword
+          // memory range [LowDisp, LowDisp+8) and partner registers.
+          bool AllSafe = true;
+          for (const MachineInstr *I : Intervening) {
+            // Check memory overlap for intervening memory instructions.
+            if (I->mayLoad() || I->mayStore()) {
+              int IMemIdx = getMemOpIdx(*I);
+              if (IMemIdx < 0) { AllSafe = false; break; }
+              int64_t IDisp = I->getOperand(IMemIdx + 1).getImm();
+              // 4-byte access at IDisp must not overlap [LowDisp, LowDisp+8)
+              if (IDisp + 4 > LowDisp && IDisp < LowDisp + 8) {
+                AllSafe = false; break;
+              }
+            }
+            // Partner register safety checks.
+            if (Opc == VAX::MOVL_mr) {
+              if (I->modifiesRegister(MI2.getOperand(0).getReg(),
+                                      /*TRI=*/nullptr)) {
+                AllSafe = false; break;
+              }
+            }
+            if (Opc == VAX::MOVL_rm) {
+              Register PDst = MI2.getOperand(0).getReg();
+              if (I->modifiesRegister(PDst, /*TRI=*/nullptr) ||
+                  I->readsRegister(PDst, /*TRI=*/nullptr)) {
+                AllSafe = false; break;
+              }
+            }
+          }
+          if (!AllSafe)
+            break;
+
+          if (Opc == VAX::MOVL_mr) {
+            Register SrcLo = LowMI.getOperand(0).getReg();
+            Register SrcHi = HighMI.getOperand(0).getReg();
+            if (SrcHi == SrcLo + 1) {
+              Register IdxReg = MI.getOperand(MemIdx + 2).getReg();
+              int64_t Flags = MI.getOperand(MemIdx + 3).getImm();
+              MachineInstrBuilder MIB =
+                  BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVQ));
+              MIB.addReg(SrcLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+              MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+              MIB.addReg(SrcHi, RegState::Implicit);
+              LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(store,nonadj) "
+                                << MI << "  + " << MI2);
+              auto Erase1 = II;
+              II = std::next(MachineBasicBlock::iterator(Scan));
+              Erase1->eraseFromParent();
+              Scan->eraseFromParent();
+              return true;
+            }
+          }
+
+          if (Opc == VAX::MOVL_rm) {
+            Register DstLo = LowMI.getOperand(0).getReg();
+            Register DstHi = HighMI.getOperand(0).getReg();
+            if (DstHi == DstLo + 1 &&
+                MI.getOperand(0).getReg() != BaseReg) {
+              Register IdxReg = MI.getOperand(MemIdx + 2).getReg();
+              int64_t Flags = MI.getOperand(MemIdx + 3).getImm();
+              MachineInstrBuilder MIB =
+                  BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVQ));
+              MIB.addReg(BaseReg).addImm(LowDisp).addReg(IdxReg).addImm(Flags);
+              MIB.addReg(DstLo).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+              MIB->addRegisterDefined(DstHi);
+              LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(load,nonadj) "
+                                << MI << "  + " << MI2);
+              auto Erase1 = II;
+              II = std::next(MachineBasicBlock::iterator(Scan));
+              Erase1->eraseFromParent();
+              Scan->eraseFromParent();
+              return true;
+            }
+          }
+        }
+      }
+      // MI2 is a MOVL that didn't form a pair — it accesses memory, stop.
+      break;
+    }
+
+    // Not a matching opcode — check if safe to skip.
+    if (Dist >= MaxScanDist)
+      break;
+    if (MI2.isCall() || MI2.isBranch() || MI2.isTerminator())
+      break;
+    if (MI2.hasUnmodeledSideEffects())
+      break;
+    if (MI2.modifiesRegister(BaseReg, /*TRI=*/nullptr))
+      break;
+
+    // Allow memory instructions through the same base register (displacement
+    // overlap checked when partner is found). Reject unknown memory formats.
+    if (MI2.mayLoad() || MI2.mayStore()) {
+      int MI2MemIdx = getMemOpIdx(MI2);
+      if (MI2MemIdx < 0)
+        break; // Unknown memory instruction format
+      const MachineOperand &MI2Base = MI2.getOperand(MI2MemIdx);
+      const MachineOperand &MI2Disp = MI2.getOperand(MI2MemIdx + 1);
+      const MachineOperand &MI2Idx = MI2.getOperand(MI2MemIdx + 2);
+      if (!MI2Base.isReg() || MI2Base.getReg() != BaseReg)
+        break; // Different base — can't prove non-aliasing
+      if (!MI2Disp.isImm())
+        break; // Non-immediate displacement
+      if (MI2Idx.getReg() != 0)
+        break; // Indexed mode
+    }
+
+    Intervening.push_back(&MI2);
+    ++Dist;
+  }
+
+  return false;
+}
+
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -870,6 +1031,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
 
       if (!Converted)
         Converted = tryQuadCombine(MBB, II, TII);
+
+      if (!Converted)
+        Converted = tryQuadCombineNonAdjacent(MBB, II, TII);
 
       if (!Converted)
         Converted = tryPushPairCombine(MBB, II, TII);
