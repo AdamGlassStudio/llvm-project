@@ -1085,7 +1085,8 @@ def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
 
 // PUSHAx — push address onto stack (SP autodecrement)
 // These are assembly-only (used in hand-written .S files like crtbegin.S)
-let Defs = [SP], Uses = [SP], HasMemOp = 1 in {
+// MOVAx/PUSHAx set N/Z based on the address value and clear V; C unchanged.
+let Defs = [SP, PSW], Uses = [SP], HasMemOp = 1 in {
 def PUSHAB : InstVAX<0x9F, (outs), (ins VAXMemOp:$src),
     "pushab\t$src", []>,
     Sched<[WritePUSHA]>;
@@ -1548,7 +1549,8 @@ def ASHL : InstVAX<0x78, (outs),
     "ashl\t$cnt, $src, $dst", []>;
 
 // MOVAB (0x9E): move address byte. src.ab, dst.wl
-let HasMemOp = 1 in
+// MOVAx instructions set N/Z based on address value and clear V; C unchanged.
+let Defs = [PSW], HasMemOp = 1 in
 def MOVAB : InstVAX<0x9E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movab\t$src, $dst", []>;
@@ -1557,19 +1559,19 @@ def MOVAB : InstVAX<0x9E, (outs),
 // (GAS accepts both movab and movabl)
 
 // MOVAW (0x3E): move address word. src.aw, dst.wl
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVAW : InstVAX<0x3E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movaw\t$src, $dst", []>;
 
 // MOVAL (0xDE): move address long. src.al, dst.wl
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVAL : InstVAX<0xDE, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "moval\t$src, $dst", []>;
 
 // MOVAQ (0x7E): move address quad. src.aq, dst.wl
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVAQ : InstVAX<0x7E, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movaq\t$src, $dst", []>;
