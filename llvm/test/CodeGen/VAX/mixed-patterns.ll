@@ -48,11 +48,11 @@ define i32 @add_constant(i32 %a) {
   ret i32 %r
 }
 
-; Sub constant — lowered as addl2 with negative immediate
+; Sub constant — lowered as moval with negative displacement
 define i32 @sub_constant(i32 %a) {
 ; CHECK-LABEL: sub_constant:
-; CHECK: movl	$-42, %r0
-; CHECK-NEXT: addl2	4(%ap), %r0
+; CHECK: movl	4(%ap), %r0
+; CHECK-NEXT: moval	-42(%r0), %r0
 ; CHECK-NEXT: ret
 ; CHECK-NEXT: .Lfunc_end4:
   %r = sub i32 %a, 42
