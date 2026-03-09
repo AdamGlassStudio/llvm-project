@@ -99,6 +99,9 @@ private:
                                   const TargetInstrInfo *TII);
   bool tryEliminateRedundantTST(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator &II);
+  bool tryFoldReload(MachineBasicBlock &MBB,
+                     MachineBasicBlock::iterator &II,
+                     const TargetInstrInfo *TII);
   bool tryPushAddressCombine(MachineBasicBlock &MBB,
                              MachineBasicBlock::iterator &II,
                              const TargetInstrInfo *TII);
@@ -443,6 +446,218 @@ bool VAXPeephole::tryQuadCombine(MachineBasicBlock &MBB,
 
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL+MOVL→MOVQ(load) " << MI << "  + "
                       << MI2);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  return false;
+}
+
+/// Try to fold a MOVL_rm (reload from stack) into the next instruction that
+/// uses the loaded register. VAX instructions natively support memory source
+/// operands, so we can eliminate the reload and use memory directly.
+///
+/// Examples:
+///   MOVL_rm + PUSHL_r → PUSHL_m
+///   MOVL_rm + MOVL_rr → MOVL_rm (direct load into different register)
+///   MOVL_rm + ADDL2_rr → ADDL2_rm
+///   MOVL_rm + ADDL3_rr → ADDL3_rm
+bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
+                                MachineBasicBlock::iterator &II,
+                                const TargetInstrInfo *TII) {
+  MachineInstr &Reload = *II;
+  if (Reload.getOpcode() != VAX::MOVL_rm)
+    return false;
+
+  // MOVL_rm: [0]=dst(def), [1]=base, [2]=disp, [3]=idx, [4]=flags
+  Register RR = Reload.getOperand(0).getReg();
+  Register MemBase = Reload.getOperand(1).getReg();
+  int64_t MemDisp = Reload.getOperand(2).getImm();
+  Register MemIdx = Reload.getOperand(3).getReg();
+  int64_t MemFlags = Reload.getOperand(4).getImm();
+
+  // Find the next real instruction.
+  auto Next = std::next(II);
+  while (Next != MBB.end() && (Next->isDebugInstr() || Next->isCFIInstruction()))
+    ++Next;
+  if (Next == MBB.end())
+    return false;
+
+  MachineInstr &Use = *Next;
+  unsigned UseOpc = Use.getOpcode();
+
+  // --- Pattern 1: PUSHL_r → PUSHL_m ---
+  if (UseOpc == VAX::PUSHL_r &&
+      Use.getOperand(0).getReg() == RR &&
+      Use.getOperand(0).isKill()) {
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::PUSHL_m));
+    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    MIB.addReg(VAX::SP, RegState::ImplicitDefine);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+PUSHL_r→PUSHL_m "
+                      << Reload << "  + " << Use);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 2: MOVL_rr → MOVL_rm (direct load into different register) ---
+  // MOVL_rr: [0]=dst(def), [1]=src
+  if (UseOpc == VAX::MOVL_rr &&
+      Use.getOperand(1).getReg() == RR &&
+      Use.getOperand(1).isKill()) {
+    Register NewDst = Use.getOperand(0).getReg();
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::MOVL_rm), NewDst);
+    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+MOVL_rr→MOVL_rm "
+                      << Reload << "  + " << Use);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 3: ALU2_rr → ALU2_rm ---
+  // ALU2_rr: [0]=dst(def), [1]=src, [2]=src2(tied to dst)
+  // ALU2_rm: [0]=dst(def), [1..4]=VAXMemOp, [5]=src2(tied to dst)
+  // Guard: dst != RR (tied constraint means dst is also read; if dst == RR,
+  // the fold changes semantics because the tied read sees the old value).
+  struct Alu2Fold {
+    unsigned FromOpc, ToOpc;
+  };
+  static const Alu2Fold Alu2Folds[] = {
+    {VAX::ADDL2_rr, VAX::ADDL2_rm},
+    {VAX::SUBL2_rr, VAX::SUBL2_rm},
+    {VAX::MULL2_rr, VAX::MULL2_rm},
+    {VAX::DIVL2_rr, VAX::DIVL2_rm},
+    {VAX::BISL2_rr, VAX::BISL2_rm},
+    {VAX::BICL2_rr, VAX::BICL2_rm},
+    {VAX::XORL2_rr, VAX::XORL2_rm},
+  };
+  for (const auto &F : Alu2Folds) {
+    if (UseOpc == F.FromOpc &&
+        Use.getOperand(1).getReg() == RR &&
+        Use.getOperand(1).isKill() &&
+        Use.getOperand(0).getReg() != RR) {
+      Register DstReg = Use.getOperand(0).getReg();
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
+      MIB.addDef(DstReg);
+      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      MIB.addReg(DstReg); // tied src2
+      MIB.cloneMemRefs(Reload);
+      LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU2_rr→ALU2_rm "
+                        << Reload << "  + " << Use);
+      auto Erase1 = II;
+      II = std::next(Next);
+      Erase1->eraseFromParent();
+      Next->eraseFromParent();
+      return true;
+    }
+  }
+
+  // --- Pattern 4: ALU3_rr → ALU3_rm ---
+  // ALU3_rr: [0]=dst, [1]=src1, [2]=src2
+  // ALU3_rm: [0]=dst, [1..4]=VAXMemOp(src1), [5]=src2
+  // NOTE: Only instructions whose _rm form has VAXMemOp as the FIRST input.
+  // BICL3_rm has (ins GPRnoPC:$mask, VAXMemOp:$src) — different layout — excluded.
+  struct Alu3Fold {
+    unsigned FromOpc, ToOpc;
+    bool Commutative;
+  };
+  static const Alu3Fold Alu3Folds[] = {
+    {VAX::ADDL3_rr, VAX::ADDL3_rm, true},
+    {VAX::SUBL3_rr, VAX::SUBL3_rm, false},
+  };
+  for (const auto &F : Alu3Folds) {
+    if (UseOpc != F.FromOpc)
+      continue;
+    Register Dst = Use.getOperand(0).getReg();
+    Register Src1 = Use.getOperand(1).getReg();
+    Register Src2 = Use.getOperand(2).getReg();
+
+    // Fold when src1 is the reloaded register.
+    if (Src1 == RR && Use.getOperand(1).isKill()) {
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
+      MIB.addDef(Dst);
+      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      MIB.addReg(Src2);
+      MIB.cloneMemRefs(Reload);
+      LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU3_rr→ALU3_rm "
+                        << Reload << "  + " << Use);
+      auto Erase1 = II;
+      II = std::next(Next);
+      Erase1->eraseFromParent();
+      Next->eraseFromParent();
+      return true;
+    }
+
+    // For commutative ops: fold when src2 is the reloaded register.
+    if (F.Commutative && Src2 == RR && Use.getOperand(2).isKill()) {
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
+      MIB.addDef(Dst);
+      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      MIB.addReg(Src1); // swapped: was src1, now occupies src2 position
+      MIB.cloneMemRefs(Reload);
+      LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU3_rr→ALU3_rm(swap) "
+                        << Reload << "  + " << Use);
+      auto Erase1 = II;
+      II = std::next(Next);
+      Erase1->eraseFromParent();
+      Next->eraseFromParent();
+      return true;
+    }
+  }
+
+  // --- Pattern 5: CMPL_rr → CMPL_rm ---
+  // CMPL_rr: [0]=$a, [1]=$b; CMPL_rm: [0..3]=VAXMemOp_a, [4]=$b
+  // Only fold when the reload feeds the first operand ($a).
+  if (UseOpc == VAX::CMPL_rr &&
+      Use.getOperand(0).getReg() == RR &&
+      Use.getOperand(0).isKill()) {
+    Register OtherReg = Use.getOperand(1).getReg();
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::CMPL_rm));
+    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    MIB.addReg(OtherReg);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+CMPL_rr→CMPL_rm "
+                      << Reload << "  + " << Use);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 6: CMP_BRANCH_rr → CMP_BRANCH_rm ---
+  // CMP_BRANCH_rr: [0]=$lhs, [1]=$rhs, [2]=$cc, [3]=$dst
+  // CMP_BRANCH_rm: [0..3]=VAXMemOp_lhs, [4]=$rhs, [5]=$cc, [6]=$dst
+  // Only fold when the reload feeds $lhs (first operand).
+  if (UseOpc == VAX::CMP_BRANCH_rr &&
+      Use.getOperand(0).getReg() == RR &&
+      Use.getOperand(0).isKill()) {
+    Register RhsReg = Use.getOperand(1).getReg();
+    int64_t CC = Use.getOperand(2).getImm();
+    MachineBasicBlock *Target = Use.getOperand(3).getMBB();
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::CMP_BRANCH_rm));
+    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    MIB.addReg(RhsReg).addImm(CC).addMBB(Target);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+CMP_BRANCH_rr→CMP_BRANCH_rm "
+                      << Reload << "  + " << Use);
     auto Erase1 = II;
     II = std::next(Next);
     Erase1->eraseFromParent();
@@ -909,9 +1124,15 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
     for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*below*/) {
       MachineInstr &MI = *II;
 
+      // Try to fold a MOVL_rm (reload) into the next instruction.
+      // Must run first: MOVL_rm only matches this pattern, and folding
+      // may enable further optimizations (e.g., TST elimination on the result).
+      bool Converted = tryFoldReload(MBB, II, TII);
+
       // Try MOVL_ri + ADDL3_rm [+ PUSHL] → MOVL_rm + MOVAL/PUSHAL
       // Must run before 3→2 conversion to see the original ADDL3_rm.
-      bool Converted = tryConvertImmLoadAddToMOVA(MBB, II, TII);
+      if (!Converted)
+        Converted = tryConvertImmLoadAddToMOVA(MBB, II, TII);
 
       // Try 3-op → 2-op conversion
       if (!Converted)
