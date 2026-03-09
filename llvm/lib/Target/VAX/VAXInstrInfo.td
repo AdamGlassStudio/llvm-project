@@ -742,11 +742,13 @@ def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
 def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
 
 // CVTBW (0x99) reg <- reg: sign-extend i8 to i16.
+let Defs = [PSW] in
 def CVTBW_rr : InstVAX<0x99, (outs GPRW:$dst), (ins GPRB:$src),
     "cvtbw\t$src, $dst",
     [(set GPRW:$dst, (sext GPRB:$src))]>;
 
 // MOVZBW (0x9B) reg <- reg: zero-extend i8 to i16.
+let Defs = [PSW] in
 def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
     "movzbw\t$src, $dst",
     [(set GPRW:$dst, (zext GPRB:$src))]>;
@@ -1495,6 +1497,7 @@ def FFC : InstVAX<0xEB, (outs),
     "ffc\t$pos, $size, $base, $dst", []>;
 
 // INSQUE (0x0E): insert entry into queue. entry.ab, pred.ab
+let Defs = [PSW] in
 def INSQUE : InstVAX<0x0E, (outs), (ins VAXMemOp:$entry, VAXMemOp:$pred),
     "insque\t$entry, $pred", []>;
 
@@ -1504,33 +1507,33 @@ def REMQUE : InstVAX<0x0F, (outs), (ins VAXMemOp:$entry, VAXMemOp:$addr),
     "remque\t$entry, $addr", []>;
 
 // MOVC3 (0x28): move character 3-operand. len.rw, srcaddr.ab, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
 def MOVC3 : InstVAX<0x28, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$src, VAXMemOp:$dst),
     "movc3\t$len, $src, $dst", []>;
 
 // MOVC5 (0x2C): move character 5-operand.
 // srclen.rw, srcaddr.ab, fill.rb, dstlen.rw, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
 def MOVC5 : InstVAX<0x2C, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
          VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "movc5\t$srclen, $srcaddr, $fill, $dstlen, $dstaddr", []>;
 
 // SCANC (0x2A): scan characters. len.rw, addr.ab, tbladdr.ab, mask.rb
-let Defs = [R0, R1, R2, R3] in
+let Defs = [R0, R1, R2, R3, PSW] in
 def SCANC : InstVAX<0x2A, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
     "scanc\t$len, $addr, $tbl, $mask", []>;
 
 // LOCC (0x3A): locate character. char.rb, len.rw, addr.ab
-let Defs = [R0, R1] in
+let Defs = [R0, R1, PSW] in
 def LOCC : InstVAX<0x3A, (outs),
     (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
     "locc\t$char, $len, $addr", []>;
 
 // SKPC (0x3B): skip character. char.rb, len.rw, addr.ab
-let Defs = [R0, R1] in
+let Defs = [R0, R1, PSW] in
 def SKPC : InstVAX<0x3B, (outs),
     (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
     "skpc\t$char, $len, $addr", []>;
@@ -1544,6 +1547,7 @@ def REI : InstVAX<0x02, (outs), (ins), "rei", []>;
 let HasMemOp = 1 in {
 
 // ASHL (0x78): arithmetic shift long. cnt.rb, src.rl, dst.wl
+let Defs = [PSW] in
 def ASHL : InstVAX<0x78, (outs),
     (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
     "ashl\t$cnt, $src, $dst", []>;
@@ -1579,37 +1583,41 @@ def MOVAQ : InstVAX<0x7E, (outs),
 // MOVQ (0x7D): move quadword (64-bit integer, no float validation).
 // Unlike MOVD, MOVQ does NOT check for reserved floating-point operands.
 // Use MOVQ for i64 data and register spills; MOVD only for actual f64 values.
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVQ : InstVAX<0x7D, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movq\t$src, $dst", []>;
 // MOVQ register-register (QPR copy for i64 / register allocation).
+let Defs = [PSW] in
 def MOVQ_rr : InstVAX<0x7D, (outs QPR:$dst), (ins QPR:$src),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;
 // MOVQ register-from-memory (QPR reload from stack slot).
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVQ_rm : InstVAX<0x7D, (outs QPR:$dst), (ins VAXDMemOp:$src),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;
 // MOVQ memory-from-register (QPR spill to stack slot).
-let HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1 in
 def MOVQ_mr : InstVAX<0x7D, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
+let Defs = [PSW] in
 def EXTZV : InstVAX<0xEF, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
     "extzv\t$pos, $size, $base, $dst", []>;
 
 // INSV (0xF0): insert field. src.rl, pos.rl, size.rb, base.rl
+let Defs = [PSW] in
 def INSV : InstVAX<0xF0, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base),
     "insv\t$src, $pos, $size, $base", []>;
 
 // SOBGTR (0xF5): subtract one and branch if greater. index.ml, disp.bb
 // The index operand is modified (read-write). disp is a branch displacement.
+let Defs = [PSW] in
 def SOBGTR : InstVAX<0xF5, (outs),
     (ins VAXMemOp:$index, VAXMemOp:$disp),
     "sobgtr\t$index, $disp", []>;
@@ -1913,7 +1921,7 @@ def CMPC5 : InstVAX<0x2D, (outs),
 
 // MOVTC (0x2E): move translated characters.
 // srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab, dstlen.rw, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
 def MOVTC : InstVAX<0x2E, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
          VAXMemOp:$tbl, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
@@ -1929,19 +1937,19 @@ def MOVTUC : InstVAX<0x2F, (outs),
 
 // CRC (0x0B): compute cyclic redundancy check.
 // tbl.ab, inicrc.rl, strlen.rw, stream.ab
-let Defs = [R0, R1, R2, R3] in
+let Defs = [R0, R1, R2, R3, PSW] in
 def CRC : InstVAX<0x0B, (outs),
     (ins VAXMemOp:$tbl, VAXMemOp:$inicrc, VAXMemOp:$strlen, VAXMemOp:$stream),
     "crc\t$tbl, $inicrc, $strlen, $stream", []>;
 
 // MATCHC (0x39): match characters. objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab
-let Defs = [R0, R1, R2, R3] in
+let Defs = [R0, R1, R2, R3, PSW] in
 def MATCHC : InstVAX<0x39, (outs),
     (ins VAXMemOp:$objlen, VAXMemOp:$objaddr, VAXMemOp:$srclen, VAXMemOp:$srcaddr),
     "matchc\t$objlen, $objaddr, $srclen, $srcaddr", []>;
 
 // SPANC (0x2B): span characters. len.rw, addr.ab, tbladdr.ab, mask.rb
-let Defs = [R0, R1, R2, R3] in
+let Defs = [R0, R1, R2, R3, PSW] in
 def SPANC : InstVAX<0x2B, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
     "spanc\t$len, $addr, $tbl, $mask", []>;
@@ -1995,11 +2003,13 @@ def ADAWI : InstVAX<0x58, (outs),
     "adawi\t$src, $dst", []>;
 
 // INSQHI (0x5C): insert into queue head interlocked. entry.ab, header.aq
+let Defs = [PSW] in
 def INSQHI : InstVAX<0x5C, (outs),
     (ins VAXMemOp:$entry, VAXMemOp:$header),
     "insqhi\t$entry, $header", []>;
 
 // INSQTI (0x5D): insert into queue tail interlocked. entry.ab, header.aq
+let Defs = [PSW] in
 def INSQTI : InstVAX<0x5D, (outs),
     (ins VAXMemOp:$entry, VAXMemOp:$header),
     "insqti\t$entry, $header", []>;
@@ -2068,6 +2078,8 @@ let isCodeGenOnly = 0, HasMemOp = 1 in {
 
 // --- Single-operand instructions (1 mem operand) ---
 
+let Defs = [PSW] in {
+
 // PUSHL: push longword onto stack. Only had _r and _i.
 def PUSHL_m : InstVAX<0xDD, (outs), (ins VAXMemOp:$src),
     "pushl\t$src", []>;
@@ -2106,6 +2118,8 @@ def TSTF_m : InstVAX<0x53, (outs), (ins VAXMemOp:$a),
 def TSTD_m : InstVAX<0x73, (outs), (ins VAXMemOp:$a),
     "tstd\t$a", []>;
 
+} // Defs = [PSW]
+
 // MOVPSL: move PSL to destination.
 def MOVPSL_m : InstVAX<0xDC, (outs), (ins VAXMemOp:$dst),
     "movpsl\t$dst", []>;
@@ -2113,6 +2127,8 @@ def MOVPSL_m : InstVAX<0xDC, (outs), (ins VAXMemOp:$dst),
 // JMP: already has JMP_mem.
 
 // --- Two-operand instructions (2 mem operands) ---
+
+let Defs = [PSW] in {
 
 // MOVL: move longword. Add all-memory variant.
 def MOVL_mm : InstVAX<0xD0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2210,11 +2226,15 @@ def ADWC_mm : InstVAX<0xD8, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 def SBWC_mm : InstVAX<0xD9, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "sbwc\t$src, $dst", []>;
 
-// MTPR/MFPR: move to/from processor register.
+} // Defs = [PSW]
+
+// MTPR/MFPR: move to/from processor register. Do not set condition codes.
 def MTPR_mm : InstVAX<0xDA, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mtpr\t$src, $dst", []>;
 def MFPR_mm : InstVAX<0xDB, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mfpr\t$src, $dst", []>;
+
+let Defs = [PSW] in {
 
 // 2-operand ALU: all-memory variants.
 def ADDL2_mm : InstVAX<0xC0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2344,11 +2364,14 @@ def MULD3_mm : InstVAX<0x65, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
 def DIVD3_mm : InstVAX<0x67, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "divd3\t$a, $b, $dst", []>, Sched<[WriteFPDDIV]>;
 
+} // Defs = [PSW]
+
 // CALLS: all-memory variant (call with args count + memory target).
+// Does not set condition codes (CALLS saves/restores PSW via call frame).
 def CALLS_mm : InstVAX<0xFB, (outs), (ins VAXMemOp:$args, VAXMemOp:$target),
     "calls\t$args, $target", []>;
 
-// JSB: jump to subroutine — memory operand.
+// JSB: jump to subroutine — memory operand. Does not set condition codes.
 def JSB_m : InstVAX<0x16, (outs), (ins VAXMemOp:$target),
     "jsb\t$target", []>;
 
@@ -2369,6 +2392,8 @@ def BVS : InstVAX<0x1D, (outs), (ins brtarget:$dst), "bvs\t$dst", []>,
     Sched<[WriteBRcc]>;
 
 let HasMemOp = 1 in {
+
+let Defs = [PSW] in {
 
 // CVTLB (0xF6): convert long to byte. src.rl, dst.wb
 def CVTLB : InstVAX<0xF6, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2578,12 +2603,15 @@ def CVTLP : InstVAX<0xF9, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvtlp\t$src, $dstlen, $dstaddr", []>;
 
-// CASEL_mm (0xCF): all-memory variant for disassembly.
+} // Defs = [PSW]
+
+// CASEL_mm (0xCF): all-memory variant for disassembly. Does not set CC.
 def CASEL_mm : InstVAX<0xCF, (outs),
     (ins VAXMemOp:$selector, VAXMemOp:$base, VAXMemOp:$limit),
     "casel\t$selector, $base, $limit", []>;
 
 // ADAWI (0x58): add aligned word interlocked. All-memory.
+let Defs = [PSW] in
 def ADAWI_mm : InstVAX<0x58, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "adawi\t$src, $dst", []>;
 
