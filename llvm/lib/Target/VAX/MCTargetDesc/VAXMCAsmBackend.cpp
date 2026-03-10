@@ -7,10 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXFixupKinds.h"
+#include "VAXMCAsmInfo.h"
 #include "VAXMCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
@@ -102,22 +104,79 @@ public:
     // relaxation (BRB → BRW).
     if ((unsigned)Fixup.getKind() == VAX::fixup_vax_pcrel_8)
       return !isInt<8>(static_cast<int64_t>(Value) - 1);
+    // A 16-bit PC-relative operand displacement that doesn't fit needs
+    // relaxation (0xCF/0xDF word → 0xEF/0xFF longword).
+    if ((unsigned)Fixup.getKind() == VAX::fixup_vax_pcrel_16)
+      return !isInt<16>(static_cast<int64_t>(Value) - 2);
     return false;
   }
 
   bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
                          const MCSubtargetInfo &STI) const override {
-    // Only BRB can be relaxed (to BRW). Conditional branches (BEQL, BNEQ,
-    // etc.) only have 8-bit forms — relaxation would require emitting two
-    // instructions, which relaxInstruction can't do. The compiler's
-    // BranchRelaxation pass handles conditional branches at the MIR level.
-    return Opcode == VAX::BRB;
+    // BRB can be relaxed to BRW.
+    if (Opcode == VAX::BRB)
+      return true;
+    // Any instruction with an expression operand might need PC-relative
+    // operand relaxation (word → longword).
+    for (const auto &Op : Operands) {
+      if (!Op.isExpr())
+        continue;
+      // Already marked longword — no further relaxation possible.
+      if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Op.getExpr()))
+        if (SRE->getSpecifier() == VAX::S_PCREL32 ||
+            SRE->getSpecifier() == VAX::S_PLT ||
+            SRE->getSpecifier() == VAX::S_GOT)
+          continue;
+      return true;
+    }
+    return false;
+  }
+
+  /// Walk an MCExpr tree and replace bare MCSymbolRefExpr nodes (specifier == 0)
+  /// with S_PCREL32 to force longword encoding on re-encode.
+  static const MCExpr *addPCREL32(const MCExpr *Expr, MCContext &Ctx) {
+    switch (Expr->getKind()) {
+    case MCExpr::SymbolRef: {
+      auto *SRE = cast<MCSymbolRefExpr>(Expr);
+      if (SRE->getSpecifier() != 0)
+        return nullptr; // Already has specifier
+      return MCSymbolRefExpr::create(&SRE->getSymbol(), VAX::S_PCREL32, Ctx);
+    }
+    case MCExpr::Binary: {
+      auto *BE = cast<MCBinaryExpr>(Expr);
+      if (auto *New = addPCREL32(BE->getLHS(), Ctx))
+        return MCBinaryExpr::create(BE->getOpcode(), New, BE->getRHS(), Ctx);
+      if (auto *New = addPCREL32(BE->getRHS(), Ctx))
+        return MCBinaryExpr::create(BE->getOpcode(), BE->getLHS(), New, Ctx);
+      return nullptr;
+    }
+    case MCExpr::Unary: {
+      auto *UE = cast<MCUnaryExpr>(Expr);
+      if (auto *New = addPCREL32(UE->getSubExpr(), Ctx))
+        return MCUnaryExpr::create(UE->getOpcode(), New, Ctx);
+      return nullptr;
+    }
+    default:
+      return nullptr;
+    }
   }
 
   void relaxInstruction(MCInst &Inst,
                         const MCSubtargetInfo &STI) const override {
-    assert(Inst.getOpcode() == VAX::BRB && "Can only relax BRB to BRW");
-    Inst.setOpcode(VAX::BRW);
+    if (Inst.getOpcode() == VAX::BRB) {
+      Inst.setOpcode(VAX::BRW);
+      return;
+    }
+    // PC-relative operand relaxation: mark expression operands with
+    // S_PCREL32 so re-encoding uses longword displacement.
+    // Handles both simple MCSymbolRefExpr and nested expressions like sym+4.
+    for (unsigned i = 0; i < Inst.getNumOperands(); i++) {
+      MCOperand &Op = Inst.getOperand(i);
+      if (!Op.isExpr())
+        continue;
+      if (auto *NewExpr = addPCREL32(Op.getExpr(), getContext()))
+        Op = MCOperand::createExpr(NewExpr);
+    }
   }
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,

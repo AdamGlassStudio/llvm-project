@@ -53,8 +53,8 @@
 # CHECK: .word 0
 	.word 0
 
-# External symbol (PC-relative)
-# CHECK: calls	$0, foo{{.*}}encoding: [0xfb,0x00,0xef,A,A,A,A]
+# External symbol (PC-relative, word displacement — relaxation grows to longword)
+# CHECK: calls	$0, foo{{.*}}encoding: [0xfb,0x00,0xcf,A,A]
 	calls $0, foo
-# CHECK: movl	foo, %r0{{.*}}encoding: [0xd0,0xef,A,A,A,A,0x50]
+# CHECK: movl	foo, %r0{{.*}}encoding: [0xd0,0xcf,A,A,0x50]
 	movl foo, %r0
