@@ -87,6 +87,11 @@ private:
 
   /// Return the displacement size for a branch opcode (1 or 2 bytes).
   unsigned getBranchDispSize(unsigned Opcode) const;
+
+  /// Return the trailing branch displacement size for compound instructions
+  /// (SOBxxx, AOBxxx, ACBx, BBxx, BLBx). Returns 0 if the instruction has
+  /// no trailing branch displacement.
+  unsigned getTrailingBranchDispSize(unsigned Opcode) const;
 };
 
 } // end anonymous namespace
@@ -419,6 +424,25 @@ unsigned VAXMCCodeEmitter::getBranchDispSize(unsigned Opcode) const {
   return (Opcode == VAX::BRW) ? 2 : 1;
 }
 
+unsigned VAXMCCodeEmitter::getTrailingBranchDispSize(unsigned Opcode) const {
+  switch (Opcode) {
+  // Byte displacement (.bb)
+  case VAX::SOBGTR: case VAX::SOBGEQ:
+  case VAX::AOBLEQ: case VAX::AOBLSS:
+  case VAX::BBS: case VAX::BBC:
+  case VAX::BBSS: case VAX::BBCS: case VAX::BBSC: case VAX::BBCC:
+  case VAX::BBSSI: case VAX::BBCCI:
+  case VAX::BLBS: case VAX::BLBC:
+    return 1;
+  // Word displacement (.bw)
+  case VAX::ACBL: case VAX::ACBW: case VAX::ACBB:
+  case VAX::ACBF: case VAX::ACBD:
+    return 2;
+  default:
+    return 0;
+  }
+}
+
 void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
                                          SmallVectorImpl<char> &CB,
                                          SmallVectorImpl<MCFixup> &Fixups,
@@ -490,10 +514,22 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   unsigned NumDefs = Desc.getNumDefs();
   unsigned NumOps = MI.getNumOperands();
 
+  // Determine if this instruction has a trailing branch displacement
+  // (e.g., SOBxxx, AOBxxx, ACBx, BBxx, BLBx).
+  unsigned TrailingBranchSize = getTrailingBranchDispSize(Opcode);
+
   // Helper: emit one MCInst operand. Returns the number of MCInst operands
   // consumed (4 for memory, 1 otherwise).
   unsigned MemOpCounter = 0; // tracks ordinal of current memory operand
   auto emitOperand = [&](unsigned OpIdx) -> unsigned {
+    // Check if this operand is a branch displacement (OPERAND_PCREL).
+    if (TrailingBranchSize && OpIdx < Desc.getNumOperands() &&
+        Desc.operands()[OpIdx].OperandType == MCOI::OPERAND_PCREL) {
+      emitBranchDisp(MI.getOperand(OpIdx), TrailingBranchSize, CB, Fixups,
+                     StartByte);
+      return 1;
+    }
+
     // Check if this is the start of a 4-slot memory operand.
     if (isMemOpStart(OpIdx)) {
       emitMemOperand(MI.getOperand(OpIdx), MI.getOperand(OpIdx + 1),
