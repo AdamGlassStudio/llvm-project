@@ -121,29 +121,67 @@ void VAXMCCodeEmitter::emitImmOperand(int64_t Imm, unsigned DataSize,
     CB.push_back(static_cast<char>((Val >> (i * 8)) & 0xFF));
 }
 
+/// Check if any MCSymbolRefExpr in the expression tree has the given specifier.
+static bool hasSpecifier(const MCExpr *Expr, unsigned Spec) {
+  switch (Expr->getKind()) {
+  case MCExpr::SymbolRef:
+    return cast<MCSymbolRefExpr>(Expr)->getSpecifier() == Spec;
+  case MCExpr::Binary:
+    return hasSpecifier(cast<MCBinaryExpr>(Expr)->getLHS(), Spec) ||
+           hasSpecifier(cast<MCBinaryExpr>(Expr)->getRHS(), Spec);
+  case MCExpr::Unary:
+    return hasSpecifier(cast<MCUnaryExpr>(Expr)->getSubExpr(), Spec);
+  default:
+    return false;
+  }
+}
+
+/// Check if any MCSymbolRefExpr in the expression tree has one of the
+/// "force longword" specifiers (S_PCREL32, S_PLT, S_GOT).
+static bool hasLongwordSpecifier(const MCExpr *Expr) {
+  return hasSpecifier(Expr, VAX::S_PCREL32) ||
+         hasSpecifier(Expr, VAX::S_PLT) ||
+         hasSpecifier(Expr, VAX::S_GOT);
+}
+
+/// Return the PLT/GOT specifier if present in the expression tree, else 0.
+static unsigned getExprSpecifier(const MCExpr *Expr) {
+  if (hasSpecifier(Expr, VAX::S_PLT)) return VAX::S_PLT;
+  if (hasSpecifier(Expr, VAX::S_GOT)) return VAX::S_GOT;
+  return 0;
+}
+
 void VAXMCCodeEmitter::emitExprOperand(const MCExpr *Expr,
                                        SmallVectorImpl<char> &CB,
                                        SmallVectorImpl<MCFixup> &Fixups,
                                        unsigned StartByte) const {
-  // PC-relative longword displacement: 0xEF + 4-byte displacement.
-  CB.push_back(static_cast<char>(0xEF));
-  unsigned FixOff = CB.size() - StartByte;
-  // Check for PLT/GOT specifier on call/data targets.
-  MCFixupKind Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
-  if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Expr)) {
-    unsigned Spec = SRE->getSpecifier();
+  bool UseLongword = hasLongwordSpecifier(Expr);
+
+  if (UseLongword) {
+    // Longword PC-relative displacement: 0xEF + 4-byte displacement.
+    CB.push_back(static_cast<char>(0xEF));
+    unsigned FixOff = CB.size() - StartByte;
+    unsigned Spec = getExprSpecifier(Expr);
+    MCFixupKind Kind;
     if (Spec == VAX::S_PLT)
       Kind = MCFixupKind(VAX::fixup_vax_plt_32);
     else if (Spec == VAX::S_GOT)
       Kind = MCFixupKind(VAX::fixup_vax_got_32);
+    else
+      Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
+    Fixups.push_back(MCFixup::create(FixOff, Expr, Kind, /*PCRel=*/true));
+    CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+  } else {
+    // Word PC-relative displacement: 0xCF + 2-byte displacement.
+    // If the displacement doesn't fit in 16 bits, the relaxation framework
+    // will grow this to longword (0xEF + 4 bytes) via S_PCREL32 specifier.
+    CB.push_back(static_cast<char>(0xCF));
+    unsigned FixOff = CB.size() - StartByte;
+    Fixups.push_back(MCFixup::create(FixOff, Expr,
+                                     MCFixupKind(VAX::fixup_vax_pcrel_16),
+                                     /*PCRel=*/true));
+    CB.push_back(0); CB.push_back(0);
   }
-  Fixups.push_back(
-      MCFixup::create(FixOff, Expr, Kind, /*PCRel=*/true));
-  // Emit 4 placeholder bytes for the fixup.
-  CB.push_back(0);
-  CB.push_back(0);
-  CB.push_back(0);
-  CB.push_back(0);
 }
 
 void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
@@ -169,29 +207,44 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
   auto emitDisplacement = [&](unsigned BaseRegNum, bool Deferred) {
     unsigned DeferBit = Deferred ? 0x10 : 0x00;
     if (Disp.isExpr()) {
-      // Expression — always longword displacement + fixup.
-      CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
-      unsigned FixOff = CB.size() - StartByte;
-      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
       MCFixupKind Kind;
       bool IsPCRel;
       if (BaseRegNum == 0xF) {
-        // PC-relative: check for GOT/PLT specifier.
+        // PC-relative: check for GOT/PLT/PCREL32 specifier (may be nested).
         IsPCRel = true;
-        unsigned Spec = 0;
-        if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Disp.getExpr()))
-          Spec = SRE->getSpecifier();
+        bool UseLongword = hasLongwordSpecifier(Disp.getExpr());
+        unsigned Spec = getExprSpecifier(Disp.getExpr());
         if (Spec == VAX::S_GOT)
           Kind = MCFixupKind(VAX::fixup_vax_got_32);
         else if (Spec == VAX::S_PLT)
           Kind = MCFixupKind(VAX::fixup_vax_plt_32);
-        else
+        else if (UseLongword)
           Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
+        else
+          Kind = MCFixupKind(VAX::fixup_vax_pcrel_16);
+
+        if (UseLongword) {
+          // Longword: 0xE0/0xF0 | reg, 4 bytes
+          CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
+          unsigned FixOff = CB.size() - StartByte;
+          CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+          Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
+        } else {
+          // Word: 0xC0/0xD0 | reg, 2 bytes — relaxation grows to longword
+          CB.push_back(static_cast<char>((0xC0 | DeferBit) | BaseRegNum));
+          unsigned FixOff = CB.size() - StartByte;
+          CB.push_back(0); CB.push_back(0);
+          Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
+        }
       } else {
         IsPCRel = false;
         Kind = MCFixupKind(FK_Data_4);
+        // Non-PC base: always longword displacement.
+        CB.push_back(static_cast<char>((0xE0 | DeferBit) | BaseRegNum));
+        unsigned FixOff = CB.size() - StartByte;
+        CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+        Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
       }
-      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind, IsPCRel));
       return;
     }
     int64_t DispVal = Disp.isImm() ? Disp.getImm() : 0;
@@ -271,16 +324,27 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
 
   case VAXAM::Absolute:
     if (Disp.isExpr()) {
-      // PC-relative longword displacement deferred: 0xFF + PC-relative fixup.
-      // GAS emits this encoding for *symbol and *symbol[Rx] patterns;
-      // use it instead of 0x9F absolute to match GAS behavior and produce
-      // identical relocations (R_VAX_PC32 instead of R_VAX_32).
-      CB.push_back(static_cast<char>(0xFF));
-      unsigned FixOff = CB.size() - StartByte;
-      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
-      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
-                                       MCFixupKind(VAX::fixup_vax_pcrel_32),
-                                       /*IsPCRel=*/true));
+      // PC-relative displacement deferred for *symbol and *symbol[Rx].
+      // Check specifier to decide word vs longword encoding (may be nested).
+      bool UseLongword = hasLongwordSpecifier(Disp.getExpr());
+      if (UseLongword) {
+        // Longword deferred: 0xFF + 4-byte PC-relative displacement.
+        CB.push_back(static_cast<char>(0xFF));
+        unsigned FixOff = CB.size() - StartByte;
+        CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+        Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
+                                         MCFixupKind(VAX::fixup_vax_pcrel_32),
+                                         /*IsPCRel=*/true));
+      } else {
+        // Word deferred: 0xDF + 2-byte PC-relative displacement.
+        // Relaxation grows to longword (0xFF + 4 bytes) if needed.
+        CB.push_back(static_cast<char>(0xDF));
+        unsigned FixOff = CB.size() - StartByte;
+        CB.push_back(0); CB.push_back(0);
+        Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
+                                         MCFixupKind(VAX::fixup_vax_pcrel_16),
+                                         /*IsPCRel=*/true));
+      }
     } else {
       // True absolute address literal: keep 0x9F.
       CB.push_back(static_cast<char>(0x9F));
