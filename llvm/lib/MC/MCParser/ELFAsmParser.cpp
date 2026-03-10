@@ -716,11 +716,35 @@ bool ELFAsmParser::parseDirectiveType(StringRef, SMLoc) {
   if (getParser().parseSymbol(Sym))
     return TokError("expected identifier");
 
+  // When AllowAtInIdentifier is true (ELF targets with @specifiers like GOT,
+  // PLT), the lexer includes '@' in identifier tokens. This causes parseSymbol
+  // to consume "foo@function" as a single symbol name. Detect and split it so
+  // that the symbol gets the correct name and the type is parsed properly.
+  // This handles the GAS-compatible ".type sym@function" syntax (no comma).
+  StringRef TypeFromSymName;
+  if (Sym->getName().contains('@')) {
+    auto [RealName, Type] = Sym->getName().split('@');
+    Sym = getContext().getOrCreateSymbol(RealName);
+    TypeFromSymName = Type;
+  }
+
   bool AllowAt = getLexer().getAllowAtInIdentifier();
   if (!AllowAt &&
       !getContext().getAsmInfo().getCommentString().starts_with("@"))
     getLexer().setAllowAtInIdentifier(true);
   llvm::scope_exit _([&]() { getLexer().setAllowAtInIdentifier(AllowAt); });
+
+  // If the type was already extracted from the symbol name, skip token parsing.
+  if (!TypeFromSymName.empty()) {
+    MCSymbolAttr Attr = MCAttrForString(TypeFromSymName);
+    if (Attr == MCSA_Invalid)
+      return TokError("unsupported attribute in '" + TypeFromSymName + "'");
+    if (getLexer().isNot(AsmToken::EndOfStatement))
+      return TokError("expected end of directive");
+    Lex();
+    getStreamer().emitSymbolAttribute(Sym, Attr);
+    return false;
+  }
 
   // NOTE the comma is optional in all cases.  It is only documented as being
   // optional in the first case, however, GAS will silently treat the comma as

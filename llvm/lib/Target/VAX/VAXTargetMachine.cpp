@@ -20,6 +20,16 @@
 
 using namespace llvm;
 
+namespace {
+// VAX instructions are variable-length and byte-aligned — no .text alignment
+// requirement. Override the default alignment (4) to match GAS (1), preventing
+// unnecessary NOP padding between object files at link time.
+class VAXELFTargetObjectFile : public TargetLoweringObjectFileELF {
+public:
+  unsigned getTextSectionAlignment() const override { return 1; }
+};
+} // namespace
+
 // VAX data layout (little-endian, ELF, 32-bit pointers):
 //   e        - little-endian
 //   m:e      - ELF name mangling
@@ -57,7 +67,7 @@ VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
     : CodeGenTargetMachineImpl(T, VAXDataLayout, TT, CPU, FS, Options,
                                getEffectiveRelocModel(RM),
                                getVAXEffectiveCodeModel(CM), OL),
-      TLOF(std::make_unique<TargetLoweringObjectFileELF>()),
+      TLOF(std::make_unique<VAXELFTargetObjectFile>()),
       Subtarget(TT, CPU.empty() ? "generic" : std::string(CPU),
                 std::string(FS), *this) {
   // VAX has no user-accessible per-thread register (unlike x86 %fs/%gs or

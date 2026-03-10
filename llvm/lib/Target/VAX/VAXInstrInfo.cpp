@@ -235,12 +235,16 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
   assert(TBB && "insertBranch must not be told to insert a fallthrough");
 
   if (Cond.empty()) {
-    // Unconditional branch — emit BRB (2 bytes) by default.
-    // BranchRelaxationPass will widen to BRW if the target is out of range.
+    // Unconditional branch — emit BRW (3 bytes) instead of BRB.
+    // BRB is shorter but the MC layer may relax it to BRW, shifting code
+    // and pushing nearby conditional branches (which only have 8-bit
+    // displacement) out of range. Using BRW here makes sizes predictable
+    // for BranchRelaxation. The MC layer's BRB→BRW relaxation still
+    // handles hand-written .S files where BRB is used explicitly.
     assert(!FBB && "Unconditional branch with false block?");
-    BuildMI(&MBB, DL, get(VAX::BRB)).addMBB(TBB);
+    BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(TBB);
     if (BytesAdded)
-      *BytesAdded = 2;
+      *BytesAdded = 3;
     return 1;
   }
 
@@ -255,9 +259,9 @@ unsigned VAXInstrInfo::insertBranch(MachineBasicBlock &MBB,
   }
 
   // Conditional + fallthrough unconditional.
-  BuildMI(&MBB, DL, get(VAX::BRB)).addMBB(FBB);
+  BuildMI(&MBB, DL, get(VAX::BRW)).addMBB(FBB);
   if (BytesAdded)
-    *BytesAdded = 4; // 2 (Bcc) + 2 (BRB)
+    *BytesAdded = 5; // 2 (Bcc) + 3 (BRW)
   return 2;
 }
 
@@ -273,10 +277,15 @@ bool VAXInstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
                                          int64_t BrOffset) const {
   switch (BranchOpc) {
   // Conditional branches have 8-bit signed displacement: ±127 bytes.
+  // Use a conservative range (±117) to absorb getInstSizeInBytes() estimation
+  // errors. Conditional branches can only be relaxed at the MIR level (by
+  // inverting condition + BRW); the MC layer cannot relax them because
+  // relaxInstruction can't emit two instructions. Any conditional branch that
+  // escapes BranchRelaxation out-of-range is a hard error.
   case VAX::BEQL: case VAX::BNEQ:
   case VAX::BGTR: case VAX::BGEQ: case VAX::BLSS: case VAX::BLEQ:
   case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
-    return isInt<8>(BrOffset);
+    return BrOffset >= -117 && BrOffset <= 117;
   // BRB has 8-bit signed displacement.
   case VAX::BRB:
     return isInt<8>(BrOffset);
