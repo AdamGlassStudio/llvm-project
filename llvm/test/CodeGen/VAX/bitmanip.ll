@@ -12,7 +12,7 @@ declare i32 @llvm.ctpop.i32(i32)
 define i32 @clz(i32 %x) {
 ; CHECK-LABEL: clz:
 ; CHECK:       tstl %r{{[0-9]+}}
-; CHECK:       beql
+; CHECK:       bneq
 ; CHECK:       extzv
 ; CHECK:       mcoml
 ; CHECK:       ret
