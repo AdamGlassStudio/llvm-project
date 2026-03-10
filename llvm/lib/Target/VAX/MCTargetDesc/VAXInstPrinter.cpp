@@ -63,6 +63,12 @@ void VAXInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   MAI.printExpr(O, *Op.getExpr());
 }
 
+// OPERAND_PCREL overload — branch targets print symbolically (ignore Address).
+void VAXInstPrinter::printOperand(const MCInst *MI, uint64_t /*Address*/,
+                                  unsigned OpNo, raw_ostream &O) {
+  printOperand(MI, OpNo, O);
+}
+
 // Memory operand: 4 MCOperands = (base, disp, index, flags).
 // Prints VAX GAS syntax based on flags (VAXAM::*).
 void VAXInstPrinter::printMemOperand(const MCInst *MI, unsigned OpNo,

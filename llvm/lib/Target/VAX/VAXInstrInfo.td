@@ -437,7 +437,13 @@ defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8>;
 //===----------------------------------------------------------------------===//
 
 // Branch target operand — holds a BasicBlock/label reference.
-def brtarget : Operand<OtherVT>;
+// brtarget: byte displacement (.bb), brtarget16: word displacement (.bw).
+def brtarget : Operand<OtherVT> {
+  let OperandType = "OPERAND_PCREL";
+}
+def brtarget16 : Operand<OtherVT> {
+  let OperandType = "OPERAND_PCREL";
+}
 
 // SDNode for VAXISD::CMP: compare two i32 values, produce a glue (PSW).
 def SDT_VAXCMP : SDTypeProfile<0, 2, [SDTCisSameAs<0,1>, SDTCisInt<0>]>;
@@ -1619,7 +1625,7 @@ def INSV : InstVAX<0xF0, (outs),
 // The index operand is modified (read-write). disp is a branch displacement.
 let Defs = [PSW] in
 def SOBGTR : InstVAX<0xF5, (outs),
-    (ins VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$index, brtarget:$disp),
     "sobgtr\t$index, $disp", []>;
 
 } // let HasMemOp = 1
@@ -1740,59 +1746,59 @@ def EDIV_m : InstVAX<0x7B, (outs),
 // BBS (0xE0): branch on bit set. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBS : InstVAX<0xE0, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbs\t$pos, $base, $disp", []>;
 
 // BBC (0xE1): branch on bit clear. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBC : InstVAX<0xE1, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbc\t$pos, $base, $disp", []>;
 
 // BBSS (0xE2): branch on bit set and set. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBSS : InstVAX<0xE2, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbss\t$pos, $base, $disp", []>;
 
 // BBCS (0xE3): branch on bit clear and set. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBCS : InstVAX<0xE3, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcs\t$pos, $base, $disp", []>;
 
 // BBSC (0xE4): branch on bit set and clear. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBSC : InstVAX<0xE4, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbsc\t$pos, $base, $disp", []>;
 
 // BBCC (0xE5): branch on bit clear and clear. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBCC : InstVAX<0xE5, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcc\t$pos, $base, $disp", []>;
 
 // BBSSI (0xE6): branch on bit set and set interlocked. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBSSI : InstVAX<0xE6, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbssi\t$pos, $base, $disp", []>;
 
 // BBCCI (0xE7): branch on bit clear and clear interlocked. pos.rl, base.rl, disp.bb
 let Defs = [PSW] in
 def BBCCI : InstVAX<0xE7, (outs),
-    (ins VAXMemOp:$pos, VAXMemOp:$base, VAXMemOp:$disp),
+    (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcci\t$pos, $base, $disp", []>;
 
 // BLBS (0xE8): branch on low bit set. src.rl, disp.bb
 def BLBS : InstVAX<0xE8, (outs),
-    (ins VAXMemOp:$src, VAXMemOp:$disp),
+    (ins VAXMemOp:$src, brtarget:$disp),
     "blbs\t$src, $disp", []>;
 
 // BLBC (0xE9): branch on low bit clear. src.rl, disp.bb
 def BLBC : InstVAX<0xE9, (outs),
-    (ins VAXMemOp:$src, VAXMemOp:$disp),
+    (ins VAXMemOp:$src, brtarget:$disp),
     "blbc\t$src, $disp", []>;
 
 // --- Bit test instructions (test bits, set PSW, no branch) ---
@@ -1820,54 +1826,54 @@ def BITB : InstVAX<0x93, (outs),
 // SOBGEQ (0xF4): subtract one and branch if >= 0. index.ml, disp.bb
 let Defs = [PSW] in
 def SOBGEQ : InstVAX<0xF4, (outs),
-    (ins VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$index, brtarget:$disp),
     "sobgeq\t$index, $disp", []>;
 
 // AOBLEQ (0xF3): add one and branch if <= limit. limit.rl, index.ml, disp.bb
 let Defs = [PSW] in
 def AOBLEQ : InstVAX<0xF3, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$index, brtarget:$disp),
     "aobleq\t$limit, $index, $disp", []>;
 
 // AOBLSS (0xF2): add one and branch if < limit. limit.rl, index.ml, disp.bb
 let Defs = [PSW] in
 def AOBLSS : InstVAX<0xF2, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$index, brtarget:$disp),
     "aoblss\t$limit, $index, $disp", []>;
 
 // ACBL (0xF1): add compare and branch longword.
 // limit.rl, add.rl, index.ml, disp.bw
 let Defs = [PSW] in
 def ACBL : InstVAX<0xF1, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbl\t$limit, $add, $index, $disp", []>;
 
 // ACBW (0x3D): add compare and branch word.
 // limit.rw, add.rw, index.mw, disp.bw
 let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2 in
 def ACBW : InstVAX<0x3D, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbw\t$limit, $add, $index, $disp", []>;
 
 // ACBB (0x9D): add compare and branch byte.
 // limit.rb, add.rb, index.mb, disp.bw
 let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1 in
 def ACBB : InstVAX<0x9D, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbb\t$limit, $add, $index, $disp", []>;
 
 // ACBF (0x4F): add compare and branch F_float.
 // limit.rf, add.rf, index.mf, disp.bw
 let Defs = [PSW] in
 def ACBF : InstVAX<0x4F, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbf\t$limit, $add, $index, $disp", []>;
 
 // ACBD (0x6F): add compare and branch D_float.
 // limit.rd, add.rd, index.md, disp.bw
 let Defs = [PSW] in
 def ACBD : InstVAX<0x6F, (outs),
-    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
+    (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbd\t$limit, $add, $index, $disp", []>;
 
 // --- Case instructions ---

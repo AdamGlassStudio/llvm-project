@@ -57,10 +57,15 @@ private:
     unsigned Flags;   // VAXAM::Disp, VAXAM::RegDirect, etc.
   };
 
+  struct ImmOp {
+    const MCExpr *Val;
+    bool DollarPrefixed; // true for $expr, false for bare expr
+  };
+
   union {
     StringRef Tok;
     MCRegister Reg;
-    const MCExpr *Imm;
+    ImmOp Imm;
     MemOp Mem;
   };
 
@@ -98,7 +103,12 @@ public:
 
   const MCExpr *getImm() const {
     assert(Kind == k_Imm);
-    return Imm;
+    return Imm.Val;
+  }
+
+  bool isDollarPrefixed() const {
+    assert(Kind == k_Imm);
+    return Imm.DollarPrefixed;
   }
 
   SMLoc getStartLoc() const override { return Start; }
@@ -111,7 +121,7 @@ public:
 
   void addImmOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
-    addExprOperand(Inst, Imm);
+    addExprOperand(Inst, Imm.Val);
   }
 
   void addMemOperands(MCInst &Inst, unsigned N) const {
@@ -132,7 +142,7 @@ public:
       break;
     case k_Imm:
       O << "Imm: ";
-      MAI.printExpr(O, *Imm);
+      MAI.printExpr(O, *Imm.Val);
       break;
     case k_Mem:
       O << "Mem(flags=" << Mem.Flags << "): base=" << Mem.Base.id();
@@ -160,9 +170,10 @@ public:
   }
 
   static std::unique_ptr<VAXOperand> createImm(const MCExpr *Val, SMLoc S,
-                                               SMLoc E) {
+                                               SMLoc E,
+                                               bool DollarPrefixed = false) {
     auto Op = std::make_unique<VAXOperand>(k_Imm, S, E);
-    Op->Imm = Val;
+    Op->Imm = {Val, DollarPrefixed};
     return Op;
   }
 
@@ -509,7 +520,8 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
 
         const MCExpr *Expr = MCConstantExpr::create(Encoded, getContext());
         Operands.push_back(
-            VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc()));
+            VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc(),
+                                  /*DollarPrefixed=*/true));
         return false;
       }
     }
@@ -518,7 +530,8 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
     if (getParser().parseExpression(Expr))
       return true;
     Operands.push_back(VAXOperand::createImm(Expr, StartLoc,
-                                             getLexer().getLoc()));
+                                             getLexer().getLoc(),
+                                             /*DollarPrefixed=*/true));
     return false;
   }
 
@@ -829,13 +842,20 @@ unsigned VAXAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
   // register or immediate. VAX operand specifiers are uniform — convert:
   //   %reg  → Mem{Base=reg, Disp=null, Idx=0, Flags=RegDirect}
   //   $imm  → Mem{Base=NoReg, Disp=imm, Idx=0, Flags=Imm}
+  //   bare expr → Mem{Base=NoReg, Disp=expr, Idx=0, Flags=Disp} (PC-relative)
   if (Kind == MCK_Mem) {
     if (Op.isReg()) {
       Op.morphToMem(Op.getReg(), nullptr, VAXAM::RegDirect);
       return Match_Success;
     }
     if (Op.isImm()) {
-      Op.morphToMem(MCRegister(), Op.getImm(), VAXAM::Imm);
+      // $-prefixed → immediate mode (0x8F); bare symbol → PC-relative (0xEF)
+      if (Op.isDollarPrefixed()) {
+        Op.morphToMem(MCRegister(), Op.getImm(), VAXAM::Imm);
+      } else {
+        // Bare expression: PC-relative displacement (like GAS behavior)
+        Op.morphToMem(VAX::PC, Op.getImm(), VAXAM::Disp);
+      }
       return Match_Success;
     }
   }
