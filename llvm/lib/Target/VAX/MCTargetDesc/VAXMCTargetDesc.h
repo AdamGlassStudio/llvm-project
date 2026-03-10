@@ -44,6 +44,7 @@ namespace VAXOp {
 enum OperandType : unsigned {
   OPERAND_BYTE_IMM = MCOI::OPERAND_FIRST_TARGET,
   OPERAND_WORD_IMM,
+  OPERAND_QUAD_IMM,
 };
 } // namespace VAXOp
 } // namespace llvm

@@ -72,7 +72,8 @@ private:
                       const MCOperand &Index, const MCOperand &Flags,
                       SmallVectorImpl<char> &CB,
                       SmallVectorImpl<MCFixup> &Fixups,
-                      unsigned StartByte) const;
+                      unsigned StartByte, unsigned Opcode,
+                      unsigned MemOpOrdinal) const;
 
   /// Emit a branch displacement with the appropriate fixup.
   void emitBranchDisp(const MCOperand &Target, unsigned DispSize,
@@ -190,7 +191,8 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
                                       const MCOperand &Flags,
                                       SmallVectorImpl<char> &CB,
                                       SmallVectorImpl<MCFixup> &Fixups,
-                                      unsigned StartByte) const {
+                                      unsigned StartByte, unsigned Opcode,
+                                      unsigned MemOpOrdinal) const {
   assert(Base.isReg() && "Memory base must be a register");
   assert(Flags.isImm() && "Memory flags must be an immediate");
   unsigned BaseReg = Base.getReg() ? getRegEncoding(Base.getReg()) : 0;
@@ -302,25 +304,39 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
     CB.push_back(static_cast<char>(0x90 | BaseReg));
     return;
 
-  case VAXAM::Imm:
+  case VAXAM::Imm: {
     // Immediate mode (no base register).
+    // Determine data size from TSFlags MemOpWidth bits for this operand.
+    // MemOpWidth encoding: 0=longword(4), 1=byte(1), 2=word(2), 3=quad(8).
+    unsigned DataSize = 4;
+    unsigned WidthBits = (MCII.get(Opcode).TSFlags >> (17 + MemOpOrdinal * 2)) & 0x3;
+    if (WidthBits == 1) DataSize = 1;
+    else if (WidthBits == 2) DataSize = 2;
+    else if (WidthBits == 3) DataSize = 8;
     if (Disp.isImm()) {
-      emitImmOperand(Disp.getImm(), 4, CB);
+      emitImmOperand(Disp.getImm(), DataSize, CB);
       return;
     }
     if (Disp.isExpr()) {
-      // Immediate mode with expression: 0x8F + absolute 4-byte value.
-      // This is NOT PC-relative — the value IS the symbol address.
+      // Immediate mode with expression: 0x8F + DataSize bytes.
       CB.push_back(static_cast<char>(0x8F));
       unsigned FixOff = CB.size() - StartByte;
-      CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
-      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
-                                       MCFixupKind(FK_Data_4),
+      for (unsigned i = 0; i < DataSize; ++i)
+        CB.push_back(0);
+      MCFixupKind Kind;
+      if (DataSize == 1)
+        Kind = FK_Data_1;
+      else if (DataSize == 2)
+        Kind = FK_Data_2;
+      else
+        Kind = MCFixupKind(FK_Data_4);
+      Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind,
                                        /*IsPCRel=*/false));
       return;
     }
-    emitImmOperand(0, 4, CB);
+    emitImmOperand(0, DataSize, CB);
     return;
+  }
 
   case VAXAM::Absolute:
     if (Disp.isExpr()) {
@@ -476,12 +492,14 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
 
   // Helper: emit one MCInst operand. Returns the number of MCInst operands
   // consumed (4 for memory, 1 otherwise).
+  unsigned MemOpCounter = 0; // tracks ordinal of current memory operand
   auto emitOperand = [&](unsigned OpIdx) -> unsigned {
     // Check if this is the start of a 4-slot memory operand.
     if (isMemOpStart(OpIdx)) {
       emitMemOperand(MI.getOperand(OpIdx), MI.getOperand(OpIdx + 1),
                      MI.getOperand(OpIdx + 2), MI.getOperand(OpIdx + 3),
-                     CB, Fixups, StartByte);
+                     CB, Fixups, StartByte, Opcode, MemOpCounter);
+      ++MemOpCounter;
       return 4;
     }
 
