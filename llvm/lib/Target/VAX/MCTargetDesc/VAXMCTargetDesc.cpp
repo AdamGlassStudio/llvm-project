@@ -9,6 +9,7 @@
 #include "VAXMCTargetDesc.h"
 #include "VAXInstPrinter.h"
 #include "VAXMCAsmInfo.h"
+#include "VAXMCObjectFileInfo.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrAnalysis.h"
@@ -71,6 +72,14 @@ static MCInstrAnalysis *createVAXMCInstrAnalysis(const MCInstrInfo *Info) {
   return new MCInstrAnalysis(Info);
 }
 
+static MCObjectFileInfo *
+createVAXMCObjectFileInfo(MCContext &Ctx, bool PIC,
+                          bool LargeCodeModel = false) {
+  MCObjectFileInfo *MOFI = new VAXMCObjectFileInfo();
+  MOFI->initMCObjectFileInfo(Ctx, PIC, LargeCodeModel);
+  return MOFI;
+}
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTargetMC() {
   RegisterMCAsmInfoFn X(getTheVAXTarget(), createVAXMCAsmInfo);
   TargetRegistry::RegisterMCInstrInfo(getTheVAXTarget(), createVAXMCInstrInfo);
@@ -85,4 +94,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTargetMC() {
                                         createVAXMCCodeEmitter);
   TargetRegistry::RegisterMCAsmBackend(getTheVAXTarget(),
                                        createVAXAsmBackend);
+  TargetRegistry::RegisterMCObjectFileInfo(getTheVAXTarget(),
+                                           createVAXMCObjectFileInfo);
 }

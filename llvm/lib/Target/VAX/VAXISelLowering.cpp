@@ -242,6 +242,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setMaxAtomicSizeInBitsSupported(32);
   setMinCmpXchgSizeInBits(32);
 
+  // VAX instructions are variable-length and byte-aligned — no function
+  // alignment needed. Align(1) prevents .p2align directives that would
+  // inflate .text section alignment from 1 (GAS default) to 4.
+  setMinFunctionAlignment(Align(1));
+  setPrefFunctionAlignment(Align(1));
+
   // FP bitcast: VAX D_float is not IEEE754, so bitcast between FP and int
   // must go through memory (store as one type, load as another).
   setOperationAction(ISD::BITCAST,    MVT::f32, Expand);

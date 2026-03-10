@@ -2110,7 +2110,7 @@ def CLRB_m : InstVAX<0x94, (outs), (ins VAXMemOp:$dst),
 def CLRW_m : InstVAX<0xB4, (outs), (ins VAXMemOp:$dst),
     "clrw\t$dst", []>;
 def CLRD_m : InstVAX<0x7C, (outs), (ins VAXMemOp:$dst),
-    "clrq\t$dst", []>;
+    "clrd\t$dst", []>;
 
 // TSTF/TSTD: test floating-point.
 def TSTF_m : InstVAX<0x53, (outs), (ins VAXMemOp:$a),

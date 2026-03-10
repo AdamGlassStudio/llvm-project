@@ -270,15 +270,20 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
     return;
 
   case VAXAM::Absolute:
-    // Absolute deferred: 0x9F + 4-byte address.
-    CB.push_back(static_cast<char>(0x9F));
     if (Disp.isExpr()) {
+      // PC-relative longword displacement deferred: 0xFF + PC-relative fixup.
+      // GAS emits this encoding for *symbol and *symbol[Rx] patterns;
+      // use it instead of 0x9F absolute to match GAS behavior and produce
+      // identical relocations (R_VAX_PC32 instead of R_VAX_32).
+      CB.push_back(static_cast<char>(0xFF));
       unsigned FixOff = CB.size() - StartByte;
       CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
       Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(),
-                                       MCFixupKind(FK_Data_4),
-                                       /*IsPCRel=*/false));
+                                       MCFixupKind(VAX::fixup_vax_pcrel_32),
+                                       /*IsPCRel=*/true));
     } else {
+      // True absolute address literal: keep 0x9F.
+      CB.push_back(static_cast<char>(0x9F));
       int64_t Addr = Disp.isImm() ? Disp.getImm() : 0;
       uint32_t Val = static_cast<uint32_t>(Addr);
       CB.push_back(static_cast<char>(Val & 0xFF));
