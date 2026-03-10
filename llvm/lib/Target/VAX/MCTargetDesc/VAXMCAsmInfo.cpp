@@ -15,6 +15,7 @@ using namespace llvm;
 static const MCAsmInfo::AtSpecifier atSpecifiers[] = {
     {VAX::S_GOT, "GOT"},
     {VAX::S_PLT, "PLT"},
+    {VAX::S_PCREL32, "PCREL32"},
 };
 
 void VAXMCAsmInfo::anchor() {}
