@@ -29,6 +29,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include <cstring>
 
 #define DEBUG_TYPE "vax-asm-parser"
 
@@ -177,10 +178,15 @@ public:
 
 private:
   static void addExprOperand(MCInst &Inst, const MCExpr *Expr) {
-    if (!Expr)
+    if (!Expr) {
       Inst.addOperand(MCOperand::createImm(0));
-    else if (const auto *CE = dyn_cast<MCConstantExpr>(Expr))
-      Inst.addOperand(MCOperand::createImm(CE->getValue()));
+      return;
+    }
+    // Fold constant expressions (including MCUnaryExpr like -20) to immediates
+    // so the MCCodeEmitter can select optimal displacement sizes.
+    int64_t Val;
+    if (Expr->evaluateAsAbsolute(Val))
+      Inst.addOperand(MCOperand::createImm(Val));
     else
       Inst.addOperand(MCOperand::createExpr(Expr));
   }
@@ -417,9 +423,97 @@ MCRegister VAXAsmParser::tryParseIndexSuffix() {
 bool VAXAsmParser::parseOperand(OperandVector &Operands) {
   SMLoc StartLoc = getLexer().getLoc();
 
-  // Case 1: $expr — immediate
+  // Case 1: $expr — immediate (including GAS float literals $0d... / $0f...)
   if (getLexer().is(AsmToken::Dollar)) {
     getLexer().Lex(); // eat '$'
+
+    // Check for GAS floating-point literal: $0d<value> (D_float) or $0f<value>
+    // (F_float). The lexer tokenizes "0d1.5" as Integer(0) + Identifier("d1")
+    // + Dot + Integer(5), so we detect by checking the source text after the
+    // integer token.
+    if (getLexer().is(AsmToken::Integer) &&
+        getLexer().getTok().getIntVal() == 0) {
+      StringRef TokStr = getLexer().getTok().getString();
+      const char *After = TokStr.end();
+      if (*After == 'd' || *After == 'D' ||
+          *After == 'f' || *After == 'F') {
+        bool IsDouble = (*After == 'd' || *After == 'D');
+        getLexer().Lex(); // eat '0'
+
+        // Collect the remaining text: "d1.5" or "f0.0" etc.
+        // The identifier token gives us "d<digits>", then optionally ".<digits>"
+        if (getLexer().isNot(AsmToken::Identifier))
+          return Error(getLexer().getLoc(), "expected float value after '0d'/'0f'");
+        StringRef FltId = getLexer().getTok().getString();
+        // Strip the d/f prefix to get the integer part
+        StringRef IntPart = FltId.drop_front(1);
+        getLexer().Lex(); // eat identifier
+
+        // Check for fractional part: . digits
+        std::string FltStr(IntPart);
+        if (getLexer().is(AsmToken::Dot)) {
+          getLexer().Lex(); // eat '.'
+          FltStr += '.';
+          if (getLexer().is(AsmToken::Integer)) {
+            FltStr += getLexer().getTok().getString();
+            getLexer().Lex(); // eat fraction digits
+          }
+        }
+
+        // Parse the float value
+        double Val;
+        if (FltStr.empty() || StringRef(FltStr).getAsDouble(Val))
+          return Error(StartLoc, "invalid floating-point literal");
+
+        // Convert to VAX float encoding
+        int64_t Encoded;
+        if (Val == 0.0) {
+          Encoded = 0;
+        } else {
+          // Convert IEEE double to VAX D_float or F_float
+          uint64_t IEEE;
+          memcpy(&IEEE, &Val, 8);
+          uint64_t Sign = (IEEE >> 63) & 1;
+          int64_t IEEEExp = ((IEEE >> 52) & 0x7FF);
+          uint64_t IEEEFrac = IEEE & ((1ULL << 52) - 1);
+
+          if (IEEEExp == 0 || IEEEExp == 0x7FF)
+            return Error(StartLoc,
+                         "VAX floats do not support denormals, infinity, or NaN");
+
+          // VAX exponent: rebias from IEEE (1023) to VAX (128), +1 for
+          // the hidden-bit convention difference (VAX: 0.1xxx, IEEE: 1.xxx)
+          int64_t VAXExp = IEEEExp - 1023 + 128 + 1;
+          if (VAXExp <= 0 || VAXExp > 255)
+            return Error(StartLoc, "floating-point value out of VAX range");
+
+          if (IsDouble) {
+            // D_float: 55 fraction bits (IEEE has 52, shift left 3)
+            uint64_t VFrac = IEEEFrac << 3;
+            uint16_t W0 = (Sign << 15) | ((VAXExp & 0xFF) << 7) |
+                          ((VFrac >> 48) & 0x7F);
+            uint16_t W1 = (VFrac >> 32) & 0xFFFF;
+            uint16_t W2 = (VFrac >> 16) & 0xFFFF;
+            uint16_t W3 = VFrac & 0xFFFF;
+            Encoded = (int64_t)((uint64_t)W3 << 48 | (uint64_t)W2 << 32 |
+                                (uint64_t)W1 << 16 | W0);
+          } else {
+            // F_float: 23 fraction bits (IEEE double has 52, shift right 29)
+            uint32_t VFrac = IEEEFrac >> 29;
+            uint16_t W0 =
+                (Sign << 15) | ((VAXExp & 0xFF) << 7) | ((VFrac >> 16) & 0x7F);
+            uint16_t W1 = VFrac & 0xFFFF;
+            Encoded = (int64_t)((uint32_t)W1 << 16 | W0);
+          }
+        }
+
+        const MCExpr *Expr = MCConstantExpr::create(Encoded, getContext());
+        Operands.push_back(
+            VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc()));
+        return false;
+      }
+    }
+
     const MCExpr *Expr;
     if (getParser().parseExpression(Expr))
       return true;
@@ -591,13 +685,32 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
       return false;
     }
 
-    // Not a register — parenthesized expression like (expr) for CALLS indirect
+    // Not a register — parenthesized expression: (expr) or (expr)(%reg)
     const MCExpr *Expr;
     if (getParser().parseExpression(Expr))
       return true;
     if (getLexer().isNot(AsmToken::RParen))
       return Error(getLexer().getLoc(), "expected ')'");
     getLexer().Lex(); // eat ')'
+
+    // Check for (%reg) suffix — displacement mode with parenthesized offset.
+    // E.g., (CI_NINTR+4)(%r2) from NetBSD kernel assembly.
+    if (getLexer().is(AsmToken::LParen)) {
+      getLexer().Lex(); // eat '('
+      MCRegister Reg;
+      SMLoc RS, RE;
+      if (tryParseRegister(Reg, RS, RE).isFailure())
+        return Error(RS, "expected register");
+      if (getLexer().isNot(AsmToken::RParen))
+        return Error(getLexer().getLoc(), "expected ')'");
+      getLexer().Lex(); // eat ')'
+      MCRegister Idx = tryParseIndexSuffix();
+      Operands.push_back(VAXOperand::createMem(
+          Reg, Expr, Idx, VAXAM::Disp, StartLoc, getLexer().getLoc()));
+      return false;
+    }
+
+    // Bare parenthesized expression — immediate (e.g., CALLS indirect)
     Operands.push_back(
         VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc()));
     return false;

@@ -9,8 +9,10 @@
 #include "VAXFixupKinds.h"
 #include "VAXMCTargetDesc.h"
 #include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -79,6 +81,15 @@ public:
     if (Fixup.isPCRel() && IsResolved)
       Value -= NumBytes;
 
+    // Range check for 8-bit branch displacements. If this fires, the branch
+    // should have been relaxed or the BranchRelaxation pass missed it.
+    if ((unsigned)Fixup.getKind() == VAX::fixup_vax_pcrel_8 && IsResolved) {
+      int64_t SVal = static_cast<int64_t>(Value);
+      if (SVal < -128 || SVal > 127)
+        getContext().reportError(Fixup.getLoc(),
+                                "branch displacement out of range (-128..+127)");
+    }
+
     for (unsigned i = 0; i < NumBytes; ++i) {
       Data[i] = static_cast<uint8_t>(Value & 0xFF);
       Value >>= 8;
@@ -87,7 +98,26 @@ public:
 
   bool fixupNeedsRelaxation(const MCFixup &Fixup,
                             uint64_t Value) const override {
+    // An 8-bit PC-relative branch displacement that doesn't fit needs
+    // relaxation (BRB → BRW).
+    if ((unsigned)Fixup.getKind() == VAX::fixup_vax_pcrel_8)
+      return !isInt<8>(static_cast<int64_t>(Value) - 1);
     return false;
+  }
+
+  bool mayNeedRelaxation(unsigned Opcode, ArrayRef<MCOperand> Operands,
+                         const MCSubtargetInfo &STI) const override {
+    // Only BRB can be relaxed (to BRW). Conditional branches (BEQL, BNEQ,
+    // etc.) only have 8-bit forms — relaxation would require emitting two
+    // instructions, which relaxInstruction can't do. The compiler's
+    // BranchRelaxation pass handles conditional branches at the MIR level.
+    return Opcode == VAX::BRB;
+  }
+
+  void relaxInstruction(MCInst &Inst,
+                        const MCSubtargetInfo &STI) const override {
+    assert(Inst.getOpcode() == VAX::BRB && "Can only relax BRB to BRW");
+    Inst.setOpcode(VAX::BRW);
   }
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,
