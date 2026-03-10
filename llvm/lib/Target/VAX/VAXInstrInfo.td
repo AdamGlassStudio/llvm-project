@@ -1507,33 +1507,33 @@ def REMQUE : InstVAX<0x0F, (outs), (ins VAXMemOp:$entry, VAXMemOp:$addr),
     "remque\t$entry, $addr", []>;
 
 // MOVC3 (0x28): move character 3-operand. len.rw, srcaddr.ab, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2 in
 def MOVC3 : InstVAX<0x28, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$src, VAXMemOp:$dst),
     "movc3\t$len, $src, $dst", []>;
 
 // MOVC5 (0x2C): move character 5-operand.
 // srclen.rw, srcaddr.ab, fill.rb, dstlen.rw, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2, MemOpWidth2 = 1, MemOpWidth3 = 2 in
 def MOVC5 : InstVAX<0x2C, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
          VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "movc5\t$srclen, $srcaddr, $fill, $dstlen, $dstaddr", []>;
 
 // SCANC (0x2A): scan characters. len.rw, addr.ab, tbladdr.ab, mask.rb
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth0 = 2, MemOpWidth3 = 1 in
 def SCANC : InstVAX<0x2A, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
     "scanc\t$len, $addr, $tbl, $mask", []>;
 
 // LOCC (0x3A): locate character. char.rb, len.rw, addr.ab
-let Defs = [R0, R1, PSW] in
+let Defs = [R0, R1, PSW], MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def LOCC : InstVAX<0x3A, (outs),
     (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
     "locc\t$char, $len, $addr", []>;
 
 // SKPC (0x3B): skip character. char.rb, len.rw, addr.ab
-let Defs = [R0, R1, PSW] in
+let Defs = [R0, R1, PSW], MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def SKPC : InstVAX<0x3B, (outs),
     (ins VAXMemOp:$char, VAXMemOp:$len, VAXMemOp:$addr),
     "skpc\t$char, $len, $addr", []>;
@@ -1547,7 +1547,7 @@ def REI : InstVAX<0x02, (outs), (ins), "rei", []>;
 let HasMemOp = 1 in {
 
 // ASHL (0x78): arithmetic shift long. cnt.rb, src.rl, dst.wl
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1 in
 def ASHL : InstVAX<0x78, (outs),
     (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
     "ashl\t$cnt, $src, $dst", []>;
@@ -1604,13 +1604,13 @@ def MOVQ_mr : InstVAX<0x7D, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     Sched<[WriteMOV]>;
 
 // EXTZV (0xEF): extract zero-extended field. pos.rl, size.rb, base.rl, dst.wl
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth1 = 1 in
 def EXTZV : InstVAX<0xEF, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
     "extzv\t$pos, $size, $base, $dst", []>;
 
 // INSV (0xF0): insert field. src.rl, pos.rl, size.rb, base.rl
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth2 = 1 in
 def INSV : InstVAX<0xF0, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base),
     "insv\t$src, $pos, $size, $base", []>;
@@ -1641,25 +1641,25 @@ def ADDL2 : InstVAX<0xC0, (outs),
     "addl2\t$src, $dst", []>;
 
 // DECW (0xB7): decrement word
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2 in
 def DECW : InstVAX<0xB7, (outs),
     (ins VAXMemOp:$dst),
     "decw\t$dst", []>;
 
 // DECB (0x97): decrement byte
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1 in
 def DECB : InstVAX<0x97, (outs),
     (ins VAXMemOp:$dst),
     "decb\t$dst", []>;
 
 // INCW (0xB6): increment word
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2 in
 def INCW : InstVAX<0xB6, (outs),
     (ins VAXMemOp:$dst),
     "incw\t$dst", []>;
 
 // INCB (0x96): increment byte
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1 in
 def INCB : InstVAX<0x96, (outs),
     (ins VAXMemOp:$dst),
     "incb\t$dst", []>;
@@ -1701,13 +1701,13 @@ def CLRL_m : InstVAX<0xD4, (outs),
     "clrl\t$dst", []>;
 
 // CLRB (0x94): clear byte
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1 in
 def CLRB : InstVAX<0x94, (outs),
     (ins VAXMemOp:$dst),
     "clrb\t$dst", []>;
 
 // CLRW (0xB4): clear word
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2 in
 def CLRW : InstVAX<0xB4, (outs),
     (ins VAXMemOp:$dst),
     "clrw\t$dst", []>;
@@ -1804,13 +1804,13 @@ def BITL : InstVAX<0xD3, (outs),
     "bitl\t$mask, $src", []>;
 
 // BITW (0xB3): bit test word. mask.rw, src.rw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def BITW : InstVAX<0xB3, (outs),
     (ins VAXMemOp:$mask, VAXMemOp:$src),
     "bitw\t$mask, $src", []>;
 
 // BITB (0x93): bit test byte. mask.rb, src.rb
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def BITB : InstVAX<0x93, (outs),
     (ins VAXMemOp:$mask, VAXMemOp:$src),
     "bitb\t$mask, $src", []>;
@@ -1844,14 +1844,14 @@ def ACBL : InstVAX<0xF1, (outs),
 
 // ACBW (0x3D): add compare and branch word.
 // limit.rw, add.rw, index.mw, disp.bw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2 in
 def ACBW : InstVAX<0x3D, (outs),
     (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
     "acbw\t$limit, $add, $index, $disp", []>;
 
 // ACBB (0x9D): add compare and branch byte.
 // limit.rb, add.rb, index.mb, disp.bw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1 in
 def ACBB : InstVAX<0x9D, (outs),
     (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, VAXMemOp:$disp),
     "acbb\t$limit, $add, $index, $disp", []>;
@@ -1873,13 +1873,13 @@ def ACBD : InstVAX<0x6F, (outs),
 // --- Case instructions ---
 
 // CASEB (0x8F): case byte. selector.rb, base.rb, limit.rb
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1 in
 def CASEB : InstVAX<0x8F, (outs),
     (ins VAXMemOp:$sel, VAXMemOp:$base, VAXMemOp:$limit),
     "caseb\t$sel, $base, $limit", []>;
 
 // CASEW (0xAF): case word. selector.rw, base.rw, limit.rw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2 in
 def CASEW : InstVAX<0xAF, (outs),
     (ins VAXMemOp:$sel, VAXMemOp:$base, VAXMemOp:$limit),
     "casew\t$sel, $base, $limit", []>;
@@ -1894,11 +1894,13 @@ def CALLG : InstVAX<0xFA, (outs),
 // --- Stack save/restore ---
 
 // PUSHR (0xBB): push registers. mask.rw
+let MemOpWidth0 = 2 in
 def PUSHR : InstVAX<0xBB, (outs),
     (ins VAXMemOp:$mask),
     "pushr\t$mask", []>;
 
 // POPR (0xBA): pop registers. mask.rw
+let MemOpWidth0 = 2 in
 def POPR : InstVAX<0xBA, (outs),
     (ins VAXMemOp:$mask),
     "popr\t$mask", []>;
@@ -1906,14 +1908,14 @@ def POPR : InstVAX<0xBA, (outs),
 // --- String instructions ---
 
 // CMPC3 (0x29): compare characters 3-operand. len.rw, addr1.ab, addr2.ab
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth0 = 2 in
 def CMPC3 : InstVAX<0x29, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$addr1, VAXMemOp:$addr2),
     "cmpc3\t$len, $addr1, $addr2", []>;
 
 // CMPC5 (0x2D): compare characters 5-operand.
 // len1.rw, addr1.ab, fill.rb, len2.rw, addr2.ab
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth0 = 2, MemOpWidth2 = 1, MemOpWidth3 = 2 in
 def CMPC5 : InstVAX<0x2D, (outs),
     (ins VAXMemOp:$len1, VAXMemOp:$addr1, VAXMemOp:$fill,
          VAXMemOp:$len2, VAXMemOp:$addr2),
@@ -1921,7 +1923,7 @@ def CMPC5 : InstVAX<0x2D, (outs),
 
 // MOVTC (0x2E): move translated characters.
 // srclen.rw, srcaddr.ab, fill.rb, tbladdr.ab, dstlen.rw, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2, MemOpWidth2 = 1, MemOpWidth4 = 2 in
 def MOVTC : InstVAX<0x2E, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$fill,
          VAXMemOp:$tbl, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
@@ -1929,7 +1931,7 @@ def MOVTC : InstVAX<0x2E, (outs),
 
 // MOVTUC (0x2F): move translated until character.
 // srclen.rw, srcaddr.ab, esc.rb, tbladdr.ab, dstlen.rw, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5, PSW] in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2, MemOpWidth2 = 1, MemOpWidth4 = 2 in
 def MOVTUC : InstVAX<0x2F, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$esc,
          VAXMemOp:$tbl, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
@@ -1937,19 +1939,19 @@ def MOVTUC : InstVAX<0x2F, (outs),
 
 // CRC (0x0B): compute cyclic redundancy check.
 // tbl.ab, inicrc.rl, strlen.rw, stream.ab
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth2 = 2 in
 def CRC : InstVAX<0x0B, (outs),
     (ins VAXMemOp:$tbl, VAXMemOp:$inicrc, VAXMemOp:$strlen, VAXMemOp:$stream),
     "crc\t$tbl, $inicrc, $strlen, $stream", []>;
 
 // MATCHC (0x39): match characters. objlen.rw, objaddr.ab, srclen.rw, srcaddr.ab
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def MATCHC : InstVAX<0x39, (outs),
     (ins VAXMemOp:$objlen, VAXMemOp:$objaddr, VAXMemOp:$srclen, VAXMemOp:$srcaddr),
     "matchc\t$objlen, $objaddr, $srclen, $srcaddr", []>;
 
 // SPANC (0x2B): span characters. len.rw, addr.ab, tbladdr.ab, mask.rb
-let Defs = [R0, R1, R2, R3, PSW] in
+let Defs = [R0, R1, R2, R3, PSW], MemOpWidth0 = 2, MemOpWidth3 = 1 in
 def SPANC : InstVAX<0x2B, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$addr, VAXMemOp:$tbl, VAXMemOp:$mask),
     "spanc\t$len, $addr, $tbl, $mask", []>;
@@ -1957,33 +1959,37 @@ def SPANC : InstVAX<0x2B, (outs),
 // --- Privileged / system instructions ---
 
 // CHMK (0xBC): change mode to kernel. code.rw
+let MemOpWidth0 = 2 in
 def CHMK : InstVAX<0xBC, (outs),
     (ins VAXMemOp:$code),
     "chmk\t$code", []>;
 
 // CHME (0xBD): change mode to executive. code.rw
+let MemOpWidth0 = 2 in
 def CHME : InstVAX<0xBD, (outs),
     (ins VAXMemOp:$code),
     "chme\t$code", []>;
 
 // CHMS (0xBE): change mode to supervisor. code.rw
+let MemOpWidth0 = 2 in
 def CHMS : InstVAX<0xBE, (outs),
     (ins VAXMemOp:$code),
     "chms\t$code", []>;
 
 // CHMU (0xBF): change mode to user. code.rw
+let MemOpWidth0 = 2 in
 def CHMU : InstVAX<0xBF, (outs),
     (ins VAXMemOp:$code),
     "chmu\t$code", []>;
 
 // PROBER (0x0C): probe read access. mode.rb, len.rw, base.ab
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def PROBER : InstVAX<0x0C, (outs),
     (ins VAXMemOp:$mode, VAXMemOp:$len, VAXMemOp:$base),
     "prober\t$mode, $len, $base", []>;
 
 // PROBEW (0x0D): probe write access. mode.rb, len.rw, base.ab
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def PROBEW : InstVAX<0x0D, (outs),
     (ins VAXMemOp:$mode, VAXMemOp:$len, VAXMemOp:$base),
     "probew\t$mode, $len, $base", []>;
@@ -1997,7 +2003,7 @@ def INDEX : InstVAX<0x0A, (outs),
     "index\t$sub, $low, $high, $size, $idxin, $idxout", []>;
 
 // ADAWI (0x58): add aligned word interlocked. src.rw, dst.mw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def ADAWI : InstVAX<0x58, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "adawi\t$src, $dst", []>;
