@@ -131,6 +131,11 @@ private:
   shouldExpandAtomicLoadInIR(LoadInst *LI) const override;
   TargetLoweringBase::AtomicExpansionKind
   shouldExpandAtomicStoreInIR(StoreInst *SI) const override;
+
+  bool allowsMisalignedMemoryAccesses(EVT VT, unsigned AddrSpace,
+                                      Align Alignment,
+                                      MachineMemOperand::Flags Flags,
+                                      unsigned *Fast) const override;
 };
 
 } // namespace llvm
