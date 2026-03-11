@@ -1299,3 +1299,12 @@ TargetLoweringBase::AtomicExpansionKind
 VAXTargetLowering::shouldExpandAtomicStoreInIR(StoreInst *SI) const {
   return AtomicExpansionKind::NotAtomic;
 }
+
+bool VAXTargetLowering::allowsMisalignedMemoryAccesses(
+    EVT VT, unsigned AddrSpace, Align Alignment,
+    MachineMemOperand::Flags Flags, unsigned *Fast) const {
+  // VAX handles all unaligned memory accesses in hardware with no penalty.
+  if (Fast)
+    *Fast = 1;
+  return true;
+}
