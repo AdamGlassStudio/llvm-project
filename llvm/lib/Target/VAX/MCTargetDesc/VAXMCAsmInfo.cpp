@@ -13,6 +13,7 @@
 using namespace llvm;
 
 static const MCAsmInfo::AtSpecifier atSpecifiers[] = {
+    {VAX::S_ABS, "ABS"},
     {VAX::S_GOT, "GOT"},
     {VAX::S_PLT, "PLT"},
     {VAX::S_PCREL32, "PCREL32"},
@@ -38,6 +39,8 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   UseIntegratedAssembler = true;
   // VAX GAS does not support the `.bss` shorthand; use `.section .bss`.
   UsesELFSectionDirectiveForBSS = true;
+  // GAS on VAX interprets .align N as 2^N byte alignment (power-of-two).
+  AlignmentIsInBytes = false;
   // VAX instructions are variable-length (1–37 bytes). Typical instructions
   // are 2–10 bytes. Used by getInlineAsmLength to estimate inline asm size.
   MaxInstLength = 10;
