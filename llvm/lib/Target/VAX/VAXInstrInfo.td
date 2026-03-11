@@ -134,6 +134,10 @@ def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
     "movl\t$imm, $dst",
     [(store (i32 imm:$imm), VAXMemLong:$dst)]>, Sched<[WriteMOV]>;
 
+// ISel-only PC-relative variants — not visible to the asm matcher.
+// The assembler uses the _rm/_mm memory-operand forms which encode the
+// correct addressing mode via VAXAM flags (see validateTargetOperandClass).
+let isCodeGenOnly = 1 in {
 // reg <- global  (PC-relative load from global/extern data)
 def MOVL_rg : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "movl\t$sym, $dst",
@@ -176,6 +180,7 @@ def MOVAL_ba : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tblockaddress:$sym))]>,
     Sched<[WriteMOV]>;
+} // let isCodeGenOnly = 1
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
 // Atomic load/store: VAX aligned loads/stores are naturally atomic.
@@ -684,84 +689,96 @@ let Defs = [PSW] in {
 
 // MOVB (0x90) — native i8 load/store/copy (byte register class).
 // reg <- mem (byte load)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVBload : InstVAX<0x90, (outs GPRB:$dst), (ins VAXMemOp:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (load VAXMem:$src))]>;
 // reg <- globaladdr (byte load via PC-relative)
+let isCodeGenOnly = 1 in
 def MOVBload_ga : InstVAX<0x90, (outs GPRB:$dst), (ins i32imm:$sym),
     "movb\t$sym, $dst",
     [(set GPRB:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
 // mem <- reg (byte store)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store GPRB:$src, VAXMem:$dst)]>;
 // mem <- imm (byte store immediate)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store (i8 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (byte store via PC-relative)
+let isCodeGenOnly = 1 in
 def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
     "movb\t$src, $sym",
     [(store GPRB:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 // reg <- reg (byte copy; no DAG pattern — emitted by copyPhysReg)
+let isCodeGenOnly = 1 in
 def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
     "movb\t$src, $dst", []>;
 // reg <- imm (byte immediate load)
+let isCodeGenOnly = 1 in
 def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins i8imm:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (i8 imm:$src))]>;
 
 // MOVW (0xB0) — native i16 load/store/copy (word register class).
 // reg <- mem (word load)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVWload : InstVAX<0xB0, (outs GPRW:$dst), (ins VAXMemOp:$src),
     "movw\t$src, $dst",
     [(set GPRW:$dst, (load VAXMem:$src))]>;
 // reg <- globaladdr (word load via PC-relative)
+let isCodeGenOnly = 1 in
 def MOVWload_ga : InstVAX<0xB0, (outs GPRW:$dst), (ins i32imm:$sym),
     "movw\t$sym, $dst",
     [(set GPRW:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
 // mem <- reg (word store)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store GPRW:$src, VAXMem:$dst)]>;
 // mem <- imm (word store immediate)
-let HasMemOp = 1 in
+let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store (i16 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (word store via PC-relative)
+let isCodeGenOnly = 1 in
 def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
     "movw\t$src, $sym",
     [(store GPRW:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 // reg <- reg (word copy; no DAG pattern — emitted by copyPhysReg)
+let isCodeGenOnly = 1 in
 def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
     "movw\t$src, $dst", []>;
 // reg <- imm (word immediate load)
+let isCodeGenOnly = 1 in
 def MOVWri : InstVAX<0xB0, (outs GPRW:$dst), (ins i16imm:$src),
     "movw\t$src, $dst",
     [(set GPRW:$dst, (i16 imm:$src))]>;
 
 // MOVZBL (0x9A) reg <- reg: zero-extend i8 to i32.
+let isCodeGenOnly = 1 in
 def MOVZBL_rr : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins GPRB:$src),
     "movzbl\t$src, $dst",
     [(set GPRnoPC:$dst, (zext GPRB:$src))]>;
 
 // CVTBL (0x98) reg <- reg: sign-extend i8 to i32.
+let isCodeGenOnly = 1 in
 def CVTBL_rr_ext : InstVAX<0x98, (outs GPRnoPC:$dst), (ins GPRB:$src),
     "cvtbl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRB:$src))]>;
 
 // MOVZWL (0x3C) reg <- reg: zero-extend i16 to i32.
+let isCodeGenOnly = 1 in
 def MOVZWL_rr : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "movzwl\t$src, $dst",
     [(set GPRnoPC:$dst, (zext GPRW:$src))]>;
 
 // CVTWL (0x32) reg <- reg: sign-extend i16 to i32.
+let isCodeGenOnly = 1 in
 def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "cvtwl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRW:$src))]>;
@@ -773,13 +790,13 @@ def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
 def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
 
 // CVTBW (0x99) reg <- reg: sign-extend i8 to i16.
-let Defs = [PSW] in
+let Defs = [PSW], isCodeGenOnly = 1 in
 def CVTBW_rr : InstVAX<0x99, (outs GPRW:$dst), (ins GPRB:$src),
     "cvtbw\t$src, $dst",
     [(set GPRW:$dst, (sext GPRB:$src))]>;
 
 // MOVZBW (0x9B) reg <- reg: zero-extend i8 to i16.
-let Defs = [PSW] in
+let Defs = [PSW], isCodeGenOnly = 1 in
 def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
     "movzbw\t$src, $dst",
     [(set GPRW:$dst, (zext GPRB:$src))]>;
@@ -796,9 +813,7 @@ def : Pat<(i8  (trunc GPRW:$src)),    (EXTRACT_SUBREG GPRW:$src, sub_8lo)>;
 // Phase 33B+ — Native byte/word arithmetic
 //===----------------------------------------------------------------------===//
 
-let Defs = [PSW] in {
-
-// ADDB3 (0x81) — byte add: dst = src1 + src2
+let Defs = [PSW], isCodeGenOnly = 1 in {
 def ADDB3_rr : InstVAX<0x81, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
     "addb3\t$a, $b, $dst",
     [(set GPRB:$dst, (add GPRB:$a, GPRB:$b))]> {
@@ -1156,7 +1171,7 @@ def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
 
 // PUSHAL with PC-relative symbol operand — ISel patterns for pushing addresses.
 // Parallel to MOVAL_ga/cp/ba but push instead of move-to-register.
-let Defs = [SP, PSW], Uses = [SP] in {
+let Defs = [SP, PSW], Uses = [SP], isCodeGenOnly = 1 in {
 def PUSHAL_ga : InstVAX<0xDF, (outs), (ins i32imm:$sym),
     "pushal\t$sym",
     [(vax_pushl (vax_pcrelwrapper tglobaladdr:$sym))]>,
@@ -1538,13 +1553,13 @@ def MFPR : InstVAX<0xDB, (outs), (ins VAXMemOp:$procreg, VAXMemOp:$dst),
     "mfpr\t$procreg, $dst", []>;
 
 // FFS (0xEA): find first set bit. startpos.rl, size.rb, base.rl, dst.wl
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth1 = 1 in
 def FFS : InstVAX<0xEA, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
     "ffs\t$pos, $size, $base, $dst", []>;
 
 // FFC (0xEB): find first clear bit. startpos.rl, size.rb, base.rl, dst.wl
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth1 = 1 in
 def FFC : InstVAX<0xEB, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
     "ffc\t$pos, $size, $base, $dst", []>;
@@ -1918,7 +1933,7 @@ def ACBF : InstVAX<0x4F, (outs),
 
 // ACBD (0x6F): add compare and branch D_float.
 // limit.rd, add.rd, index.md, disp.bw
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 3, MemOpWidth1 = 3, MemOpWidth2 = 3 in
 def ACBD : InstVAX<0x6F, (outs),
     (ins VAXMemOp:$limit, VAXMemOp:$add, VAXMemOp:$index, brtarget16:$disp),
     "acbd\t$limit, $add, $index, $disp", []>;
@@ -2144,8 +2159,10 @@ def PUSHL_m : InstVAX<0xDD, (outs), (ins VAXMemOp:$src),
     "pushl\t$src", []>;
 
 // TSTB/TSTW/TSTL: test (set condition codes). TSTL_m exists; add byte/word.
+let MemOpWidth0 = 1 in
 def TSTB_m : InstVAX<0x95, (outs), (ins VAXMemOp:$a),
     "tstb\t$a", []>;
+let MemOpWidth0 = 2 in
 def TSTW_m : InstVAX<0xB5, (outs), (ins VAXMemOp:$a),
     "tstw\t$a", []>;
 
@@ -2154,26 +2171,34 @@ def INCL_m : InstVAX<0xD6, (outs), (ins VAXMemOp:$dst),
     "incl\t$dst", []>;
 def DECL_m : InstVAX<0xD7, (outs), (ins VAXMemOp:$dst),
     "decl\t$dst", []>;
+let MemOpWidth0 = 1 in {
 def INCB_m : InstVAX<0x96, (outs), (ins VAXMemOp:$dst),
     "incb\t$dst", []>;
 def DECB_m : InstVAX<0x97, (outs), (ins VAXMemOp:$dst),
     "decb\t$dst", []>;
+} // MemOpWidth0 = 1
+let MemOpWidth0 = 2 in {
 def INCW_m : InstVAX<0xB6, (outs), (ins VAXMemOp:$dst),
     "incw\t$dst", []>;
 def DECW_m : InstVAX<0xB7, (outs), (ins VAXMemOp:$dst),
     "decw\t$dst", []>;
+} // MemOpWidth0 = 2
 
 // CLRB/CLRW: clear byte/word. (CLRL_m already exists.)
+let MemOpWidth0 = 1 in
 def CLRB_m : InstVAX<0x94, (outs), (ins VAXMemOp:$dst),
     "clrb\t$dst", []>;
+let MemOpWidth0 = 2 in
 def CLRW_m : InstVAX<0xB4, (outs), (ins VAXMemOp:$dst),
     "clrw\t$dst", []>;
+let MemOpWidth0 = 3 in
 def CLRD_m : InstVAX<0x7C, (outs), (ins VAXMemOp:$dst),
     "clrd\t$dst", []>;
 
 // TSTF/TSTD: test floating-point.
 def TSTF_m : InstVAX<0x53, (outs), (ins VAXMemOp:$a),
     "tstf\t$a", []>;
+let MemOpWidth0 = 3 in
 def TSTD_m : InstVAX<0x73, (outs), (ins VAXMemOp:$a),
     "tstd\t$a", []>;
 
@@ -2194,68 +2219,87 @@ def MOVL_mm : InstVAX<0xD0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movl\t$src, $dst", []>;
 
 // MOVB/MOVW: move byte/word. All-memory.
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def MOVB_mm : InstVAX<0x90, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movb\t$src, $dst", []>;
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def MOVW_mm : InstVAX<0xB0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movw\t$src, $dst", []>;
 
 // MOVQ: move quadword. All-memory.
+let MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def MOVQ_mm : InstVAX<0x7D, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movq\t$src, $dst", []>;
 
 // CMPL/CMPB/CMPW: compare. All-memory.
 def CMPL_mm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpl\t$a, $b", []>;
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def CMPB_mm : InstVAX<0x91, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpb\t$a, $b", []>;
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def CMPW_mm : InstVAX<0xB1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpw\t$a, $b", []>;
 def CMPF_mm : InstVAX<0x51, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpf\t$a, $b", []>;
+let MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def CMPD_mm : InstVAX<0x71, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpd\t$a, $b", []>;
 
 // MCOML/MCOMB/MCOMW: move complement.
 def MCOML_mm : InstVAX<0xD2, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mcoml\t$src, $dst", []>;
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def MCOMB_mm : InstVAX<0x92, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mcomb\t$src, $dst", []>;
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def MCOMW_mm : InstVAX<0xB2, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mcomw\t$src, $dst", []>;
 
 // MNEGL/MNEGB/MNEGW/MNEGF/MNEGD: move negated. (MNEGL_m exists as single-out.)
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def MNEGB_mm : InstVAX<0x8E, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mnegb\t$src, $dst", []>;
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def MNEGW_mm : InstVAX<0xAE, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mnegw\t$src, $dst", []>;
 def MNEGL_mm : InstVAX<0xCE, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mnegl\t$src, $dst", []>;
 def MNEGF_mm : InstVAX<0x52, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mnegf\t$src, $dst", []>;
+let MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def MNEGD_mm : InstVAX<0x72, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mnegd\t$src, $dst", []>;
 
 // BITL/BITB/BITW: bit test.
 def BITL_mm : InstVAX<0xD3, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "bitl\t$a, $b", []>;
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def BITB_mm : InstVAX<0x93, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "bitb\t$a, $b", []>;
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def BITW_mm : InstVAX<0xB3, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "bitw\t$a, $b", []>;
 
 // MOVZBL/MOVZBW/MOVZWL: move zero-extended. All-memory.
+let MemOpWidth0 = 1 in
 def MOVZBL_mm : InstVAX<0x9A, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movzbl\t$src, $dst", []>;
+let MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def MOVZBW_mm : InstVAX<0x9B, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movzbw\t$src, $dst", []>;
+let MemOpWidth0 = 2 in
 def MOVZWL_mm : InstVAX<0x3C, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movzwl\t$src, $dst", []>;
 
 // CVTBL/CVTBW/CVTWL: convert (sign-extend). All-memory.
+let MemOpWidth0 = 1 in
 def CVTBL_mm : InstVAX<0x98, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtbl\t$src, $dst", []>;
+let MemOpWidth0 = 1, MemOpWidth1 = 2 in
 def CVTBW_mm : InstVAX<0x99, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtbw\t$src, $dst", []>;
+let MemOpWidth0 = 2 in
 def CVTWL_mm : InstVAX<0x32, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtwl\t$src, $dst", []>;
 
@@ -2264,18 +2308,23 @@ def CVTFL_mm : InstVAX<0x4A, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtfl\t$src, $dst", []>;
 def CVTLF_mm : InstVAX<0x4E, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtlf\t$src, $dst", []>;
+let MemOpWidth1 = 3 in
 def CVTFD_mm : InstVAX<0x56, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtfd\t$src, $dst", []>;
+let MemOpWidth0 = 3 in
 def CVTDF_mm : InstVAX<0x76, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtdf\t$src, $dst", []>;
+let MemOpWidth0 = 3 in
 def CVTDL_mm : InstVAX<0x6A, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtdl\t$src, $dst", []>;
+let MemOpWidth1 = 3 in
 def CVTLD_mm : InstVAX<0x6E, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtld\t$src, $dst", []>;
 
 // MOVF/MOVD: move float. All-memory.
 def MOVF_mm : InstVAX<0x50, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movf\t$src, $dst", []>;
+let MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def MOVD_mm : InstVAX<0x70, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movd\t$src, $dst", []>;
 
@@ -2312,6 +2361,7 @@ def XORL2_mm : InstVAX<0xCC, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "xorl2\t$src, $dst", []>;
 
 // 2-operand byte/word ALU: all-memory.
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in {
 def ADDB2_mm : InstVAX<0x80, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "addb2\t$src, $dst", []>;
 def SUBB2_mm : InstVAX<0x82, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2322,6 +2372,8 @@ def BICB2_mm : InstVAX<0x8A, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "bicb2\t$src, $dst", []>;
 def XORB2_mm : InstVAX<0x8C, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "xorb2\t$src, $dst", []>;
+} // MemOpWidth0 = 1, MemOpWidth1 = 1
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in {
 def ADDW2_mm : InstVAX<0xA0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "addw2\t$src, $dst", []>;
 def SUBW2_mm : InstVAX<0xA2, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2332,6 +2384,7 @@ def BICW2_mm : InstVAX<0xAA, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "bicw2\t$src, $dst", []>;
 def XORW2_mm : InstVAX<0xAC, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "xorw2\t$src, $dst", []>;
+} // MemOpWidth0 = 2, MemOpWidth1 = 2
 
 // 2-operand F_float ALU: all-memory.
 def ADDF2_mm : InstVAX<0x40, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2344,6 +2397,7 @@ def DIVF2_mm : InstVAX<0x46, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "divf2\t$src, $dst", []>, Sched<[WriteFPDIV]>;
 
 // 2-operand D_float ALU: all-memory.
+let MemOpWidth0 = 3, MemOpWidth1 = 3 in {
 def ADDD2_mm : InstVAX<0x60, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "addd2\t$src, $dst", []>;
 def SUBD2_mm : InstVAX<0x62, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2352,14 +2406,18 @@ def MULD2_mm : InstVAX<0x64, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "muld2\t$src, $dst", []>, Sched<[WriteFPDALU]>;
 def DIVD2_mm : InstVAX<0x66, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "divd2\t$src, $dst", []>, Sched<[WriteFPDDIV]>;
+} // MemOpWidth0 = 3, MemOpWidth1 = 3
 
 // ROTL/ASHL: shift. 3-operand, all-memory.
+let MemOpWidth0 = 1 in {
 def ASHL_mm : InstVAX<0x78, (outs), (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
     "ashl\t$cnt, $src, $dst", []>;
-def ASHQ_mm : InstVAX<0x79, (outs), (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
-    "ashq\t$cnt, $src, $dst", []>;
 def ROTL_mm : InstVAX<0x9C, (outs), (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
     "rotl\t$cnt, $src, $dst", []>;
+} // MemOpWidth0 = 1
+let MemOpWidth0 = 1, MemOpWidth1 = 3, MemOpWidth2 = 3 in
+def ASHQ_mm : InstVAX<0x79, (outs), (ins VAXMemOp:$cnt, VAXMemOp:$src, VAXMemOp:$dst),
+    "ashq\t$cnt, $src, $dst", []>;
 
 // --- Three-operand instructions (3 mem operands) ---
 
@@ -2380,6 +2438,7 @@ def XORL3_mm : InstVAX<0xCD, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
     "xorl3\t$a, $b, $dst", []>;
 
 // 3-operand byte ALU: all-memory.
+let MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1 in {
 def ADDB3_mm : InstVAX<0x81, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "addb3\t$a, $b, $dst", []>;
 def SUBB3_mm : InstVAX<0x83, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2390,8 +2449,10 @@ def BICB3_mm : InstVAX<0x8B, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
     "bicb3\t$a, $b, $dst", []>;
 def XORB3_mm : InstVAX<0x8D, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "xorb3\t$a, $b, $dst", []>;
+} // MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1
 
 // 3-operand word ALU: all-memory.
+let MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2 in {
 def ADDW3_mm : InstVAX<0xA1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "addw3\t$a, $b, $dst", []>;
 def SUBW3_mm : InstVAX<0xA3, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2402,6 +2463,7 @@ def BICW3_mm : InstVAX<0xAB, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
     "bicw3\t$a, $b, $dst", []>;
 def XORW3_mm : InstVAX<0xAD, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "xorw3\t$a, $b, $dst", []>;
+} // MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2
 
 // 3-operand F_float ALU: all-memory.
 def ADDF3_mm : InstVAX<0x41, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2414,6 +2476,7 @@ def DIVF3_mm : InstVAX<0x47, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
     "divf3\t$a, $b, $dst", []>, Sched<[WriteFPDIV]>;
 
 // 3-operand D_float ALU: all-memory.
+let MemOpWidth0 = 3, MemOpWidth1 = 3, MemOpWidth2 = 3 in {
 def ADDD3_mm : InstVAX<0x61, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "addd3\t$a, $b, $dst", []>;
 def SUBD3_mm : InstVAX<0x63, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
@@ -2422,6 +2485,7 @@ def MULD3_mm : InstVAX<0x65, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
     "muld3\t$a, $b, $dst", []>, Sched<[WriteFPDALU]>;
 def DIVD3_mm : InstVAX<0x67, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "divd3\t$a, $b, $dst", []>, Sched<[WriteFPDDIV]>;
+} // MemOpWidth0 = 3, MemOpWidth1 = 3, MemOpWidth2 = 3
 
 } // Defs = [PSW]
 
@@ -2455,22 +2519,27 @@ let HasMemOp = 1 in {
 let Defs = [PSW] in {
 
 // CVTLB (0xF6): convert long to byte. src.rl, dst.wb
+let MemOpWidth1 = 1 in
 def CVTLB : InstVAX<0xF6, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtlb\t$src, $dst", []>;
 
 // CVTLW (0xF7): convert long to word. src.rl, dst.ww
+let MemOpWidth1 = 2 in
 def CVTLW : InstVAX<0xF7, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtlw\t$src, $dst", []>;
 
 // CVTWB (0x33): convert word to byte. src.rw, dst.wb
+let MemOpWidth0 = 2, MemOpWidth1 = 1 in
 def CVTWB : InstVAX<0x33, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtwb\t$src, $dst", []>;
 
 // CVTFB (0x48): convert F_float to byte. src.rf, dst.wb
+let MemOpWidth1 = 1 in
 def CVTFB : InstVAX<0x48, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtfb\t$src, $dst", []>;
 
 // CVTFW (0x49): convert F_float to word. src.rf, dst.ww
+let MemOpWidth1 = 2 in
 def CVTFW : InstVAX<0x49, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtfw\t$src, $dst", []>;
 
@@ -2479,185 +2548,226 @@ def CVTRFL : InstVAX<0x4B, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtrfl\t$src, $dst", []>;
 
 // CVTBF (0x4C): convert byte to F_float. src.rb, dst.wf
+let MemOpWidth0 = 1 in
 def CVTBF : InstVAX<0x4C, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtbf\t$src, $dst", []>;
 
 // CVTWF (0x4D): convert word to F_float. src.rw, dst.wf
+let MemOpWidth0 = 2 in
 def CVTWF : InstVAX<0x4D, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtwf\t$src, $dst", []>;
 
 // CVTDB (0x68): convert D_float to byte. src.rd, dst.wb
+let MemOpWidth0 = 3, MemOpWidth1 = 1 in
 def CVTDB : InstVAX<0x68, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtdb\t$src, $dst", []>;
 
 // CVTDW (0x69): convert D_float to word. src.rd, dst.ww
+let MemOpWidth0 = 3, MemOpWidth1 = 2 in
 def CVTDW : InstVAX<0x69, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtdw\t$src, $dst", []>;
 
 // CVTRDL (0x6B): convert rounded D_float to long. src.rd, dst.wl
+let MemOpWidth0 = 3 in
 def CVTRDL : InstVAX<0x6B, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtrdl\t$src, $dst", []>;
 
 // CVTBD (0x6C): convert byte to D_float. src.rb, dst.wd
+let MemOpWidth0 = 1, MemOpWidth1 = 3 in
 def CVTBD : InstVAX<0x6C, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtbd\t$src, $dst", []>;
 
 // CVTWD (0x6D): convert word to D_float. src.rw, dst.wd
+let MemOpWidth0 = 2, MemOpWidth1 = 3 in
 def CVTWD : InstVAX<0x6D, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "cvtwd\t$src, $dst", []>;
 
 // Byte/word multiply/divide (0x84-0x87, 0xA4-0xA7).
+let MemOpWidth0 = 1, MemOpWidth1 = 1 in {
 def MULB2 : InstVAX<0x84, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mulb2\t$src, $dst", []>;
-def MULB3 : InstVAX<0x85, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "mulb3\t$a, $b, $dst", []>;
 def DIVB2 : InstVAX<0x86, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "divb2\t$src, $dst", []>;
+} // MemOpWidth0 = 1, MemOpWidth1 = 1
+let MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1 in {
+def MULB3 : InstVAX<0x85, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
+    "mulb3\t$a, $b, $dst", []>;
 def DIVB3 : InstVAX<0x87, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "divb3\t$a, $b, $dst", []>;
+} // MemOpWidth0 = 1, MemOpWidth1 = 1, MemOpWidth2 = 1
+let MemOpWidth0 = 2, MemOpWidth1 = 2 in {
 def MULW2 : InstVAX<0xA4, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mulw2\t$src, $dst", []>;
-def MULW3 : InstVAX<0xA5, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
-    "mulw3\t$a, $b, $dst", []>;
 def DIVW2 : InstVAX<0xA6, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "divw2\t$src, $dst", []>;
+} // MemOpWidth0 = 2, MemOpWidth1 = 2
+let MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2 in {
+def MULW3 : InstVAX<0xA5, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
+    "mulw3\t$a, $b, $dst", []>;
 def DIVW3 : InstVAX<0xA7, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "divw3\t$a, $b, $dst", []>;
+} // MemOpWidth0 = 2, MemOpWidth1 = 2, MemOpWidth2 = 2
 
 // EMODF (0x54): extended modulus F_float. mulr.rf, mulrx.rb, muld.rf, int.wl, fract.wf
+let MemOpWidth1 = 1 in
 def EMODF_m : InstVAX<0x54, (outs),
     (ins VAXMemOp:$mulr, VAXMemOp:$mulrx, VAXMemOp:$muld,
          VAXMemOp:$int, VAXMemOp:$fract),
     "emodf\t$mulr, $mulrx, $muld, $int, $fract", []>;
 
 // EMODD (0x74): extended modulus D_float.
+let MemOpWidth0 = 3, MemOpWidth1 = 1, MemOpWidth2 = 3, MemOpWidth4 = 3 in
 def EMODD_m : InstVAX<0x74, (outs),
     (ins VAXMemOp:$mulr, VAXMemOp:$mulrx, VAXMemOp:$muld,
          VAXMemOp:$int, VAXMemOp:$fract),
     "emodd\t$mulr, $mulrx, $muld, $int, $fract", []>;
 
 // POLYF (0x55): evaluate polynomial F_float. arg.rf, degree.rw, tbladdr.ab
+let MemOpWidth1 = 2 in
 def POLYF_m : InstVAX<0x55, (outs),
     (ins VAXMemOp:$arg, VAXMemOp:$degree, VAXMemOp:$tbladdr),
     "polyf\t$arg, $degree, $tbladdr", []>;
 
 // POLYD (0x75): evaluate polynomial D_float. arg.rd, degree.rw, tbladdr.ab
+let MemOpWidth0 = 3, MemOpWidth1 = 2 in
 def POLYD_m : InstVAX<0x75, (outs),
     (ins VAXMemOp:$arg, VAXMemOp:$degree, VAXMemOp:$tbladdr),
     "polyd\t$arg, $degree, $tbladdr", []>;
 
 // BISPSW (0xB8): bit set PSW. mask.rw
+let MemOpWidth0 = 2 in
 def BISPSW : InstVAX<0xB8, (outs), (ins VAXMemOp:$mask),
     "bispsw\t$mask", []>;
 
 // BICPSW (0xB9): bit clear PSW. mask.rw
+let MemOpWidth0 = 2 in
 def BICPSW : InstVAX<0xB9, (outs), (ins VAXMemOp:$mask),
     "bicpsw\t$mask", []>;
 
 // CMPV (0xEC): compare field. pos.rl, size.rb, base.vb, src.rl
+let MemOpWidth1 = 1 in
 def CMPV : InstVAX<0xEC, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$src),
     "cmpv\t$pos, $size, $base, $src", []>;
 
 // CMPZV (0xED): compare zero-extended field. pos.rl, size.rb, base.vb, src.rl
+let MemOpWidth1 = 1 in
 def CMPZV : InstVAX<0xED, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$src),
     "cmpzv\t$pos, $size, $base, $src", []>;
 
 // EXTV (0xEE): extract field. pos.rl, size.rb, base.vb, dst.wl
+let MemOpWidth1 = 1 in
 def EXTV : InstVAX<0xEE, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$size, VAXMemOp:$base, VAXMemOp:$dst),
     "extv\t$pos, $size, $base, $dst", []>;
 
 // Decimal string instructions (packed decimal).
 // CVTPS (0x08): convert packed to string. srclen.rw, srcaddr.ab, dstlen.rw, dstaddr.ab
+let MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def CVTPS_m : InstVAX<0x08, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvtps\t$srclen, $srcaddr, $dstlen, $dstaddr", []>;
 
 // CVTSP (0x09): convert string to packed.
+let MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def CVTSP_m : InstVAX<0x09, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvtsp\t$srclen, $srcaddr, $dstlen, $dstaddr", []>;
 
 // ADDP4 (0x20): add packed 4-operand.
+let MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def ADDP4 : InstVAX<0x20, (outs),
     (ins VAXMemOp:$addlen, VAXMemOp:$addaddr, VAXMemOp:$sumlen, VAXMemOp:$sumaddr),
     "addp4\t$addlen, $addaddr, $sumlen, $sumaddr", []>;
 
 // ADDP6 (0x21): add packed 6-operand.
+let MemOpWidth0 = 2, MemOpWidth2 = 2, MemOpWidth4 = 2 in
 def ADDP6 : InstVAX<0x21, (outs),
     (ins VAXMemOp:$add1len, VAXMemOp:$add1addr, VAXMemOp:$add2len,
          VAXMemOp:$add2addr, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "addp6\t$add1len, $add1addr, $add2len, $add2addr, $dstlen, $dstaddr", []>;
 
 // SUBP4 (0x22): subtract packed 4-operand.
+let MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def SUBP4 : InstVAX<0x22, (outs),
     (ins VAXMemOp:$sublen, VAXMemOp:$subaddr, VAXMemOp:$diflen, VAXMemOp:$difaddr),
     "subp4\t$sublen, $subaddr, $diflen, $difaddr", []>;
 
 // SUBP6 (0x23): subtract packed 6-operand.
+let MemOpWidth0 = 2, MemOpWidth2 = 2, MemOpWidth4 = 2 in
 def SUBP6 : InstVAX<0x23, (outs),
     (ins VAXMemOp:$sublen, VAXMemOp:$subaddr, VAXMemOp:$minlen,
          VAXMemOp:$minaddr, VAXMemOp:$diflen, VAXMemOp:$difaddr),
     "subp6\t$sublen, $subaddr, $minlen, $minaddr, $diflen, $difaddr", []>;
 
 // CVTPT (0x24): convert packed to trailing.
+let MemOpWidth0 = 2, MemOpWidth3 = 2 in
 def CVTPT : InstVAX<0x24, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$tbladdr,
          VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvtpt\t$srclen, $srcaddr, $tbladdr, $dstlen, $dstaddr", []>;
 
 // MULP (0x25): multiply packed.
+let MemOpWidth0 = 2, MemOpWidth2 = 2, MemOpWidth4 = 2 in
 def MULP : InstVAX<0x25, (outs),
     (ins VAXMemOp:$mulrlen, VAXMemOp:$mulraddr, VAXMemOp:$muldlen,
          VAXMemOp:$muldaddr, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "mulp\t$mulrlen, $mulraddr, $muldlen, $muldaddr, $dstlen, $dstaddr", []>;
 
 // CVTTP (0x26): convert trailing to packed.
+let MemOpWidth0 = 2, MemOpWidth3 = 2 in
 def CVTTP : InstVAX<0x26, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$tbladdr,
          VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvttp\t$srclen, $srcaddr, $tbladdr, $dstlen, $dstaddr", []>;
 
 // DIVP (0x27): divide packed.
+let MemOpWidth0 = 2, MemOpWidth2 = 2, MemOpWidth4 = 2 in
 def DIVP : InstVAX<0x27, (outs),
     (ins VAXMemOp:$divrlen, VAXMemOp:$divraddr, VAXMemOp:$divdlen,
          VAXMemOp:$divdaddr, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "divp\t$divrlen, $divraddr, $divdlen, $divdaddr, $dstlen, $dstaddr", []>;
 
 // MOVP (0x34): move packed. len.rw, srcaddr.ab, dstaddr.ab
+let MemOpWidth0 = 2 in
 def MOVP : InstVAX<0x34, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$srcaddr, VAXMemOp:$dstaddr),
     "movp\t$len, $srcaddr, $dstaddr", []>;
 
 // CMPP3 (0x35): compare packed 3-operand. len.rw, src1addr.ab, src2addr.ab
+let MemOpWidth0 = 2 in
 def CMPP3 : InstVAX<0x35, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$src1addr, VAXMemOp:$src2addr),
     "cmpp3\t$len, $src1addr, $src2addr", []>;
 
 // CVTPL (0x36): convert packed to long. srclen.rw, srcaddr.ab, dst.wl
+let MemOpWidth0 = 2 in
 def CVTPL : InstVAX<0x36, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$dst),
     "cvtpl\t$srclen, $srcaddr, $dst", []>;
 
 // CMPP4 (0x37): compare packed 4-operand.
+let MemOpWidth0 = 2, MemOpWidth2 = 2 in
 def CMPP4 : InstVAX<0x37, (outs),
     (ins VAXMemOp:$src1len, VAXMemOp:$src1addr, VAXMemOp:$src2len, VAXMemOp:$src2addr),
     "cmpp4\t$src1len, $src1addr, $src2len, $src2addr", []>;
 
 // EDITPC (0x38): edit packed to character.
+let MemOpWidth0 = 2 in
 def EDITPC : InstVAX<0x38, (outs),
     (ins VAXMemOp:$srclen, VAXMemOp:$srcaddr, VAXMemOp:$pattern, VAXMemOp:$dstaddr),
     "editpc\t$srclen, $srcaddr, $pattern, $dstaddr", []>;
 
 // ASHP (0xF8): arithmetic shift and round packed.
+let MemOpWidth0 = 1, MemOpWidth1 = 2, MemOpWidth3 = 1, MemOpWidth4 = 2 in
 def ASHP : InstVAX<0xF8, (outs),
     (ins VAXMemOp:$cnt, VAXMemOp:$srclen, VAXMemOp:$srcaddr,
          VAXMemOp:$round, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "ashp\t$cnt, $srclen, $srcaddr, $round, $dstlen, $dstaddr", []>;
 
 // CVTLP (0xF9): convert long to packed. src.rl, dstlen.rw, dstaddr.ab
+let MemOpWidth1 = 2 in
 def CVTLP : InstVAX<0xF9, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dstlen, VAXMemOp:$dstaddr),
     "cvtlp\t$src, $dstlen, $dstaddr", []>;
@@ -2670,7 +2780,7 @@ def CASEL_mm : InstVAX<0xCF, (outs),
     "casel\t$selector, $base, $limit", []>;
 
 // ADAWI (0x58): add aligned word interlocked. All-memory.
-let Defs = [PSW] in
+let Defs = [PSW], MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def ADAWI_mm : InstVAX<0x58, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "adawi\t$src, $dst", []>;
 

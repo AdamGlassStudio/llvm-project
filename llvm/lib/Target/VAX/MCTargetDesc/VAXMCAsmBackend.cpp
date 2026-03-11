@@ -139,6 +139,9 @@ public:
     // BRB can be relaxed to BRW.
     if (Opcode == VAX::BRB)
       return true;
+    // BSBB can be relaxed to BSBW.
+    if (Opcode == VAX::BSBB)
+      return true;
     // Conditional branches can be relaxed to inverted-Bcc + BRW.
     if (isCondBranch(Opcode))
       return true;
@@ -191,6 +194,10 @@ public:
                         const MCSubtargetInfo &STI) const override {
     if (Inst.getOpcode() == VAX::BRB) {
       Inst.setOpcode(VAX::BRW);
+      return;
+    }
+    if (Inst.getOpcode() == VAX::BSBB) {
+      Inst.setOpcode(VAX::BSBW);
       return;
     }
     // Conditional branch relaxation: Bcc → LongBcc (inverted-Bcc + BRW).
