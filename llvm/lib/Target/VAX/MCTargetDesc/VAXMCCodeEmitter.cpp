@@ -85,6 +85,10 @@ private:
   /// displacement (not an operand-specifier branch like JMP).
   bool isBranch(unsigned Opcode) const;
 
+  /// Expand a LongBcc pseudo into an inverted Bcc + BRW sequence.
+  void expandLongCondBr(const MCInst &MI, SmallVectorImpl<char> &CB,
+                        SmallVectorImpl<MCFixup> &Fixups) const;
+
   /// Return the displacement size for a branch opcode (1 or 2 bytes).
   unsigned getBranchDispSize(unsigned Opcode) const;
 
@@ -408,6 +412,51 @@ void VAXMCCodeEmitter::emitBranchDisp(const MCOperand &Target,
     CB.push_back(0);
 }
 
+/// Return the hardware opcode byte for the inverted condition of a LongBcc.
+static uint8_t getInvertedCondBranchHWOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case VAX::LongBEQL:  return 0x12; // BNEQ
+  case VAX::LongBNEQ:  return 0x13; // BEQL
+  case VAX::LongBGTR:  return 0x15; // BLEQ
+  case VAX::LongBGEQ:  return 0x19; // BLSS
+  case VAX::LongBLSS:  return 0x18; // BGEQ
+  case VAX::LongBLEQ:  return 0x14; // BGTR
+  case VAX::LongBGTRU: return 0x1B; // BLEQU
+  case VAX::LongBGEQU: return 0x1F; // BLSSU
+  case VAX::LongBLSSU: return 0x1E; // BGEQU
+  case VAX::LongBLEQU: return 0x1A; // BGTRU
+  default:
+    llvm_unreachable("Not a long conditional branch pseudo");
+  }
+}
+
+void VAXMCCodeEmitter::expandLongCondBr(const MCInst &MI,
+                                        SmallVectorImpl<char> &CB,
+                                        SmallVectorImpl<MCFixup> &Fixups) const {
+  unsigned StartByte = CB.size();
+
+  // Emit the inverted conditional branch with displacement +3.
+  // This skips over the 3-byte BRW that follows.
+  //   [inverted Bcc opcode] [+3]     ← 2 bytes
+  //   [BRW opcode=0x31] [disp16]     ← 3 bytes
+  // The Bcc displacement is PC-relative from the byte after the disp field,
+  // i.e., from offset +2.  We need to reach offset +5, so disp = +3.
+  CB.push_back(static_cast<char>(getInvertedCondBranchHWOpcode(MI.getOpcode())));
+  CB.push_back(static_cast<char>(3));
+
+  // Emit BRW (opcode 0x31) with the original target.
+  CB.push_back(static_cast<char>(0x31));
+  const MCOperand &Target = MI.getOperand(0);
+  if (Target.isExpr()) {
+    Fixups.push_back(
+        MCFixup::create(CB.size() - StartByte, Target.getExpr(),
+                        MCFixupKind(VAX::fixup_vax_pcrel_16),
+                        /*PCRel=*/true));
+  }
+  CB.push_back(0);
+  CB.push_back(0);
+}
+
 bool VAXMCCodeEmitter::isBranch(unsigned Opcode) const {
   switch (Opcode) {
   case VAX::BRB: case VAX::BRW:
@@ -449,6 +498,20 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
                                          const MCSubtargetInfo &STI) const {
   unsigned Opcode = MI.getOpcode();
   const MCInstrDesc &Desc = MCII.get(Opcode);
+
+  // Handle long conditional branch pseudos before the general isPseudo check.
+  // These expand to an inverted Bcc + BRW two-instruction sequence.
+  switch (Opcode) {
+  case VAX::LongBEQL: case VAX::LongBNEQ:
+  case VAX::LongBGTR: case VAX::LongBGEQ:
+  case VAX::LongBLSS: case VAX::LongBLEQ:
+  case VAX::LongBGTRU: case VAX::LongBGEQU:
+  case VAX::LongBLSSU: case VAX::LongBLEQU:
+    expandLongCondBr(MI, CB, Fixups);
+    return;
+  default:
+    break;
+  }
 
   // Extract hardware opcode and flags from TSFlags.
   // Bit 0: HasMemOp, Bits 1-16: HWOpcode.
