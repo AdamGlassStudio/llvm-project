@@ -579,6 +579,26 @@ def BLEQU : InstVAX<0x1B, (outs), (ins brtarget:$dst), "blequ\t$dst",
     Sched<[WriteBRcc]>;
 }
 
+// Long conditional branch pseudos for MC relaxation.
+// When a Bcc target is out of 8-bit displacement range, the MC relaxation pass
+// replaces it with one of these.  The MCCodeEmitter expands each to an
+// inverted Bcc (+3) + BRW (target) sequence.
+// Size = 5 bytes: 2-byte inverted Bcc (opcode + 1-byte disp) +
+//                 3-byte BRW (opcode + 2-byte disp).
+let isBranch = 1, isTerminator = 1, hasSideEffects = 0,
+    mayStore = 0, mayLoad = 0, hasNoSchedulingInfo = 1, Size = 5 in {
+def LongBEQL  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBNEQ  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBGTR  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBGEQ  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBLSS  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBLEQ  : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBGTRU : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBGEQU : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBLSSU : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+def LongBLEQU : Pseudo<(outs), (ins brtarget:$dst), "", []>;
+}
+
 // Fused compare-branch pseudos: prevent the RA from inserting PSW-clobbering
 // COPYs between compare and conditional branch.  These are created by a
 // pre-RA pass and expanded back into CMP + Bcc after RA.
