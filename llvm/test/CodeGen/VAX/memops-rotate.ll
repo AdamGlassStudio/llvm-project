@@ -5,18 +5,22 @@
 declare void @llvm.memcpy.p0.p0.i32(ptr, ptr, i32, i1)
 declare void @llvm.memset.p0.i32(ptr, i8, i32, i1)
 
-; Small memcpy — calls memcpy libfunc
+; Small memcpy — inlined as movl sequence (VAX allows unaligned access)
 define void @small_memcpy(ptr %dst, ptr %src) {
 ; CHECK-LABEL: small_memcpy:
-; CHECK: calls $3, memcpy
+; CHECK-NOT: calls $3, memcpy
+; CHECK: movl
+; CHECK: ret
   call void @llvm.memcpy.p0.p0.i32(ptr %dst, ptr %src, i32 16, i1 false)
   ret void
 }
 
-; Small memset — calls memset libfunc
+; Small memset — inlined as clrq sequence (VAX allows unaligned access)
 define void @small_memset(ptr %dst) {
 ; CHECK-LABEL: small_memset:
-; CHECK: calls $3, memset
+; CHECK-NOT: calls $3, memset
+; CHECK: clrq
+; CHECK: ret
   call void @llvm.memset.p0.i32(ptr %dst, i8 0, i32 16, i1 false)
   ret void
 }
