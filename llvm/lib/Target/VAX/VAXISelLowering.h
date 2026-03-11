@@ -53,6 +53,10 @@ enum NodeType : unsigned {
   // EXTZV: extract zero-extended bit field. (pos:i32, size:i32, base:i32) →
   // result:i32. Used for logical right shift (srl).
   EXTZV,
+  // SELECT_CC_I64: combined i64 compare + i32 select.
+  // (hi_lhs, hi_rhs, lo_lhs, lo_rhs, true_val, false_val, cc) → result.
+  // Expands to efficient multi-block branch sequence in custom inserter.
+  SELECT_CC_I64,
 };
 } // namespace VAXISD
 
@@ -114,10 +118,17 @@ private:
   EmitInstrWithCustomInserter(MachineInstr &MI,
                               MachineBasicBlock *BB) const override;
 
+  MachineBasicBlock *
+  EmitSELECT_CC_I64(MachineInstr &MI,
+                     MachineBasicBlock *BB) const;
+
   Register getExceptionPointerRegister(const Constant *PersonalityFn) const override;
   Register getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
 
   unsigned getJumpTableEncoding() const override;
+
+  SDValue PerformDAGCombine(SDNode *N,
+                            DAGCombinerInfo &DCI) const override;
 
   std::pair<unsigned, const TargetRegisterClass *>
   getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
