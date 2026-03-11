@@ -921,6 +921,28 @@ def SELECT_CC_W_Pseudo : Pseudo<(outs GPRW:$dst),
                                       (i32 imm:$cc)))]>;
 }
 
+// Combined i64 compare + i32 select pseudo.  Expanded by
+// EmitInstrWithCustomInserter into an efficient multi-block branch sequence
+// that avoids materializing intermediate booleans for each half-word compare.
+def SDT_VAXSelectCCI64 : SDTypeProfile<1, 7, [
+  SDTCisVT<0, i32>, SDTCisVT<1, i32>, SDTCisVT<2, i32>, SDTCisVT<3, i32>,
+  SDTCisVT<4, i32>, SDTCisVT<5, i32>, SDTCisVT<6, i32>, SDTCisVT<7, i32>
+]>;
+def vax_select_cc_i64 : SDNode<"VAXISD::SELECT_CC_I64", SDT_VAXSelectCCI64>;
+
+let usesCustomInserter = 1 in {
+def SELECT_CC_I64_Pseudo : Pseudo<(outs GPRnoPC:$dst),
+    (ins GPRnoPC:$hi_lhs, GPRnoPC:$hi_rhs,
+         GPRnoPC:$lo_lhs, GPRnoPC:$lo_rhs,
+         GPRnoPC:$truev, GPRnoPC:$falsev, i32imm:$cc),
+    "#SELECT_CC_I64 $hi_lhs $hi_rhs $lo_lhs $lo_rhs $truev $falsev $cc",
+    [(set GPRnoPC:$dst,
+      (vax_select_cc_i64 GPRnoPC:$hi_lhs, GPRnoPC:$hi_rhs,
+                          GPRnoPC:$lo_lhs, GPRnoPC:$lo_rhs,
+                          GPRnoPC:$truev, GPRnoPC:$falsev,
+                          (i32 imm:$cc)))]>;
+}
+
 //===----------------------------------------------------------------------===//
 // Phase 10 — Shift + Rotate
 //===----------------------------------------------------------------------===//

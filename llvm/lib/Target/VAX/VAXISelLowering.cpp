@@ -157,6 +157,11 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::SUBC, MVT::i32, Legal);
   setOperationAction(ISD::SUBE, MVT::i32, Legal);
 
+  // Enable target DAG combine to catch the i64 comparison expansion pattern
+  // (SELECT(SETCC,SETCC,SETCC) feeding SELECT_CC) and replace it with an
+  // efficient multi-block branch sequence (SELECT_CC_I64_Pseudo).
+  setTargetDAGCombine(ISD::SELECT_CC);
+
   // Shifts: SHL is handled directly by ASHL. SRA and SRL need custom lowering
   // because VAX ASHL uses negative count for right shift (arithmetic), and
   // logical right shift has no dedicated instruction.
@@ -330,6 +335,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::EMUL:         return "VAXISD::EMUL";
     case VAXISD::EDIV:         return "VAXISD::EDIV";
   case VAXISD::EXTZV:        return "VAXISD::EXTZV";
+  case VAXISD::SELECT_CC_I64: return "VAXISD::SELECT_CC_I64";
   default:                   return nullptr;
   }
 }
@@ -1196,6 +1202,107 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   return Chain;
 }
 
+// PerformDAGCombine — target-specific DAG optimizations.
+//
+// Catches the i64 comparison expansion pattern produced by the type legalizer:
+//   SELECT_CC(SELECT(SETCC_EQ, SETCC_LO, SETCC_HI), 0, T, F, SETNE)
+// and replaces it with a single VAXISD::SELECT_CC_I64 node that expands to
+// an efficient multi-block branch sequence in EmitInstrWithCustomInserter.
+// This avoids materializing 3 intermediate booleans and a nested select.
+SDValue VAXTargetLowering::PerformDAGCombine(SDNode *N,
+                                              DAGCombinerInfo &DCI) const {
+  if (N->getOpcode() != ISD::SELECT_CC)
+    return SDValue();
+
+  SelectionDAG &DAG = DCI.DAG;
+  SDValue LHS = N->getOperand(0);
+  SDValue RHS = N->getOperand(1);
+  SDValue TrueVal = N->getOperand(2);
+  SDValue FalseVal = N->getOperand(3);
+  ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(4))->get();
+
+  // Only match the pattern: SELECT_CC(x, 0, T, F, SETNE) where x is either:
+  //   (a) SELECT(SETCC_EQ, SETCC_LO, SETCC_HI) — pre-combine form, or
+  //   (b) SELECT_CC(hi_a, hi_b, SETCC_LO, SETCC_HI, SETEQ) — combined form.
+  // Both represent the standard i64 comparison expansion from type legalization.
+  if (CC != ISD::SETNE || !isNullConstant(RHS))
+    return SDValue();
+
+  SDValue HiLHS, HiRHS, LoLHS, LoRHS;
+  ISD::CondCode HiCC;
+
+  if (LHS.getOpcode() == ISD::SELECT_CC) {
+    // Combined form: SELECT_CC(hi_a, hi_b, setcc_lo, setcc_hi, SETEQ).
+    ISD::CondCode InnerCC =
+        cast<CondCodeSDNode>(LHS.getOperand(4))->get();
+    if (InnerCC != ISD::SETEQ)
+      return SDValue();
+
+    SDValue InnerTrue = LHS.getOperand(2);   // SETCC(lo_a, lo_b, unsigned_cc)
+    SDValue InnerFalse = LHS.getOperand(3);  // SETCC(hi_a, hi_b, signed_cc)
+    if (InnerTrue.getOpcode() != ISD::SETCC ||
+        InnerFalse.getOpcode() != ISD::SETCC)
+      return SDValue();
+
+    HiLHS = LHS.getOperand(0);
+    HiRHS = LHS.getOperand(1);
+    LoLHS = InnerTrue.getOperand(0);
+    LoRHS = InnerTrue.getOperand(1);
+    HiCC = cast<CondCodeSDNode>(InnerFalse.getOperand(2))->get();
+
+    // Verify the hi-comparison setcc uses the same hi operands.
+    if (InnerFalse.getOperand(0) != HiLHS ||
+        InnerFalse.getOperand(1) != HiRHS)
+      return SDValue();
+  } else if (LHS.getOpcode() == ISD::SELECT) {
+    // Pre-combine form: SELECT(SETCC_EQ, SETCC_LO, SETCC_HI).
+    SDValue SelCond = LHS.getOperand(0);
+    SDValue SelTrue = LHS.getOperand(1);
+    SDValue SelFalse = LHS.getOperand(2);
+
+    if (SelCond.getOpcode() != ISD::SETCC ||
+        SelTrue.getOpcode() != ISD::SETCC ||
+        SelFalse.getOpcode() != ISD::SETCC)
+      return SDValue();
+
+    ISD::CondCode EqCC =
+        cast<CondCodeSDNode>(SelCond.getOperand(2))->get();
+    if (EqCC != ISD::SETEQ)
+      return SDValue();
+
+    HiLHS = SelCond.getOperand(0);
+    HiRHS = SelCond.getOperand(1);
+    LoLHS = SelTrue.getOperand(0);
+    LoRHS = SelTrue.getOperand(1);
+    HiCC = cast<CondCodeSDNode>(SelFalse.getOperand(2))->get();
+
+    if (SelFalse.getOperand(0) != HiLHS ||
+        SelFalse.getOperand(1) != HiRHS)
+      return SDValue();
+  } else {
+    return SDValue();
+  }
+
+  // Map the original i64 condition code to an encoding for the pseudo.
+  unsigned I64CC;
+  switch (HiCC) {
+  case ISD::SETLT:  I64CC = 0; break;
+  case ISD::SETLE:  I64CC = 1; break;
+  case ISD::SETGT:  I64CC = 2; break;
+  case ISD::SETGE:  I64CC = 3; break;
+  case ISD::SETULT: I64CC = 4; break;
+  case ISD::SETULE: I64CC = 5; break;
+  case ISD::SETUGT: I64CC = 6; break;
+  case ISD::SETUGE: I64CC = 7; break;
+  default: return SDValue(); // EQ/NE use XOR+OR path, not this pattern.
+  }
+
+  SDLoc DL(N);
+  return DAG.getNode(VAXISD::SELECT_CC_I64, DL, N->getValueType(0),
+                     {HiLHS, HiRHS, LoLHS, LoRHS, TrueVal, FalseVal,
+                      DAG.getConstant(I64CC, DL, MVT::i32)});
+}
+
 // Expand SELECT_CC_Pseudo into a branch diamond:
 //   ThisMBB:
 //     (CMP already set flags)
@@ -1207,15 +1314,18 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                 MachineBasicBlock *BB) const {
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+
+  if (MI.getOpcode() == VAX::SELECT_CC_I64_Pseudo)
+    return EmitSELECT_CC_I64(MI, BB);
+
   assert((MI.getOpcode() == VAX::SELECT_CC_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_B_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_W_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_F_Pseudo ||
           MI.getOpcode() == VAX::SELECT_CC_D_Pseudo) &&
          "Unexpected custom inserter opcode");
-
-  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
 
   Register DstReg = MI.getOperand(0).getReg();
   Register TrueReg = MI.getOperand(1).getReg();
@@ -1253,6 +1363,120 @@ VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
       .addReg(TrueReg)
       .addMBB(BB)
+      .addReg(FalseReg)
+      .addMBB(FalseMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
+}
+
+// Expand SELECT_CC_I64_Pseudo into an efficient multi-block branch sequence
+// for i64 ordered comparisons.  Avoids materializing intermediate booleans:
+//
+//   BB0:
+//     CMPL hi_lhs, hi_rhs
+//     BNEQ HiDecideMBB          ; hi words differ — skip lo compare
+//   LoCmpMBB:                   ; hi words equal — compare lo (unsigned)
+//     CMPL lo_lhs, lo_rhs
+//     Bcc_lo TrueMBB
+//   FalseMBB:                   ; fallthrough = false
+//     BRW SinkMBB
+//   HiDecideMBB:
+//     CMPL hi_lhs, hi_rhs       ; redundant CMP (safe: avoids cross-MBB flags)
+//     Bcc_hi TrueMBB
+//     BRW FalseMBB
+//   TrueMBB:
+//   SinkMBB:
+//     PHI dst = [TrueReg:TrueMBB, FalseReg:FalseMBB]
+MachineBasicBlock *
+VAXTargetLowering::EmitSELECT_CC_I64(MachineInstr &MI,
+                                       MachineBasicBlock *BB) const {
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+
+  Register DstReg  = MI.getOperand(0).getReg();
+  Register HiLHS   = MI.getOperand(1).getReg();
+  Register HiRHS   = MI.getOperand(2).getReg();
+  Register LoLHS   = MI.getOperand(3).getReg();
+  Register LoRHS   = MI.getOperand(4).getReg();
+  Register TrueReg = MI.getOperand(5).getReg();
+  Register FalseReg = MI.getOperand(6).getReg();
+  unsigned I64CC   = MI.getOperand(7).getImm();
+
+  // Decode I64CC to branch opcodes:
+  //   HiBrTrue:  branch taken when hi comparison strictly satisfies CC
+  //   LoBrTrue:  branch taken when lo comparison satisfies CC (unsigned)
+  // The "hi strictly false" case is handled by BNEQ falling through from BB0
+  // to LoCmpMBB (equal) or jumping to HiDecideMBB (not equal), then a single
+  // conditional branch in HiDecideMBB.
+  unsigned HiBrTrue, LoBrTrue;
+  switch (I64CC) {
+  case 0: HiBrTrue = VAX::BLSS;  LoBrTrue = VAX::BLSSU; break; // SETLT
+  case 1: HiBrTrue = VAX::BLSS;  LoBrTrue = VAX::BLEQU; break; // SETLE
+  case 2: HiBrTrue = VAX::BGTR;  LoBrTrue = VAX::BGTRU; break; // SETGT
+  case 3: HiBrTrue = VAX::BGTR;  LoBrTrue = VAX::BGEQU; break; // SETGE
+  case 4: HiBrTrue = VAX::BLSSU; LoBrTrue = VAX::BLSSU; break; // SETULT
+  case 5: HiBrTrue = VAX::BLSSU; LoBrTrue = VAX::BLEQU; break; // SETULE
+  case 6: HiBrTrue = VAX::BGTRU; LoBrTrue = VAX::BGTRU; break; // SETUGT
+  case 7: HiBrTrue = VAX::BGTRU; LoBrTrue = VAX::BGEQU; break; // SETUGE
+  default: llvm_unreachable("Invalid I64CC");
+  }
+
+  MachineFunction *MF = BB->getParent();
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator InsertPt = ++BB->getIterator();
+
+  // Create blocks. Layout: BB0, LoCmpMBB, FalseMBB, SinkMBB, HiDecideMBB,
+  // TrueMBB.  This puts the common (hi-equal) path as fallthrough.
+  auto *LoCmpMBB    = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *FalseMBB    = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *SinkMBB     = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *HiDecideMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *TrueMBB     = MF->CreateMachineBasicBlock(LLVMBB);
+  MF->insert(InsertPt, LoCmpMBB);
+  MF->insert(InsertPt, FalseMBB);
+  MF->insert(InsertPt, SinkMBB);
+  MF->insert(InsertPt, HiDecideMBB);
+  MF->insert(InsertPt, TrueMBB);
+
+  // Move the rest of the original block (after the pseudo) into SinkMBB.
+  SinkMBB->splice(SinkMBB->begin(), BB,
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  // BB0: CMPL hi + BNEQ HiDecideMBB, fallthrough to LoCmpMBB.
+  BB->addSuccessor(HiDecideMBB);
+  BB->addSuccessor(LoCmpMBB);
+  BuildMI(BB, DL, TII.get(VAX::CMPL_rr)).addReg(HiLHS).addReg(HiRHS);
+  BuildMI(BB, DL, TII.get(VAX::BNEQ)).addMBB(HiDecideMBB);
+
+  // LoCmpMBB: CMPL lo + Bcc_lo TrueMBB, fallthrough to FalseMBB.
+  LoCmpMBB->addSuccessor(TrueMBB);
+  LoCmpMBB->addSuccessor(FalseMBB);
+  BuildMI(LoCmpMBB, DL, TII.get(VAX::CMPL_rr)).addReg(LoLHS).addReg(LoRHS);
+  BuildMI(LoCmpMBB, DL, TII.get(LoBrTrue)).addMBB(TrueMBB);
+
+  // FalseMBB: jump to SinkMBB (not adjacent in layout).
+  FalseMBB->addSuccessor(SinkMBB);
+  BuildMI(FalseMBB, DL, TII.get(VAX::BRW)).addMBB(SinkMBB);
+
+  // HiDecideMBB: redundant CMPL hi + Bcc_hi TrueMBB, else jump to FalseMBB.
+  // The redundant CMPL avoids relying on PSW surviving across MBB boundaries
+  // (register allocator can insert PSW-clobbering copies at block boundaries).
+  HiDecideMBB->addSuccessor(TrueMBB);
+  HiDecideMBB->addSuccessor(FalseMBB);
+  BuildMI(HiDecideMBB, DL, TII.get(VAX::CMPL_rr)).addReg(HiLHS).addReg(HiRHS);
+  BuildMI(HiDecideMBB, DL, TII.get(HiBrTrue)).addMBB(TrueMBB);
+  BuildMI(HiDecideMBB, DL, TII.get(VAX::BRW)).addMBB(FalseMBB);
+
+  // TrueMBB: jump to SinkMBB.
+  TrueMBB->addSuccessor(SinkMBB);
+  BuildMI(TrueMBB, DL, TII.get(VAX::BRW)).addMBB(SinkMBB);
+
+  // SinkMBB: PHI to merge true/false values.
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
+      .addReg(TrueReg)
+      .addMBB(TrueMBB)
       .addReg(FalseReg)
       .addMBB(FalseMBB);
 
