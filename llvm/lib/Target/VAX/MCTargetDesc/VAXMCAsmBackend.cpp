@@ -24,6 +24,29 @@ using namespace llvm;
 
 namespace {
 
+/// Map a conditional branch opcode to its long-form pseudo-instruction.
+/// Returns the original opcode if it is not a conditional branch.
+static unsigned getRelaxedCondBranchOpcode(unsigned Opcode) {
+  switch (Opcode) {
+  case VAX::BEQL:  return VAX::LongBEQL;
+  case VAX::BNEQ:  return VAX::LongBNEQ;
+  case VAX::BGTR:  return VAX::LongBGTR;
+  case VAX::BGEQ:  return VAX::LongBGEQ;
+  case VAX::BLSS:  return VAX::LongBLSS;
+  case VAX::BLEQ:  return VAX::LongBLEQ;
+  case VAX::BGTRU: return VAX::LongBGTRU;
+  case VAX::BGEQU: return VAX::LongBGEQU;
+  case VAX::BLSSU: return VAX::LongBLSSU;
+  case VAX::BLEQU: return VAX::LongBLEQU;
+  default:         return Opcode;
+  }
+}
+
+/// Return true if this opcode is a conditional branch (Bcc).
+static bool isCondBranch(unsigned Opcode) {
+  return getRelaxedCondBranchOpcode(Opcode) != Opcode;
+}
+
 class VAXAsmBackend : public MCAsmBackend {
 public:
   VAXAsmBackend() : MCAsmBackend(llvm::endianness::little) {}
@@ -116,6 +139,9 @@ public:
     // BRB can be relaxed to BRW.
     if (Opcode == VAX::BRB)
       return true;
+    // Conditional branches can be relaxed to inverted-Bcc + BRW.
+    if (isCondBranch(Opcode))
+      return true;
     // Any instruction with an expression operand might need PC-relative
     // operand relaxation (word → longword).
     for (const auto &Op : Operands) {
@@ -165,6 +191,12 @@ public:
                         const MCSubtargetInfo &STI) const override {
     if (Inst.getOpcode() == VAX::BRB) {
       Inst.setOpcode(VAX::BRW);
+      return;
+    }
+    // Conditional branch relaxation: Bcc → LongBcc (inverted-Bcc + BRW).
+    unsigned RelaxedOp = getRelaxedCondBranchOpcode(Inst.getOpcode());
+    if (RelaxedOp != Inst.getOpcode()) {
+      Inst.setOpcode(RelaxedOp);
       return;
     }
     // PC-relative operand relaxation: mark expression operands with
