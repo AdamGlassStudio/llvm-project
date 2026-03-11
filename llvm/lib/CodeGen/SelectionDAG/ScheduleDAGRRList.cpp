@@ -1559,6 +1559,26 @@ SUnit *ScheduleDAGRRList::PickNodeToScheduleBottomUp() {
     SmallVectorImpl<unsigned> &LRegs = LRegsMap[TrySU];
     assert(LRegs.size() == 1 && "Can't handle this yet!");
     unsigned Reg = LRegs[0];
+
+    // The special CallResource pseudo-register (== TRI->getNumRegs()) tracks
+    // call-sequence interference and is not a real physical register.  We
+    // cannot copy or duplicate it, so force an ordering edge between the
+    // interfering SU and the call-sequence SU that defines CallResource.
+    if (Reg == TRI->getNumRegs()) {
+      SUnit *LRDef = LiveRegDefs[Reg];
+      assert(LRDef && "CallResource interference without a defining SU");
+      LLVM_DEBUG(dbgs() << "    CallResource interference: forcing edge SU("
+                        << LRDef->NodeNum << ") -> SU("
+                        << TrySU->NodeNum << ")\n");
+      AddPredQueued(TrySU, SDep(LRDef, SDep::Artificial));
+      // Release the CallResource so the scheduler can make progress.
+      LiveRegDefs[Reg] = nullptr;
+      LiveRegGens[Reg] = nullptr;
+      releaseInterferences(Reg);
+      TrySU->isAvailable = false;
+      CurSU = TrySU;
+    } else {
+
     SUnit *LRDef = LiveRegDefs[Reg];
     MVT VT = getPhysicalRegisterVT(LRDef->getNode(), Reg, TII);
     const TargetRegisterClass *RC =
@@ -1594,6 +1614,7 @@ SUnit *ScheduleDAGRRList::PickNodeToScheduleBottomUp() {
     AddPredQueued(NewDef, SDep(TrySU, SDep::Artificial));
     TrySU->isAvailable = false;
     CurSU = NewDef;
+    } // end of else (real physical register)
   }
   assert(CurSU && "Unable to resolve live physical register dependencies!");
   return CurSU;
