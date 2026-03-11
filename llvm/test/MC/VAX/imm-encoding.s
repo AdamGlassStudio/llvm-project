@@ -36,3 +36,33 @@ movl $65536, %r0
 # Negative immediate
 movl $-1, %r0
 # CHECK: movl $-1, %r0  # encoding: [0xd0,0x8f,0xff,0xff,0xff,0xff,0x50]
+
+# ---- Sub-longword immediate operand widths ----
+# Instructions with .rw (word) source operands must emit 2-byte immediates.
+# Instructions with .rb (byte) source operands must emit 1-byte immediates.
+
+# movzwl (.rw source): large immediate → 0x8F + 2 bytes
+movzwl $0xffff, %r0
+# CHECK: movzwl $65535, %r0  # encoding: [0x3c,0x8f,0xff,0xff,0x50]
+
+movzwl $0x1234, %r0
+# CHECK: movzwl $4660, %r0  # encoding: [0x3c,0x8f,0x34,0x12,0x50]
+
+# movzwl short literal (0-63): single byte, no width issue
+movzwl $42, %r0
+# CHECK: movzwl $42, %r0  # encoding: [0x3c,0x2a,0x50]
+
+# cvtwl (.rw source): large immediate → 0x8F + 2 bytes
+cvtwl $0x1234, %r0
+# CHECK: cvtwl $4660, %r0  # encoding: [0x32,0x8f,0x34,0x12,0x50]
+
+# movzbl (.rb source): large immediate → 0x8F + 1 byte
+movzbl $0xff, %r0
+# CHECK: movzbl $255, %r0  # encoding: [0x9a,0x8f,0xff,0x50]
+
+movzbl $0x80, %r0
+# CHECK: movzbl $128, %r0  # encoding: [0x9a,0x8f,0x80,0x50]
+
+# cvtbl (.rb source): large immediate → 0x8F + 1 byte
+cvtbl $0x80, %r0
+# CHECK: cvtbl $128, %r0  # encoding: [0x98,0x8f,0x80,0x50]

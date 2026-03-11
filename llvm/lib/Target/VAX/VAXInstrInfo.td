@@ -267,7 +267,10 @@ multiclass VAXAlu2D<bits<16> opc, string mn> {
 }
 
 // Multiclass for zero-extending loads: MOVZBL, MOVZWL.
-multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload> {
+// SrcImm carries the source operand width so the MC encoder emits the correct
+// number of immediate bytes (ByteImm → 1, WordImm → 2).
+multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload,
+                      Operand SrcImm> {
   let HasMemOp = 1 in {
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
       mn # "\t$src, $dst",
@@ -276,23 +279,25 @@ multiclass VAXMovZext<bits<16> opc, string mn, PatFrag zload, PatFrag eload> {
       mn # "\t$src, $dst",
       [(set GPRnoPC:$dst, (eload VAXMem:$src))]>, Sched<[WriteCVT]>;
   }
-  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins SrcImm:$sym),
       mn # "\t$sym, $dst",
       [(set GPRnoPC:$dst, (zload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
     Sched<[WriteCVT]>;
-  def _rg_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+  def _rg_e : InstVAX<opc, (outs GPRnoPC:$dst), (ins SrcImm:$sym),
       mn # "\t$sym, $dst",
       [(set GPRnoPC:$dst, (eload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
     Sched<[WriteCVT]>;
 }
 
 // Multiclass for sign-extending conversions: CVTBL, CVTWL.
-multiclass VAXSextConv<bits<16> opc, string mn, PatFrag sload, ValueType subvt> {
+// SrcImm carries the source operand width (ByteImm or WordImm).
+multiclass VAXSextConv<bits<16> opc, string mn, PatFrag sload, ValueType subvt,
+                       Operand SrcImm> {
   let HasMemOp = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
       mn # "\t$src, $dst",
       [(set GPRnoPC:$dst, (sload VAXMem:$src))]>, Sched<[WriteCVT]>;
-  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins i32imm:$sym),
+  def _rg : InstVAX<opc, (outs GPRnoPC:$dst), (ins SrcImm:$sym),
       mn # "\t$sym, $dst",
       [(set GPRnoPC:$dst, (sload (vax_pcrelwrapper tglobaladdr:$sym)))]>,
     Sched<[WriteCVT]>;
@@ -429,7 +434,7 @@ def BICL3_rm : InstVAX<0xCB, (outs GPRnoPC:$dst),
     Sched<[WriteALU]>;
 
 // MOVZBL — zero-extend byte to longword.
-defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8>;
+defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8, ByteImm>;
 } // let Defs = [PSW] — end of integer ALU + MOVZBL block
 
 //===----------------------------------------------------------------------===//
@@ -656,13 +661,13 @@ let Defs = [PSW] in {
 
 // CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
 // source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
-defm CVTBL : VAXSextConv<0x98, "cvtbl", sextloadi8, i8>;
+defm CVTBL : VAXSextConv<0x98, "cvtbl", sextloadi8, i8, ByteImm>;
 
 // MOVZWL (0x3C) — Move Zero-Extended Word to Longword.
-defm MOVZWL : VAXMovZext<0x3C, "movzwl", zextloadi16, extloadi16>;
+defm MOVZWL : VAXMovZext<0x3C, "movzwl", zextloadi16, extloadi16, WordImm>;
 
 // CVTWL (0x32) — Convert Word to Longword: sign-extends low 16 bits.
-defm CVTWL : VAXSextConv<0x32, "cvtwl", sextloadi16, i16>;
+defm CVTWL : VAXSextConv<0x32, "cvtwl", sextloadi16, i16, WordImm>;
 
 // MOVB (0x90) — Move Byte: used for truncating stores of i32 to i8 memory.
 defm MOVB : VAXTruncStore<0x90, "movb", truncstorei8>;
