@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/VAXMCAsmInfo.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "TargetInfo/VAXTargetInfo.h"
 #include "VAX.h"
@@ -34,6 +35,22 @@
 #define DEBUG_TYPE "vax-asm-parser"
 
 using namespace llvm;
+
+/// Wrap an MCExpr's inner MCSymbolRefExpr with the S_ABS specifier.
+/// This marks the expression as requiring immediate/absolute encoding
+/// (0x8F + R_VAX_32) instead of PC-relative displacement.
+static const MCExpr *wrapWithSpecifier(const MCExpr *Expr, MCContext &Ctx) {
+  if (auto *SRE = dyn_cast<MCSymbolRefExpr>(Expr))
+    return MCSymbolRefExpr::create(&SRE->getSymbol(), VAX::S_ABS, Ctx);
+  if (auto *BE = dyn_cast<MCBinaryExpr>(Expr))
+    return MCBinaryExpr::create(BE->getOpcode(),
+                                wrapWithSpecifier(BE->getLHS(), Ctx),
+                                BE->getRHS(), Ctx);
+  if (auto *UE = dyn_cast<MCUnaryExpr>(Expr))
+    return MCUnaryExpr::create(UE->getOpcode(),
+                               wrapWithSpecifier(UE->getSubExpr(), Ctx), Ctx);
+  return Expr;
+}
 
 namespace {
 
@@ -529,6 +546,13 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
     const MCExpr *Expr;
     if (getParser().parseExpression(Expr))
       return true;
+    // If $expr is a non-constant expression (symbol reference), wrap it with
+    // S_ABS so the encoder generates immediate mode (0x8F + R_VAX_32) instead
+    // of PC-relative displacement. GAS treats $symbol as "push the address
+    // value" (immediate), not "load from address" (displacement).
+    int64_t Dummy;
+    if (!Expr->evaluateAsAbsolute(Dummy))
+      Expr = wrapWithSpecifier(Expr, getContext());
     Operands.push_back(VAXOperand::createImm(Expr, StartLoc,
                                              getLexer().getLoc(),
                                              /*DollarPrefixed=*/true));
@@ -852,8 +876,12 @@ unsigned VAXAsmParser::validateTargetOperandClass(MCParsedAsmOperand &AsmOp,
       // $-prefixed → immediate mode (0x8F); bare symbol → PC-relative (0xEF)
       if (Op.isDollarPrefixed()) {
         Op.morphToMem(MCRegister(), Op.getImm(), VAXAM::Imm);
+      } else if (isa<MCConstantExpr>(Op.getImm())) {
+        // Bare numeric constant: absolute addressing (0x9F + addr).
+        // E.g., "tstl 0x80000100" accesses a fixed physical address.
+        Op.morphToMem(MCRegister(), Op.getImm(), VAXAM::Absolute);
       } else {
-        // Bare expression: PC-relative displacement (like GAS behavior)
+        // Bare symbol: PC-relative displacement (like GAS behavior)
         Op.morphToMem(VAX::PC, Op.getImm(), VAXAM::Disp);
       }
       return Match_Success;

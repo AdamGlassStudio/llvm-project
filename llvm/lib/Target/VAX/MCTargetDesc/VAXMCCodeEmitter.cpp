@@ -165,6 +165,19 @@ void VAXMCCodeEmitter::emitExprOperand(const MCExpr *Expr,
                                        SmallVectorImpl<char> &CB,
                                        SmallVectorImpl<MCFixup> &Fixups,
                                        unsigned StartByte) const {
+  // S_ABS: $symbol in assembly → immediate mode (0x8F + absolute relocation).
+  // GAS treats $symbol as "the address value" (immediate), not "load from
+  // address" (displacement). CodeGen never sets S_ABS; it only appears from
+  // the asm parser for $-prefixed symbol operands.
+  if (hasSpecifier(Expr, VAX::S_ABS)) {
+    CB.push_back(static_cast<char>(0x8F));
+    unsigned FixOff = CB.size() - StartByte;
+    CB.push_back(0); CB.push_back(0); CB.push_back(0); CB.push_back(0);
+    Fixups.push_back(MCFixup::create(FixOff, Expr, FK_Data_4,
+                                     /*IsPCRel=*/false));
+    return;
+  }
+
   bool UseLongword = hasLongwordSpecifier(Expr);
 
   if (UseLongword) {
@@ -206,6 +219,16 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
   assert(Flags.isImm() && "Memory flags must be an immediate");
   unsigned BaseReg = Base.getReg() ? getRegEncoding(Base.getReg()) : 0;
   unsigned Mode = Flags.getImm();
+
+  // When the base register is absent (NoReg) and the displacement is a
+  // symbolic expression, this is a PC-relative operand (e.g., "symbol" or
+  // "symbol[Rx]").  Use the PC register (0xF) as the base.
+  // Numeric constants (MCConstantExpr) are absolute addresses and must NOT
+  // use PC-relative encoding — they use absolute mode (0x9F) instead.
+  if (!Base.getReg() && Disp.isExpr() &&
+      !isa<MCConstantExpr>(Disp.getExpr()) &&
+      (Mode == VAXAM::Disp || Mode == VAXAM::DispDeferred))
+    BaseReg = 0xF;
 
   // Emit index prefix byte if present: 0x40 | index_reg.
   if (Index.isReg() && Index.getReg()) {
@@ -348,7 +371,7 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
   }
 
   case VAXAM::Absolute:
-    if (Disp.isExpr()) {
+    if (Disp.isExpr() && !isa<MCConstantExpr>(Disp.getExpr())) {
       // PC-relative displacement deferred for *symbol and *symbol[Rx].
       // Check specifier to decide word vs longword encoding (may be nested).
       bool UseLongword = hasLongwordSpecifier(Disp.getExpr());
@@ -371,9 +394,11 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
                                          /*IsPCRel=*/true));
       }
     } else {
-      // True absolute address literal: keep 0x9F.
+      // Absolute address: constant expr or immediate → 0x9F + addr.
       CB.push_back(static_cast<char>(0x9F));
       int64_t Addr = Disp.isImm() ? Disp.getImm() : 0;
+      if (Disp.isExpr())
+        Addr = cast<MCConstantExpr>(Disp.getExpr())->getValue();
       uint32_t Val = static_cast<uint32_t>(Addr);
       CB.push_back(static_cast<char>(Val & 0xFF));
       CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
@@ -389,6 +414,19 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
 
   case VAXAM::Disp:
   default:
+    // Bare constant address with no register → absolute mode (0x9F + addr).
+    // E.g., "tstl 0x80000100" accesses the absolute address directly.
+    if (!Base.getReg() && Disp.isExpr() &&
+        isa<MCConstantExpr>(Disp.getExpr())) {
+      int64_t Addr = cast<MCConstantExpr>(Disp.getExpr())->getValue();
+      CB.push_back(static_cast<char>(0x9F));
+      uint32_t Val = static_cast<uint32_t>(Addr);
+      CB.push_back(static_cast<char>(Val & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 8) & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 16) & 0xFF));
+      CB.push_back(static_cast<char>((Val >> 24) & 0xFF));
+      return;
+    }
     // Normal displacement mode (or zero disp → register deferred).
     emitDisplacement(BaseReg, /*Deferred=*/false);
     return;
@@ -460,6 +498,7 @@ void VAXMCCodeEmitter::expandLongCondBr(const MCInst &MI,
 bool VAXMCCodeEmitter::isBranch(unsigned Opcode) const {
   switch (Opcode) {
   case VAX::BRB: case VAX::BRW:
+  case VAX::BSBB: case VAX::BSBW:
   case VAX::BEQL: case VAX::BNEQ: case VAX::BGTR: case VAX::BGEQ:
   case VAX::BLSS: case VAX::BLEQ: case VAX::BGTRU: case VAX::BGEQU:
   case VAX::BLSSU: case VAX::BLEQU:
@@ -470,7 +509,7 @@ bool VAXMCCodeEmitter::isBranch(unsigned Opcode) const {
 }
 
 unsigned VAXMCCodeEmitter::getBranchDispSize(unsigned Opcode) const {
-  return (Opcode == VAX::BRW) ? 2 : 1;
+  return (Opcode == VAX::BRW || Opcode == VAX::BSBW) ? 2 : 1;
 }
 
 unsigned VAXMCCodeEmitter::getTrailingBranchDispSize(unsigned Opcode) const {

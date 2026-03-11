@@ -21,6 +21,7 @@ enum Specifier {
   S_GOT,     /// @GOT — GOT-relative reference for data
   S_PLT,     /// @PLT — PLT-relative reference for calls
   S_PCREL32, /// Internal: force longword PC-relative encoding (from relaxation)
+  S_ABS,     /// Internal: force immediate/absolute encoding ($symbol in asm)
 };
 } // namespace VAX
 
