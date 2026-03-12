@@ -14,7 +14,7 @@ define i32 @test_add_rr() {
 }
 
 ; CHECK-LABEL: test_add_ri:
-; CHECK: addl2 $42
+; CHECK: addl2 x, %r0
 ; CHECK: ret
 define i32 @test_add_ri() {
   %a = load i32, ptr @x
@@ -23,7 +23,7 @@ define i32 @test_add_ri() {
 }
 
 ; CHECK-LABEL: test_sub_rr:
-; CHECK: subl2
+; CHECK: subl3
 ; CHECK: ret
 define i32 @test_sub_rr() {
   %a = load i32, ptr @x

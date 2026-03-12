@@ -250,6 +250,16 @@ static int getMemOpIdx(const MachineInstr &MI) {
   return -1;
 }
 
+/// Copy the 4-slot VAXMemOp (base, disp, index, flags) from a source
+/// instruction starting at operand MemStart into a MachineInstrBuilder.
+static void addMemOps(MachineInstrBuilder &MIB, const MachineInstr &Src,
+                      unsigned MemStart) {
+  MIB.addReg(Src.getOperand(MemStart).getReg());
+  MIB.add(Src.getOperand(MemStart + 1)); // disp: may be imm or global
+  MIB.addReg(Src.getOperand(MemStart + 2).getReg());
+  MIB.addImm(Src.getOperand(MemStart + 3).getImm());
+}
+
 /// Check if two memory operands refer to the same base address with
 /// displacements that differ by exactly 4 bytes. If so, return the lower
 /// displacement value (i.e., the MOVQ/CLRQ target address).
@@ -474,10 +484,8 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
 
   // MOVL_rm: [0]=dst(def), [1]=base, [2]=disp, [3]=idx, [4]=flags
   Register RR = Reload.getOperand(0).getReg();
-  Register MemBase = Reload.getOperand(1).getReg();
-  int64_t MemDisp = Reload.getOperand(2).getImm();
-  Register MemIdx = Reload.getOperand(3).getReg();
-  int64_t MemFlags = Reload.getOperand(4).getImm();
+  // Memory operand starts at index 1.
+  constexpr unsigned MemStart = 1;
 
   // Find the next real instruction.
   auto Next = std::next(II);
@@ -495,7 +503,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
       Use.getOperand(0).isKill()) {
     MachineInstrBuilder MIB =
         BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::PUSHL_m));
-    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    addMemOps(MIB, Reload, MemStart);
     MIB.addReg(VAX::SP, RegState::ImplicitDefine);
     MIB.cloneMemRefs(Reload);
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+PUSHL_r→PUSHL_m "
@@ -515,7 +523,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     Register NewDst = Use.getOperand(0).getReg();
     MachineInstrBuilder MIB =
         BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::MOVL_rm), NewDst);
-    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    addMemOps(MIB, Reload, MemStart);
     MIB.cloneMemRefs(Reload);
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+MOVL_rr→MOVL_rm "
                       << Reload << "  + " << Use);
@@ -552,7 +560,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
       MachineInstrBuilder MIB =
           BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
       MIB.addDef(DstReg);
-      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      addMemOps(MIB, Reload, MemStart);
       MIB.addReg(DstReg); // tied src2
       MIB.cloneMemRefs(Reload);
       LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU2_rr→ALU2_rm "
@@ -590,7 +598,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
       MachineInstrBuilder MIB =
           BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
       MIB.addDef(Dst);
-      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      addMemOps(MIB, Reload, MemStart);
       MIB.addReg(Src2);
       MIB.cloneMemRefs(Reload);
       LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU3_rr→ALU3_rm "
@@ -607,7 +615,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
       MachineInstrBuilder MIB =
           BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
       MIB.addDef(Dst);
-      MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+      addMemOps(MIB, Reload, MemStart);
       MIB.addReg(Src1); // swapped: was src1, now occupies src2 position
       MIB.cloneMemRefs(Reload);
       LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+ALU3_rr→ALU3_rm(swap) "
@@ -629,7 +637,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     Register OtherReg = Use.getOperand(1).getReg();
     MachineInstrBuilder MIB =
         BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::CMPL_rm));
-    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    addMemOps(MIB, Reload, MemStart);
     MIB.addReg(OtherReg);
     MIB.cloneMemRefs(Reload);
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+CMPL_rr→CMPL_rm "
@@ -653,7 +661,7 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     MachineBasicBlock *Target = Use.getOperand(3).getMBB();
     MachineInstrBuilder MIB =
         BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::CMP_BRANCH_rm));
-    MIB.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    addMemOps(MIB, Reload, MemStart);
     MIB.addReg(RhsReg).addImm(CC).addMBB(Target);
     MIB.cloneMemRefs(Reload);
     LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+CMP_BRANCH_rr→CMP_BRANCH_rm "
@@ -803,10 +811,9 @@ bool VAXPeephole::tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
 
   // ADDL3_rm layout: [0]=dst(def), [1..4]=memop, [5]=reg_src
   Register AddDst = Next->getOperand(0).getReg();
+  constexpr unsigned Add3MemStart = 1;
   Register MemBase = Next->getOperand(1).getReg();
-  int64_t MemDisp = Next->getOperand(2).getImm();
   Register MemIdx = Next->getOperand(3).getReg();
-  int64_t MemFlags = Next->getOperand(4).getImm();
   MachineOperand &RegSrc = Next->getOperand(5);
 
   if (RegSrc.getReg() != ImmReg)
@@ -842,7 +849,7 @@ bool VAXPeephole::tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
     MachineInstrBuilder Load =
         BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVL_rm));
     Load.addDef(AddDst);
-    Load.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+    addMemOps(Load, *Next, Add3MemStart);
     Load.cloneMemRefs(*Next);
 
     MachineInstrBuilder Push =
@@ -870,7 +877,7 @@ bool VAXPeephole::tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
   MachineInstrBuilder Load =
       BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MOVL_rm));
   Load.addDef(AddDst);
-  Load.addReg(MemBase).addImm(MemDisp).addReg(MemIdx).addImm(MemFlags);
+  addMemOps(Load, *Next, Add3MemStart);
   Load.cloneMemRefs(*Next);
 
   MachineInstrBuilder Mova =
