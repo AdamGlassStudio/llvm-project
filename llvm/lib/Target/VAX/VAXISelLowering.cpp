@@ -144,10 +144,13 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::UREM, MVT::i32, Custom);
   setOperationAction(ISD::SREM, MVT::i32, Custom);
 
-  // i64 mul: EMUL (32×32→64) handles SMUL_LOHI directly.
+  // i64 mul: EMUL (32×32→64) handles both SMUL_LOHI and UMUL_LOHI.
+  // SMUL_LOHI maps directly to EMUL. UMUL_LOHI uses EMUL + unsigned fixup.
+  // This lets the type legalizer expand i64 MUL inline (no __muldi3 libcall):
+  //   sign-extended inputs → SMUL_LOHI → EMUL (1 instruction)
+  //   general i64 × i64   → UMUL_LOHI + cross terms → EMUL + fixup + mull3
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Custom);
-  // Remaining i64 mul/div expansions still use libcalls.
-  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Expand);
+  setOperationAction(ISD::UMUL_LOHI, MVT::i32, Custom);
   setOperationAction(ISD::MULHU, MVT::i32, Expand);
   setOperationAction(ISD::MULHS, MVT::i32, Expand);
 
@@ -355,6 +358,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
   case ISD::SRA_PARTS:     return LowerSRA_PARTS(Op, DAG);
   case ISD::SMUL_LOHI:     return LowerSMUL_LOHI(Op, DAG);
+  case ISD::UMUL_LOHI:     return LowerUMUL_LOHI(Op, DAG);
   case ISD::UDIV:          return LowerUDIV(Op, DAG);
   case ISD::UREM:          return LowerUREM(Op, DAG);
   case ISD::SREM:          return LowerSREM(Op, DAG);
@@ -671,6 +675,41 @@ SDValue VAXTargetLowering::LowerSMUL_LOHI(SDValue Op,
   SDValue EMUL = DAG.getNode(VAXISD::EMUL, DL,
                               DAG.getVTList(MVT::i32, MVT::i32), A, B, Zero);
   return DAG.getMergeValues({EMUL.getValue(0), EMUL.getValue(1)}, DL);
+}
+
+SDValue VAXTargetLowering::LowerUMUL_LOHI(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  // umul_lohi(a, b) → unsigned 32×32→64 using signed EMUL + fixup.
+  //
+  // EMUL computes signed(a)*signed(b). For unsigned interpretation:
+  //   unsigned_product = signed_product
+  //     + (a < 0 ? b : 0) << 32
+  //     + (b < 0 ? a : 0) << 32
+  //
+  // The fixup uses arithmetic right shift by 31 to create a mask:
+  //   ashl $-31, a → 0xFFFFFFFF if bit 31 set, else 0
+  //   AND with b → b if a was "negative", else 0
+  SDLoc DL(Op);
+  SDValue A = Op.getOperand(0);
+  SDValue B = Op.getOperand(1);
+  SDValue Zero = DAG.getConstant(0, DL, MVT::i32);
+  SDValue Shift31 = DAG.getConstant(31, DL, MVT::i32);
+
+  // Signed 32×32→64 product.
+  SDValue Prod = DAG.getNode(VAXISD::EMUL, DL,
+                              DAG.getVTList(MVT::i32, MVT::i32), A, B, Zero);
+  SDValue Lo = Prod.getValue(0);
+  SDValue Hi = Prod.getValue(1);
+
+  // Unsigned fixup: add b when a has bit 31 set, and vice versa.
+  SDValue AMask = DAG.getNode(ISD::SRA, DL, MVT::i32, A, Shift31);
+  SDValue BMask = DAG.getNode(ISD::SRA, DL, MVT::i32, B, Shift31);
+  SDValue Fix1 = DAG.getNode(ISD::AND, DL, MVT::i32, AMask, B);
+  SDValue Fix2 = DAG.getNode(ISD::AND, DL, MVT::i32, BMask, A);
+  Hi = DAG.getNode(ISD::ADD, DL, MVT::i32, Hi, Fix1);
+  Hi = DAG.getNode(ISD::ADD, DL, MVT::i32, Hi, Fix2);
+
+  return DAG.getMergeValues({Lo, Hi}, DL);
 }
 
 SDValue VAXTargetLowering::LowerUDIV(SDValue Op, SelectionDAG &DAG) const {

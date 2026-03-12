@@ -31,20 +31,22 @@ define i32 @udiv_large_const(i32 %a) {
   ret i32 %r
 }
 
-; Divisor = 0x80000001 (MSB set): also no EDIV.
+; Divisor = 0x80000001 (MSB set): DAGCombiner uses multiply-by-reciprocal
+; via UMUL_LOHI (emul + unsigned fixup) instead of our custom UDIV lowering.
 define i32 @udiv_msb_const(i32 %a) {
 ; CHECK-LABEL: udiv_msb_const:
 ; CHECK-NOT:   ediv
-; CHECK:       cmpl
+; CHECK:       emul
   %r = udiv i32 %a, 2147483649
   ret i32 %r
 }
 
-; Small positive constant divisor: must use EDIV and must NOT hang
-; (regression for DAGCombiner infinite loop).
+; Small positive constant divisor: DAGCombiner uses multiply-by-reciprocal
+; via UMUL_LOHI (emul + unsigned fixup). This is faster than EDIV and also
+; avoids the DAGCombiner infinite loop (regression for UDIV→SDIV→UDIV cycle).
 define i32 @udiv_small_const(i32 %a) {
 ; CHECK-LABEL: udiv_small_const:
-; CHECK:       ediv
+; CHECK:       emul
   %r = udiv i32 %a, 9
   ret i32 %r
 }
@@ -67,10 +69,10 @@ define i32 @urem_large_const(i32 %a) {
   ret i32 %r
 }
 
-; Small constant divisor urem: must use EDIV (DAGCombiner regression).
+; Small constant divisor urem: multiply-by-reciprocal via UMUL_LOHI.
 define i32 @urem_small_const(i32 %a) {
 ; CHECK-LABEL: urem_small_const:
-; CHECK:       ediv
+; CHECK:       emul
   %r = urem i32 %a, 10
   ret i32 %r
 }
