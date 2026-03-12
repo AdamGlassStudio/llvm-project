@@ -2826,3 +2826,81 @@ def : Pat<(store (f32 (load VAXMem:$src)), VAXMem:$dst),
 // --- f64 memory-to-memory (D_float copy) ---
 def : Pat<(store (f64 (load VAXMem:$src)), VAXMem:$dst),
           (MOVD_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+//===----------------------------------------------------------------------===//
+// ALU memory-operand ISel patterns.
+//
+// These patterns select _mm instruction variants for ALU operations when
+// operands come from memory and/or results go to memory.  Like the MOV _mm
+// patterns above, they fire only when loads have a single use.
+//===----------------------------------------------------------------------===//
+
+// --- Compare: both operands from memory ---
+def : Pat<(vax_cmp (i32 (load VAXMemLong:$a)), (i32 (load VAXMemLong:$b))),
+          (CMPL_mm VAXMemOp:$a, VAXMemOp:$b)>;
+
+// --- Unary ALU: memory source, memory destination ---
+// MNEGL_mm: dst = -(load src)
+def : Pat<(store (i32 (ineg (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (MNEGL_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// MCOML_mm: dst = ~(load src)
+def : Pat<(store (i32 (not (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (MCOML_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- 3-operand ALU: two memory sources, result to memory ---
+// addl3 (load a), (load b), dst  — commutative
+def : Pat<(store (i32 (add (i32 (load VAXMemLong:$a)),
+                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+          (ADDL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
+// subl3 (load a), (load b), dst  — dst = b - a
+def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$b)),
+                           (i32 (load VAXMemLong:$a)))), VAXMemLong:$dst),
+          (SUBL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
+// mull3 (load a), (load b), dst  — commutative
+def : Pat<(store (i32 (mul (i32 (load VAXMemLong:$a)),
+                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+          (MULL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
+// bisl3 (load a), (load b), dst  — commutative
+def : Pat<(store (i32 (or (i32 (load VAXMemLong:$a)),
+                          (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+          (BISL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
+// xorl3 (load a), (load b), dst  — commutative
+def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$a)),
+                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+          (XORL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
+// bicl3 (load mask), (load src), dst  — dst = src & ~mask
+def : Pat<(store (i32 (vax_bicl (i32 (load VAXMemLong:$mask)),
+                                (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (BICL3_mm VAXMemOp:$mask, VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- RMW: increment/decrement memory ---
+// INCL_m: mem = mem + 1
+def : Pat<(store (i32 (add (i32 (load VAXMemLong:$addr)), (i32 1))),
+                 VAXMemLong:$addr),
+          (INCL_m VAXMemOp:$addr)>;
+// DECL_m: mem = mem - 1  (add -1)
+def : Pat<(store (i32 (add (i32 (load VAXMemLong:$addr)), (i32 -1))),
+                 VAXMemLong:$addr),
+          (DECL_m VAXMemOp:$addr)>;
+
+// --- RMW 2-operand ALU: mem_dst OP= (load mem_src) ---
+// ADDL2_mm: dst = dst + src
+def : Pat<(store (i32 (add (i32 (load VAXMemLong:$dst)),
+                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (ADDL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// SUBL2_mm: dst = dst - src
+def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$dst)),
+                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (SUBL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// BISL2_mm: dst = dst | src
+def : Pat<(store (i32 (or (i32 (load VAXMemLong:$dst)),
+                          (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (BISL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// BICL2_mm: dst = dst & ~src
+def : Pat<(store (i32 (vax_bicl (i32 (load VAXMemLong:$src)),
+                                (i32 (load VAXMemLong:$dst)))), VAXMemLong:$dst),
+          (BICL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// XORL2_mm: dst = dst ^ src
+def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)),
+                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+          (XORL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;

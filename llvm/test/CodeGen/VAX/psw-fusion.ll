@@ -48,7 +48,7 @@ not_found:
 
 ; Red-black tree comparison — the exact pattern from uvm_rb_insert.
 ; CHECK-LABEL: rb_compare:
-; CHECK:       cmpl (%r1), %r0
+; CHECK:       cmpl (%r0), 8(%ap)
 ; CHECK-NEXT:  bgeq
 define i32 @rb_compare(ptr %tree_node, i32 %search_key) {
   %node_key = load i32, ptr %tree_node, align 4
