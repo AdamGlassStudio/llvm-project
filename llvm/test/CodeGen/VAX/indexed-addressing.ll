@@ -17,7 +17,7 @@ entry:
 ; Simple array store: a[i] = val
 define void @store_array(ptr %a, i32 %i, i32 %val) {
 ; CHECK-LABEL: store_array:
-; CHECK: movl %r{{[0-9]+}}, (%r{{[0-9]+}})[%r{{[0-9]+}}]
+; CHECK: movl 12(%ap), (%r{{[0-9]+}})[%r{{[0-9]+}}]
 entry:
   %ptr = getelementptr i32, ptr %a, i32 %i
   store i32 %val, ptr %ptr

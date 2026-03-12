@@ -6,10 +6,8 @@
 define void @make_pair(ptr sret(%struct.pair) %out, i32 %x, i32 %y) {
 ; CHECK-LABEL: make_pair:
 ; CHECK: movl 4(%ap), %r0
-; CHECK: movl 12(%ap), %r1
-; CHECK: movl %r1, 4(%r0)
-; CHECK: movl 8(%ap), %r1
-; CHECK: movl %r1, (%r0)
+; CHECK: movl 12(%ap), 4(%r0)
+; CHECK: movl 8(%ap), (%r0)
   %a = getelementptr inbounds %struct.pair, ptr %out, i32 0, i32 0
   store i32 %x, ptr %a
   %b = getelementptr inbounds %struct.pair, ptr %out, i32 0, i32 1

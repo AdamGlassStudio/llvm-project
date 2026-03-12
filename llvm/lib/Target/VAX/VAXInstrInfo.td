@@ -2785,3 +2785,44 @@ def ADAWI_mm : InstVAX<0x58, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "adawi\t$src, $dst", []>;
 
 } // end let HasMemOp
+
+//===----------------------------------------------------------------------===//
+// Memory-to-memory ISel patterns.
+//
+// When a load has a single use feeding a store, select the _mm instruction
+// variant to avoid an intermediate register.  e.g.:
+//   movl (r0), (r1)          instead of   movl (r0), r2 / movl r2, (r1)
+//
+// The _mm instruction definitions above (in the disassembly section) already
+// carry HasMemOp = 1 and correct MemOpWidth settings.  These Pat<> entries
+// teach ISel to select them during codegen.
+//===----------------------------------------------------------------------===//
+
+// --- i32 memory-to-memory ---
+def : Pat<(store (i32 (load VAXMemLong:$src)), VAXMemLong:$dst),
+          (MOVL_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- i8 memory-to-memory (byte copy) ---
+// After type legalization, byte copy = truncstorei8(i32 extload(i8 addr)).
+def : Pat<(truncstorei8 (i32 (extloadi8 VAXMem:$src)), VAXMem:$dst),
+          (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+def : Pat<(truncstorei8 (i32 (zextloadi8 VAXMem:$src)), VAXMem:$dst),
+          (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+def : Pat<(truncstorei8 (i32 (sextloadi8 VAXMem:$src)), VAXMem:$dst),
+          (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- i16 memory-to-memory (word copy) ---
+def : Pat<(truncstorei16 (i32 (extloadi16 VAXMem:$src)), VAXMem:$dst),
+          (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+def : Pat<(truncstorei16 (i32 (zextloadi16 VAXMem:$src)), VAXMem:$dst),
+          (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+def : Pat<(truncstorei16 (i32 (sextloadi16 VAXMem:$src)), VAXMem:$dst),
+          (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- f32 memory-to-memory (F_float copy) ---
+def : Pat<(store (f32 (load VAXMem:$src)), VAXMem:$dst),
+          (MOVF_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+// --- f64 memory-to-memory (D_float copy) ---
+def : Pat<(store (f64 (load VAXMem:$src)), VAXMem:$dst),
+          (MOVD_mm VAXMemOp:$src, VAXMemOp:$dst)>;
