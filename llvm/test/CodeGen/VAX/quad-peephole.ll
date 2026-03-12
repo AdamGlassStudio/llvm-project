@@ -65,11 +65,10 @@ define i64 @return_i64_arg(i64 %x) {
 define void @copy_i64(ptr %dst, ptr %src) {
 ; CHECK-LABEL: copy_i64:
 ; CHECK: movl 8(%ap), %r0
-; CHECK: movl (%r0), %r1
-; CHECK: movl 4(%r0), %r0
+; CHECK: movl 4(%r0), %r1
 ; CHECK: movl 4(%ap), %r2
-; CHECK: movl %r0, 4(%r2)
-; CHECK: movl %r1, (%r2)
+; CHECK: movl (%r0), (%r2)
+; CHECK: movl %r1, 4(%r2)
 ; CHECK: ret
   %v = load i64, ptr %src
   store i64 %v, ptr %dst
