@@ -4,12 +4,9 @@
 
 define i32 @setcc_eq(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_eq:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       beql	.LBB0_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB0_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp eq i32 %a, %b
@@ -19,12 +16,9 @@ define i32 @setcc_eq(i32 %a, i32 %b) {
 
 define i32 @setcc_ne(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_ne:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       bneq	.LBB1_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB1_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp ne i32 %a, %b
@@ -34,12 +28,9 @@ define i32 @setcc_ne(i32 %a, i32 %b) {
 
 define i32 @setcc_ult(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_ult:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       blssu	.LBB2_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB2_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp ult i32 %a, %b
@@ -49,12 +40,9 @@ define i32 @setcc_ult(i32 %a, i32 %b) {
 
 define i32 @setcc_uge(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_uge:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       bgequ	.LBB3_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB3_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp uge i32 %a, %b
@@ -64,12 +52,9 @@ define i32 @setcc_uge(i32 %a, i32 %b) {
 
 define i32 @setcc_sgt(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_sgt:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       bgtr	.LBB4_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB4_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp sgt i32 %a, %b
@@ -79,12 +64,9 @@ define i32 @setcc_sgt(i32 %a, i32 %b) {
 
 define i32 @setcc_sle(i32 %a, i32 %b) {
 ; CHECK-LABEL: setcc_sle:
-; CHECK:       movl	8(%ap), %r1
-; CHECK:       movl	$1, %r0
-; CHECK:       cmpl	4(%ap), %r1
+; CHECK:       cmpl	4(%ap), 8(%ap)
 ; CHECK:       bleq	.LBB5_2
 ; CHECK:       clrl	%r0
-; CHECK:       .LBB5_2:
 ; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp sle i32 %a, %b

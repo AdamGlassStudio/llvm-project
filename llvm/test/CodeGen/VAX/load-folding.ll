@@ -82,7 +82,7 @@ define i32 @sub_mem_reg(ptr %p, i32 %b) nounwind {
 
 define i32 @cmp_mem_reg(ptr %p, i32 %b) nounwind {
 ; CHECK-LABEL: cmp_mem_reg:
-; CHECK:       cmpl (%r{{[0-9]+}}), %r{{[0-9]+}}
+; CHECK:       cmpl (%r{{[0-9]+}}), 8(%ap)
   %val = load i32, ptr %p
   %cmp = icmp sgt i32 %val, %b
   %res = select i1 %cmp, i32 1, i32 0
