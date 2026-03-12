@@ -4,7 +4,8 @@
 
 define i64 @mul_i64(i64 %a, i64 %b) {
 ; CHECK-LABEL: mul_i64:
-; CHECK: calls {{.*}}, __muldi3
+; CHECK: emul
+; CHECK-NOT: calls {{.*}}, __muldi3
   %r = mul i64 %a, %b
   ret i64 %r
 }
