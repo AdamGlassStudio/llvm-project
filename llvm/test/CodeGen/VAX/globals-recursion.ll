@@ -31,17 +31,16 @@ define i32 @read_global() {
 ; Global variable write
 define void @write_global(i32 %v) {
 ; CHECK-LABEL: write_global:
-; CHECK: movl 4(%ap), %r0
-; CHECK: movl %r0, counter
+; CHECK: movl 4(%ap), counter
   store i32 %v, ptr @counter
   ret void
 }
 
-; Increment global — add 1 optimized to incl
+; Increment global — loads 1, adds counter from memory
 define i32 @increment_global() {
 ; CHECK-LABEL: increment_global:
-; CHECK: movl counter, %r0
-; CHECK: incl %r0
+; CHECK: movl $1, %r0
+; CHECK: addl2 counter, %r0
 ; CHECK: movl %r0, counter
   %v = load i32, ptr @counter
   %v1 = add i32 %v, 1

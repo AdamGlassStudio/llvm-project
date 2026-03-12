@@ -533,12 +533,26 @@ bool VAXAsmPrinter::PrintAsmMemoryOperand(const MachineInstr *MI, unsigned OpNo,
   if (!Base.isReg())
     return true;
 
-  int64_t Disp = 0;
-  if (OpNo + 1 < MI->getNumOperands() && MI->getOperand(OpNo + 1).isImm())
-    Disp = MI->getOperand(OpNo + 1).getImm();
+  const MachineOperand &Disp = MI->getOperand(OpNo + 1);
 
-  if (Disp != 0)
-    OS << Disp;
+  // PC-relative (global): Base is NoReg, Disp is the symbol expression.
+  if (!Base.getReg()) {
+    if (Disp.isGlobal()) {
+      const MCSymbol *Sym = getSymbol(Disp.getGlobal());
+      OS << *Sym;
+    } else if (Disp.isImm())
+      OS << Disp.getImm();
+    else
+      return true;
+    return false;
+  }
+
+  int64_t DispVal = 0;
+  if (Disp.isImm())
+    DispVal = Disp.getImm();
+
+  if (DispVal != 0)
+    OS << DispVal;
   {
     const char *Name = VAXInstPrinter::getRegisterName(Base.getReg());
     if (Name[0] == 'B' || Name[0] == 'W') {

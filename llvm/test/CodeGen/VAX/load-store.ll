@@ -45,7 +45,7 @@ define void @store_i16(i16 %v) {
 
 define void @store_i32(i32 %v) {
 ; CHECK-LABEL: store_i32:
-; CHECK: movl %r0, g32
+; CHECK: movl 4(%ap), g32
   store i32 %v, ptr @g32
   ret void
 }
@@ -59,7 +59,7 @@ define i32 @load_volatile() {
 
 define void @store_volatile(i32 %v) {
 ; CHECK-LABEL: store_volatile:
-; CHECK: movl %r0, g32
+; CHECK: movl 4(%ap), g32
   store volatile i32 %v, ptr @g32
   ret void
 }

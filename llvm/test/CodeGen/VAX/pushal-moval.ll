@@ -70,7 +70,7 @@ declare void @use_int(i32)
 define void @push_global_value() {
 ; CHECK-LABEL: push_global_value:
 ; CHECK-NOT:   pushal
-; CHECK:       movl gvar
+; CHECK:       pushl gvar
   %v = load i32, ptr @gvar
   call void @use_int(i32 %v)
   ret void

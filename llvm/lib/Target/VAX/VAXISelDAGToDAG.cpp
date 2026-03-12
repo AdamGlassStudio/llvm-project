@@ -296,9 +296,13 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
   }
 
   // Bare register — zero displacement.
-  // Exclude nodes that have their own dedicated patterns (PCRelWrapper, etc.)
-  if (Addr.getOpcode() == VAXISD::PCRelWrapper)
-    return false;
+  // PCRelWrapper(tglobaladdr) → Base=NoReg, Offset=symbol.
+  // The MC encoder and printer handle Base=NoReg + expr as PC-relative.
+  if (Addr.getOpcode() == VAXISD::PCRelWrapper) {
+    Base = CurDAG->getRegister(0, PtrTy);
+    Offset = Addr.getOperand(0);
+    return true;
+  }
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
   return true;
@@ -366,15 +370,8 @@ bool VAXDAGToDAGISel::SelectInlineAsmMemoryOperand(
   case InlineAsm::ConstraintCode::o:
   case InlineAsm::ConstraintCode::p: {
     SDValue Base, Offset, Index, Flags;
-    if (!SelectVAXAddr(Op, Base, Offset, Index, Flags)) {
-      // SelectVAXAddr rejects PCRelWrapper to let TableGen patterns match
-      // globals directly. For inline asm, accept it as base+0.
-      SDLoc DL(Op);
-      Base = Op;
-      Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
-      Index = CurDAG->getRegister(0, MVT::i32);
-      Flags = CurDAG->getTargetConstant(0, DL, MVT::i32);
-    }
+    if (!SelectVAXAddr(Op, Base, Offset, Index, Flags))
+      return true; // cannot represent as memory operand
     OutOps.push_back(Base);
     OutOps.push_back(Offset);
     OutOps.push_back(Index);
