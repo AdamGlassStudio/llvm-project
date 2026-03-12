@@ -630,6 +630,10 @@ def TSTD_BRANCH : Pseudo<(outs),
 // Memory-operand compare/test fused pseudos:
 def CMP_BRANCH_rm : Pseudo<(outs),
     (ins VAXMemOp:$lhs, GPRnoPC:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMP_BRANCH_mm : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, VAXMemOp:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMP_BRANCH_mi : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, i32imm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TST_BRANCH_m : Pseudo<(outs),
     (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
 // Byte/word compare/test fused pseudos:
@@ -2233,7 +2237,9 @@ def MOVQ_mm : InstVAX<0x7D, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 
 // CMPL/CMPB/CMPW: compare. All-memory.
 def CMPL_mm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
-    "cmpl\t$a, $b", []>;
+    "cmpl\t$a, $b",
+    [(vax_cmp (i32 (load VAXMemLong:$a)), (i32 (load VAXMemLong:$b)))]>,
+    Sched<[WriteALU]>;
 let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def CMPB_mm : InstVAX<0x91, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     "cmpb\t$a, $b", []>;
@@ -2359,6 +2365,27 @@ def BICL2_mm : InstVAX<0xCA, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "bicl2\t$src, $dst", []>;
 def XORL2_mm : InstVAX<0xCC, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "xorl2\t$src, $dst", []>;
+
+// 2-operand ALU: immediate-to-memory variants.
+// These enable RMW with an immediate source: e.g. addl2 $5, <mem>
+def ADDL2_mi : InstVAX<0xC0, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "addl2\t$src, $dst", []>;
+def SUBL2_mi : InstVAX<0xC2, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "subl2\t$src, $dst", []>;
+def MULL2_mi : InstVAX<0xC4, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "mull2\t$src, $dst", []>, Sched<[WriteMULL]>;
+def BISL2_mi : InstVAX<0xC8, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "bisl2\t$src, $dst", []>;
+def BICL2_mi : InstVAX<0xCA, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "bicl2\t$src, $dst", []>;
+def XORL2_mi : InstVAX<0xCC, (outs), (ins i32imm:$src, VAXMemOp:$dst),
+    "xorl2\t$src, $dst", []>;
+
+// Compare: memory against immediate.
+def CMPL_mi : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, i32imm:$b),
+    "cmpl\t$a, $b",
+    [(vax_cmp (load VAXMemLong:$a), (i32 imm:$b))]>,
+    Sched<[WriteALU]>;
 
 // 2-operand byte/word ALU: all-memory.
 let MemOpWidth0 = 1, MemOpWidth1 = 1 in {
@@ -2835,10 +2862,6 @@ def : Pat<(store (f64 (load VAXMem:$src)), VAXMem:$dst),
 // patterns above, they fire only when loads have a single use.
 //===----------------------------------------------------------------------===//
 
-// --- Compare: both operands from memory ---
-def : Pat<(vax_cmp (i32 (load VAXMemLong:$a)), (i32 (load VAXMemLong:$b))),
-          (CMPL_mm VAXMemOp:$a, VAXMemOp:$b)>;
-
 // --- Unary ALU: memory source, memory destination ---
 // MNEGL_mm: dst = -(load src)
 def : Pat<(store (i32 (ineg (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
@@ -2904,3 +2927,33 @@ def : Pat<(store (i32 (vax_bicl (i32 (load VAXMemLong:$src)),
 def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)),
                            (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
           (XORL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+
+//===----------------------------------------------------------------------===//
+// Immediate-to-memory ISel patterns.
+//
+// These patterns select _mi instruction variants for ALU operations with
+// an immediate operand and a memory destination (RMW).  e.g.:
+//   addl2 $5, counter      instead of   movl counter, r0 / addl2 $5, r0 / movl r0, counter
+//===----------------------------------------------------------------------===//
+
+// --- RMW 2-operand ALU: mem_dst OP= immediate ---
+// ADDL2_mi: dst = dst + imm
+def : Pat<(store (i32 (add (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
+                 VAXMemLong:$dst),
+          (ADDL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
+// SUBL2_mi: dst = dst - imm  (implemented as addl2 of negated immediate)
+def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
+                 VAXMemLong:$dst),
+          (SUBL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
+// BISL2_mi: dst = dst | imm
+def : Pat<(store (i32 (or (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
+                 VAXMemLong:$dst),
+          (BISL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
+// BICL2_mi: dst = dst & ~imm
+def : Pat<(store (i32 (vax_bicl (i32 imm:$src),
+                                (i32 (load VAXMemLong:$dst)))), VAXMemLong:$dst),
+          (BICL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
+// XORL2_mi: dst = dst ^ imm
+def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
+                 VAXMemLong:$dst),
+          (XORL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
