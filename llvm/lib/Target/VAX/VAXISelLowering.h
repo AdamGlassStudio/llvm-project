@@ -101,6 +101,7 @@ private:
   SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerUMUL_LOHI(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUDIV(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerUREM(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSREM(SDValue Op, SelectionDAG &DAG) const;
