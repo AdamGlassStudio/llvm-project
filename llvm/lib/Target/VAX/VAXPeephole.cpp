@@ -16,12 +16,15 @@
 //   - Convert MOVL_ri + ADDL3_rm [+ PUSHL_r] to MOVL_rm + MOVAL/PUSHAL
 //   - Convert ADDL3_ri to MOVAL (shorter encoding for imm outside 0-63)
 //   - Convert ADDL3_ri + PUSHL_r to PUSHAL (one instruction instead of two)
+//   - Shorten large immediates: MOVL_ri/PUSHL_i → ASHL_ii/MNEGL_i
+//     when the constant decomposes as base<<shift or is a small negative
 //
 //===----------------------------------------------------------------------===//
 
 #include "VAX.h"
 #include "VAXInstrInfo.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
@@ -114,6 +117,9 @@ private:
   bool tryConvertImmLoadAddToMOVA(MachineBasicBlock &MBB,
                                    MachineBasicBlock::iterator &II,
                                    const TargetInstrInfo *TII);
+  bool tryShortenImmediate(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator &II,
+                           const TargetInstrInfo *TII);
 };
 
 char VAXPeephole::ID = 0;
@@ -1123,6 +1129,107 @@ bool VAXPeephole::tryQuadCombineNonAdjacent(MachineBasicBlock &MBB,
   return false;
 }
 
+/// Try to shorten immediate loads and pushes using shorter instruction forms.
+///
+/// Patterns:
+///  1. MOVL_ri $C, $rN  →  ASHL_ii $shift, $base, $rN
+///     when C = base << shift, base in [1,63], shift > 0, and C > 63.
+///     Saves 3 bytes (7 → 4).
+///
+///  2. MOVL_ri $C, $rN  →  MNEGL_i $(-C), $rN
+///     when C is negative (as i32) and -C in [1,63].
+///     Saves 4 bytes (7 → 3).
+///
+///  3. PUSHL_i $C  →  ASHL_iip $shift, $base
+///     when C = base << shift, base in [1,63], shift > 0, and C > 63.
+///     Saves 2 bytes (6 → 4).
+///
+///  4. PUSHL_i $C  →  MNEGL_ip $(-C)
+///     when C is negative (as i32) and -C in [1,63].
+///     Saves 3 bytes (6 → 3).
+bool VAXPeephole::tryShortenImmediate(MachineBasicBlock &MBB,
+                                      MachineBasicBlock::iterator &II,
+                                      const TargetInstrInfo *TII) {
+  MachineInstr &MI = *II;
+  unsigned Opc = MI.getOpcode();
+
+  bool IsMov = (Opc == VAX::MOVL_ri);
+  bool IsPush = (Opc == VAX::PUSHL_i);
+  if (!IsMov && !IsPush)
+    return false;
+
+  unsigned ImmOpIdx = IsMov ? 1 : 0;
+  if (!MI.getOperand(ImmOpIdx).isImm())
+    return false;
+
+  int64_t Imm = MI.getOperand(ImmOpIdx).getImm();
+
+  // Truncate to 32 bits (VAX is 32-bit).
+  int32_t Imm32 = static_cast<int32_t>(Imm);
+  uint32_t UImm = static_cast<uint32_t>(Imm32);
+
+  // Values 0–63 already use VAX literal mode (1-byte operand) — no savings.
+  if (UImm <= 63)
+    return false;
+
+  // Try MNEGL: if the value is negative and its absolute value fits in [1,63].
+  // -C must be positive and ≤ 63 for literal mode savings.
+  // Note: INT32_MIN (-2147483648) cannot be negated in i32, skip it.
+  if (Imm32 < 0 && Imm32 != INT32_MIN) {
+    int32_t NegImm = -Imm32;
+    if (NegImm >= 1 && NegImm <= 63) {
+      if (IsMov) {
+        // MOVL_ri $(-N), $rN → MNEGL_i $N, $rN  (saves 4 bytes: 7 → 3)
+        Register DstReg = MI.getOperand(0).getReg();
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MNEGL_i))
+            .addDef(DstReg)
+            .addImm(NegImm);
+        LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_ri→MNEGL_i " << MI);
+      } else {
+        // PUSHL_i $(-N) → MNEGL_ip $N  (saves 3 bytes: 6 → 3)
+        MachineInstrBuilder MIB =
+            BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::MNEGL_ip))
+                .addImm(NegImm);
+        MIB->addRegisterDefined(VAX::SP);
+        LLVM_DEBUG(dbgs() << "VAXPeephole: PUSHL_i→MNEGL_ip " << MI);
+      }
+      auto Erase = II++;
+      Erase->eraseFromParent();
+      return true;
+    }
+  }
+
+  // Try ASHL: if UImm = base << shift, base in [1,63], shift > 0.
+  unsigned Shift = llvm::countr_zero(UImm);
+  if (Shift == 0)
+    return false;
+
+  uint32_t Base = UImm >> Shift;
+  if (Base < 1 || Base > 63)
+    return false;
+
+  if (IsMov) {
+    // MOVL_ri $C, $rN → ASHL_ii $shift, $base, $rN  (saves 3 bytes: 7 → 4)
+    Register DstReg = MI.getOperand(0).getReg();
+    BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::ASHL_ii))
+        .addDef(DstReg)
+        .addImm(Shift)
+        .addImm(Base);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_ri→ASHL_ii " << MI);
+  } else {
+    // PUSHL_i $C → ASHL_iip $shift, $base  (saves 2 bytes: 6 → 4)
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, MI.getDebugLoc(), TII->get(VAX::ASHL_iip))
+            .addImm(Shift)
+            .addImm(Base);
+    MIB->addRegisterDefined(VAX::SP);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: PUSHL_i→ASHL_iip " << MI);
+  }
+  auto Erase = II++;
+  Erase->eraseFromParent();
+  return true;
+}
+
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -1265,6 +1372,9 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
 
       if (!Converted)
         Converted = tryPushPairCombine(MBB, II, TII);
+
+      if (!Converted)
+        Converted = tryShortenImmediate(MBB, II, TII);
 
       if (!Converted)
         ++II;

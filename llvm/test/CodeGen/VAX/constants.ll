@@ -16,13 +16,13 @@ define i32 @const_one() {
 
 define i32 @const_neg1() {
 ; CHECK-LABEL: const_neg1:
-; CHECK: movl $-1, %r0
+; CHECK: mnegl $1, %r0
   ret i32 -1
 }
 
 define i32 @const_large() {
 ; CHECK-LABEL: const_large:
-; CHECK: movl $65536, %r0
+; CHECK: ashl $16, $1, %r0
   ret i32 65536
 }
 
@@ -34,7 +34,7 @@ define i32 @const_max() {
 
 define i32 @const_min() {
 ; CHECK-LABEL: const_min:
-; CHECK: movl $-2147483648, %r0
+; CHECK: ashl $31, $1, %r0
   ret i32 -2147483648
 }
 
