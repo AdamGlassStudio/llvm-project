@@ -695,6 +695,12 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
   while (OpIdx < NumDefs)
     OpIdx += emitOperand(OpIdx);
 
+  // ASHL_iip / MNEGL_ip have a hardcoded -(SP) destination that is not an
+  // explicit MCInst operand (it only appears in the asm string).  Emit the
+  // autodecrement-SP operand specifier byte that the hardware expects.
+  if (Opcode == VAX::ASHL_iip || Opcode == VAX::MNEGL_ip)
+    CB.push_back(0x7E); // mode 7 (autodecrement), register 14 (SP)
+
   LLVM_DEBUG(dbgs() << "  encoded " << (CB.size() - StartByte) << " bytes, "
                     << Fixups.size() << " fixups\n");
 }

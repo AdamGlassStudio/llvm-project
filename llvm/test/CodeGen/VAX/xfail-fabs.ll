@@ -9,7 +9,7 @@ define float @fabs_f32(float %a) {
 ; CHECK-LABEL: fabs_f32:
 ; CHECK: subl2	$8, %sp
 ; CHECK-NEXT: movf	4(%ap), -8(%fp)
-; CHECK-NEXT: movl	$-2147483648, %r0
+; CHECK-NEXT: ashl	$31, $1, %r0
 ; CHECK-NEXT: bicl3	%r0, -8(%fp), %r0
 ; CHECK-NEXT: movl	%r0, -4(%fp)
 ; CHECK-NEXT: movf	-4(%fp), %r0

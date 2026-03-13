@@ -1044,7 +1044,39 @@ def ROTL_ir : InstVAX<0x9C, (outs GPRnoPC:$dst),
     "rotl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (rotl GPRnoPC:$src, (i32 imm:$cnt)))]>,
     Sched<[WriteROTL]>;
+// ASHL_ii — peephole-only: constant materialization via shift.
+// dst = imm_src << imm_cnt.  Used when the result constant > 63 (so MOVL_ri
+// would use a 5-byte immediate operand) but can be decomposed as base << shift
+// with base in [1,63] (1-byte literal mode).  Saves 3 bytes vs MOVL_ri.
+def ASHL_ii : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins ByteImm:$cnt, i32imm:$src),
+    "ashl\t$cnt, $src, $dst", []>,
+    Sched<[WriteShift]>;
+
 } // let Defs = [PSW] — end of shift/rotate block
+
+// ASHL_iip — peephole-only: push constant via shift to -(SP).
+// Pushes (imm_src << imm_cnt) onto the stack.  Saves 2 bytes vs PUSHL_i
+// for constants > 63 that decompose as base << shift with base in [1,63].
+let Defs = [SP, PSW], Uses = [SP] in
+def ASHL_iip : InstVAX<0x78, (outs), (ins ByteImm:$cnt, i32imm:$src),
+    "ashl\t$cnt, $src, -(%sp)", []>,
+    Sched<[WriteShift]>;
+
+// MNEGL_i — peephole-only: negate immediate to register.
+// dst = -(imm).  Used to replace MOVL_ri of negative constants whose
+// absolute value fits in literal mode (1-63), saving 4 bytes.
+let Defs = [PSW] in
+def MNEGL_i : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins i32imm:$src),
+    "mnegl\t$src, $dst", []>,
+    Sched<[WriteMCOM]>;
+
+// MNEGL_ip — peephole-only: negate immediate and push to -(SP).
+// Pushes -(imm) onto the stack.
+let Defs = [SP, PSW], Uses = [SP] in
+def MNEGL_ip : InstVAX<0xCE, (outs), (ins i32imm:$src),
+    "mnegl\t$src, -(%sp)", []>,
+    Sched<[WriteMCOM]>;
 
 // ROTL — assembly-only form with all MemOp operands (for hand-written .S)
 let Defs = [PSW], HasMemOp = 1 in

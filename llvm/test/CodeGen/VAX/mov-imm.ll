@@ -15,7 +15,7 @@ define i32 @ret0() {
 }
 
 ; CHECK-LABEL: ret_neg1:
-; CHECK: movl $-1, %r0
+; CHECK: mnegl $1, %r0
 ; CHECK: ret
 define i32 @ret_neg1() {
   ret i32 -1
