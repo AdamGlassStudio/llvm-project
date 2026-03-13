@@ -226,8 +226,16 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
   }
 
+  // Emit BRW as BRB — the MC relaxation framework will grow to BRW only
+  // when the displacement doesn't fit in 8 bits. At the MIR level we use BRW
+  // for predictable sizes (BranchRelaxation), but at the MC level BRB is the
+  // canonical form that benefits from automatic shrinking.
+  unsigned MIOpcode = MI->getOpcode();
+  if (MIOpcode == VAX::BRW)
+    MIOpcode = VAX::BRB;
+
   MCInst Inst;
-  Inst.setOpcode(MI->getOpcode());
+  Inst.setOpcode(MIOpcode);
   for (const MachineOperand &MO : MI->explicit_operands()) {
     switch (MO.getType()) {
     case MachineOperand::MO_Register:

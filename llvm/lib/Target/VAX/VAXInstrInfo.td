@@ -86,7 +86,8 @@ def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>,
 // CLRL — zero a longword register; cheapest way to load the constant 0
 // Nearly all VAX data-manipulation instructions set condition codes (N/Z/V/C
 // in PSW). Each instruction or block below explicitly declares Defs = [PSW].
-let Defs = [PSW] in
+// Rematerializable: the RA can recompute zero instead of spilling/reloading.
+let Defs = [PSW], isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def CLRL : InstVAX<0xD4, (outs GPRnoPC:$dst), (ins),
     "clrl\t$dst", [(set GPRnoPC:$dst, (i32 0))]>,
     Sched<[WriteALU]>;
@@ -112,6 +113,10 @@ def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "movl\t$src, $dst", []>, Sched<[WriteMOV]>;
 
 // reg <- immediate  (assembler emits $imm literal)
+// Rematerializable: the RA can recompute an immediate load instead of
+// spilling/reloading. This is critical for avoiding unnecessary stack traffic
+// on VAX where memory operands are multi-byte.
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def MOVL_ri : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$imm),
     "movl\t$imm, $dst",
     [(set GPRnoPC:$dst, (i32 imm:$imm))]>, Sched<[WriteMOV]>;
@@ -158,6 +163,7 @@ def MOVL_gr : InstVAX<0xD0, (outs), (ins GPRnoPC:$src, i32imm:$sym),
 
 // Materialize a jump table address into a register (PC-relative).
 // Emits: moval JT_sym, $dst
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 def MOVAL_jt : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$jt),
     "moval\t$jt, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tjumptable:$jt))]>,
@@ -180,6 +186,7 @@ def MOVAL_ba : InstVAX<0xDE, (outs GPRnoPC:$dst), (ins i32imm:$sym),
     "moval\t$sym, $dst",
     [(set GPRnoPC:$dst, (vax_pcrelwrapper tblockaddress:$sym))]>,
     Sched<[WriteMOV]>;
+} // let isReMaterializable, isAsCheapAsAMove
 } // let isCodeGenOnly = 1
 } // let Defs = [PSW] — end of MOV/MOVAL block
 
@@ -1350,6 +1357,7 @@ let Defs = [PSW] in {
 defm MOVF : VAXFpMov<0x50, "movf", GPRI, f32, VAXFMemOp>;
 
 // CLRF (0xD4) — Clear F_float: dst = 0.0.
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def CLRF : InstVAX<0xD4, (outs GPRI:$dst), (ins),
     "clrf\t$dst", []>;
 
@@ -1449,6 +1457,7 @@ let Defs = [PSW] in {
 defm MOVD : VAXFpMov<0x70, "movd", QPR, f64, VAXDMemOp>;
 
 // CLRD (0x7C) — Clear D_float: dst = 0.0.
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def CLRD : InstVAX<0x7C, (outs QPR:$dst), (ins),
     "clrd\t$dst", []>;
 

@@ -44,21 +44,21 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       blss	.LBB1_5
 ; CHECK:       movl	4(%ap), %r2
 ; CHECK:       clrl	%r3
-; CHECK:       movl	$1, %r4
+; Rematerialization: $1 is recomputed in-loop instead of hoisted + copied.
 ; CHECK:       movl	%r3, %r0
-; CHECK:       brw	.LBB1_3
+; CHECK:       brb	.LBB1_3
 ; CHECK:       .LBB1_2:
-; CHECK:       bicl2	$-2, %r5
-; CHECK:       addl2	%r5, %r0
+; CHECK:       bicl2	$-2, %r4
+; CHECK:       addl2	%r4, %r0
 ; CHECK:       addl2	$4, %r2
 ; CHECK:       decl	%r1
 ; CHECK:       beql	.LBB1_5
 ; CHECK:       .LBB1_3:
-; CHECK:       movl	%r4, %r5
+; CHECK:       movl	$1, %r4
 ; CHECK:       tstl	(%r2)
 ; CHECK:       bneq	.LBB1_2
-; CHECK:       movl	%r3, %r5
-; CHECK:       brw	.LBB1_2
+; CHECK:       movl	%r3, %r4
+; CHECK:       brb	.LBB1_2
 ; CHECK:       .LBB1_5:
 ; CHECK:       ret
 entry:
