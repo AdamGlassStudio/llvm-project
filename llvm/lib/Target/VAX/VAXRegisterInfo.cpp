@@ -66,7 +66,14 @@ bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   int64_t Offset = MFI.getObjectOffset(FI) +
                    MI.getOperand(FIOperandNum + 1).getImm();
 
-  MI.getOperand(FIOperandNum).ChangeToRegister(VAX::FP, false);
+  // Fixed objects at positive offsets are in the AP-relative arg area
+  // (created by LowerFormalArguments). Use AP as the base register so
+  // the RA can rematerialize arg loads instead of spilling to new slots.
+  Register BaseReg = VAX::FP;
+  if (MFI.isFixedObjectIndex(FI) && MFI.getObjectOffset(FI) > 0)
+    BaseReg = VAX::AP;
+
+  MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, false);
   MI.getOperand(FIOperandNum + 1).setImm(Offset);
   return false;
 }

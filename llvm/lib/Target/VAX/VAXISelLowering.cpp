@@ -1023,14 +1023,21 @@ SDValue VAXTargetLowering::LowerFormalArguments(
   CCState CCInfo(CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, CC_VAX);
 
-  SDValue AP = DAG.getRegister(VAX::AP, MVT::i32);
+  MachineFrameInfo &MFI = MF.getFrameInfo();
   for (auto &VA : ArgLocs) {
     // AP+0 is the argument count word written by CALLS.
     // AP+4 is the first argument, AP+8 the second, etc.
-    SDValue Off = DAG.getConstant(VA.getLocMemOffset() + 4, DL, MVT::i32);
-    SDValue Ptr = DAG.getNode(ISD::ADD, DL, MVT::i32, AP, Off);
-    SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, Ptr,
-                               MachinePointerInfo());
+    // Create a fixed stack object for each arg so the RA knows it can
+    // rematerialize loads from the arg area instead of spilling to a new
+    // stack slot. We use positive offsets to distinguish arg-area objects
+    // (AP-relative) from locals (FP-relative, negative offsets).
+    // eliminateFrameIndex resolves these to AP+offset.
+    int APOffset = VA.getLocMemOffset() + 4;
+    int FI = MFI.CreateFixedObject(VA.getLocVT().getSizeInBits() / 8,
+                                   APOffset, /*IsImmutable=*/true);
+    SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
+    SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
+                               MachinePointerInfo::getFixedStack(MF, FI));
 
     // Handle CC promotion: if the arg was promoted (e.g., i8→i32),
     // truncate back to the expected value type.
