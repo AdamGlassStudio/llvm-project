@@ -103,6 +103,24 @@ static void addFrameMemOps(MachineInstrBuilder &MIB, int FrameIndex) {
   MIB.addFrameIndex(FrameIndex).addImm(0).addReg(0).addImm(VAXAM::Disp);
 }
 
+/// Swap a VAX condition code for reversed compare operands.
+/// cmpl A,B; bCC → cmpl B,A; bSwapped(CC)
+static int64_t swapVAXCC(int64_t CC) {
+  switch (CC) {
+  case 0: return 0; // EQL → EQL
+  case 1: return 1; // NEQ → NEQ
+  case 2: return 4; // GTR → LSS
+  case 3: return 5; // GEQ → LEQ
+  case 4: return 2; // LSS → GTR
+  case 5: return 3; // LEQ → GEQ
+  case 6: return 8; // GTRU → LSSU
+  case 7: return 9; // GEQU → LEQU
+  case 8: return 6; // LSSU → GTRU
+  case 9: return 7; // LEQU → GEQU
+  default: return -1;
+  }
+}
+
 MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
     MachineBasicBlock::iterator InsertPt, int FrameIndex, LiveIntervals *LIS,
@@ -152,6 +170,21 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     return MIB;
   }
 
+  // CMP_BRANCH_rr: fold operand 1 ($rhs) → CMP_BRANCH_rm with swapped CC
+  if (Opc == VAX::CMP_BRANCH_rr && OpIdx == 1) {
+    Register LhsReg = MI.getOperand(0).getReg();
+    int64_t CC = MI.getOperand(2).getImm();
+    int64_t SwappedCC = swapVAXCC(CC);
+    if (SwappedCC < 0)
+      return nullptr;
+    MachineBasicBlock *Target = MI.getOperand(3).getMBB();
+    // cmpl lhs, rhs; bCC → cmpl mem(rhs), lhs; bSwapped
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_rm));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addReg(LhsReg).addImm(SwappedCC).addMBB(Target);
+    return MIB;
+  }
+
   // CMP_BRANCH_ri: fold operand 0 ($lhs) → CMP_BRANCH_mi
   if (Opc == VAX::CMP_BRANCH_ri && OpIdx == 0) {
     int64_t RhsImm = MI.getOperand(1).getImm();
@@ -183,6 +216,11 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
   static const Alu3Fold Alu3Folds[] = {
       {VAX::ADDL3_rr, VAX::ADDL3_rm, true},
       {VAX::SUBL3_rr, VAX::SUBL3_rm, false},
+      {VAX::MULL3_rr, VAX::MULL3_rm, true},
+      {VAX::DIVL3_rr, VAX::DIVL3_rm, false},
+      {VAX::BISL3_rr, VAX::BISL3_rm, true},
+      {VAX::XORL3_rr, VAX::XORL3_rm, true},
+      {VAX::ASHL_rr, VAX::ASHL_rm, false},
   };
   for (const auto &F : Alu3Folds) {
     if (Opc != F.FromOpc)
@@ -205,6 +243,18 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
       return MIB;
     }
     return nullptr;
+  }
+
+  // BICL3_rr: special handling — _rm folds operand 2 (src), not operand 1
+  // (mask). BICL3_rr: [0]=dst, [1]=mask, [2]=src
+  // BICL3_rm: [0]=dst, [1]=mask(reg), [2..5]=VAXMemOp(src)
+  if (Opc == VAX::BICL3_rr && OpIdx == 2) {
+    Register Dst = MI.getOperand(0).getReg();
+    Register Mask = MI.getOperand(1).getReg();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::BICL3_rm), Dst);
+    MIB.addReg(Mask);
+    addFrameMemOps(MIB, FrameIndex);
+    return MIB;
   }
 
   // --- ALU 2-operand: fold src (operand 1) into memory ---

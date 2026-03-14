@@ -437,6 +437,14 @@ def DIVL3_rr : InstVAX<0xC7, (outs GPRnoPC:$dst), (ins GPRnoPC:$dv, GPRnoPC:$dd)
     "divl3\t$dv, $dd, $dst",
     [(set GPRnoPC:$dst, (sdiv GPRnoPC:$dd, GPRnoPC:$dv))]>,
     Sched<[WriteDIVL]>;
+// Fold divisor from memory: dst = reg / (load addr)
+// No ISel pattern — used only by foldMemoryOperandImpl to fold spill reloads.
+// ISel should prefer DIVL3_rr → peephole to DIVL2 when dst==dividend.
+let HasMemOp = 1, mayLoad = 1 in
+def DIVL3_rm : InstVAX<0xC7, (outs GPRnoPC:$dst),
+    (ins VAXMemOp:$dv, GPRnoPC:$dd),
+    "divl3\t$dv, $dd, $dst", []>,
+    Sched<[WriteDIVL]>;
 
 // MNEGL — negate longword: dst = -src  (matches ISD ineg = sub 0, x)
 def MNEGL : InstVAX<0xCE, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
@@ -1081,6 +1089,12 @@ def ASHL_ir : InstVAX<0x78, (outs GPRnoPC:$dst),
     (ins ByteImm:$cnt, GPRnoPC:$src),
     "ashl\t$cnt, $src, $dst",
     [(set GPRnoPC:$dst, (shl GPRnoPC:$src, (i32 imm:$cnt)))]>,
+    Sched<[WriteShift]>;
+// Fold shift count from memory: dst = src << (load addr)
+let HasMemOp = 1, mayLoad = 1 in
+def ASHL_rm : InstVAX<0x78, (outs GPRnoPC:$dst),
+    (ins VAXMemOp:$cnt, GPRnoPC:$src),
+    "ashl\t$cnt, $src, $dst", []>,
     Sched<[WriteShift]>;
 
 // ASHL for custom SRA lowering (cnt is already negated by LowerSRA).
