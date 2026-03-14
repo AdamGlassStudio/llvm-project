@@ -507,7 +507,14 @@ FindCallSeqStart(SDNode *N, unsigned &NestLevel, unsigned &MaxNest,
             BestMaxNest = MyMaxNest;
           }
       }
-      assert(Best);
+      // Best may be null if this TokenFactor merges chains where none
+      // contain a CALLSEQ_BEGIN (e.g., when legalized libcalls chain from
+      // EntryToken independently and their results merge with the BB's
+      // computation chain via nested TokenFactors). In this case, return
+      // null and let the caller's TokenFactor find the CALLSEQ_BEGIN
+      // through a different branch.
+      if (!Best)
+        return nullptr;
       MaxNest = BestMaxNest;
       return Best;
     }
