@@ -43,6 +43,199 @@ void VAXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
 
+/// Return the register and frame index of a load from a stack slot.
+/// Recognizes the MOVL_rm / MOVQ_rm / MOVBload / MOVWload patterns
+/// emitted by loadRegFromStackSlot().
+Register VAXInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
+                                           int &FrameIndex) const {
+  unsigned Opc = MI.getOpcode();
+  switch (Opc) {
+  default:
+    return Register();
+  case VAX::MOVL_rm:
+  case VAX::MOVQ_rm:
+  case VAX::MOVBload:
+  case VAX::MOVWload:
+    break;
+  }
+  // Operand layout: $dst, $base, $disp, $index, $flags
+  // A stack load has: FrameIndex as base, disp=0, index=$noreg, flags=Disp.
+  const MachineOperand &Base = MI.getOperand(1);
+  const MachineOperand &Disp = MI.getOperand(2);
+  const MachineOperand &Index = MI.getOperand(3);
+  if (Base.isFI() && Disp.isImm() && Disp.getImm() == 0 &&
+      Index.isReg() && Index.getReg() == 0) {
+    FrameIndex = Base.getIndex();
+    return MI.getOperand(0).getReg();
+  }
+  return Register();
+}
+
+/// Return the register and frame index of a store to a stack slot.
+Register VAXInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
+                                          int &FrameIndex) const {
+  unsigned Opc = MI.getOpcode();
+  switch (Opc) {
+  default:
+    return Register();
+  case VAX::MOVL_mr:
+  case VAX::MOVQ_mr:
+  case VAX::MOVBstore:
+  case VAX::MOVWstore:
+    break;
+  }
+  // Operand layout: $src, $base, $disp, $index, $flags
+  // A stack store has: FrameIndex as base, disp=0, index=$noreg, flags=Disp.
+  const MachineOperand &Base = MI.getOperand(1);
+  const MachineOperand &Disp = MI.getOperand(2);
+  const MachineOperand &Index = MI.getOperand(3);
+  if (Base.isFI() && Disp.isImm() && Disp.getImm() == 0 &&
+      Index.isReg() && Index.getReg() == 0) {
+    FrameIndex = Base.getIndex();
+    return MI.getOperand(0).getReg();
+  }
+  return Register();
+}
+
+/// Helper: append a stack-slot memory operand (FrameIndex, disp=0, no index,
+/// Disp mode) to a MachineInstrBuilder.
+static void addFrameMemOps(MachineInstrBuilder &MIB, int FrameIndex) {
+  MIB.addFrameIndex(FrameIndex).addImm(0).addReg(0).addImm(VAXAM::Disp);
+}
+
+MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
+    MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
+    MachineBasicBlock::iterator InsertPt, int FrameIndex, LiveIntervals *LIS,
+    VirtRegMap *VRM) const {
+  // We only fold a single operand at a time.
+  if (Ops.size() != 1)
+    return nullptr;
+
+  unsigned OpIdx = Ops[0];
+  unsigned Opc = MI.getOpcode();
+
+  // Don't try to fold COPYs — the base class handles those.
+  if (MI.isCopy())
+    return nullptr;
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  // --- Fold loads: register source → memory source ---
+  // The RA wants to replace a register use with a load from FrameIndex.
+
+  // PUSHL_r $reg → PUSHL_m (stack-slot)
+  if (Opc == VAX::PUSHL_r && OpIdx == 0) {
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::PUSHL_m));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addReg(VAX::SP, RegState::ImplicitDefine);
+    return MIB;
+  }
+
+  // CMPL_rr: fold operand 0 ($a) → CMPL_rm
+  if (Opc == VAX::CMPL_rr && OpIdx == 0) {
+    Register RhsReg = MI.getOperand(1).getReg();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMPL_rm));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addReg(RhsReg);
+    return MIB;
+  }
+
+  // CMP_BRANCH_rr: fold operand 0 ($lhs) → CMP_BRANCH_rm
+  if (Opc == VAX::CMP_BRANCH_rr && OpIdx == 0) {
+    Register RhsReg = MI.getOperand(1).getReg();
+    int64_t CC = MI.getOperand(2).getImm();
+    MachineBasicBlock *Target = MI.getOperand(3).getMBB();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_rm));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addReg(RhsReg).addImm(CC).addMBB(Target);
+    return MIB;
+  }
+
+  // CMP_BRANCH_ri: fold operand 0 ($lhs) → CMP_BRANCH_mi
+  if (Opc == VAX::CMP_BRANCH_ri && OpIdx == 0) {
+    int64_t RhsImm = MI.getOperand(1).getImm();
+    int64_t CC = MI.getOperand(2).getImm();
+    MachineBasicBlock *Target = MI.getOperand(3).getMBB();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_mi));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addImm(RhsImm).addImm(CC).addMBB(Target);
+    return MIB;
+  }
+
+  // TST_BRANCH: fold operand 0 ($src) → TST_BRANCH_m
+  if (Opc == VAX::TST_BRANCH && OpIdx == 0) {
+    int64_t CC = MI.getOperand(1).getImm();
+    MachineBasicBlock *Target = MI.getOperand(2).getMBB();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::TST_BRANCH_m));
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addImm(CC).addMBB(Target);
+    return MIB;
+  }
+
+  // --- ALU 3-operand: fold src1 (operand 1) into memory ---
+  // ALU3_rr: [0]=dst, [1]=src1, [2]=src2
+  // ALU3_rm: [0]=dst, [1..4]=VAXMemOp(src1), [5]=src2
+  struct Alu3Fold {
+    unsigned FromOpc, ToOpc;
+    bool Commutative;
+  };
+  static const Alu3Fold Alu3Folds[] = {
+      {VAX::ADDL3_rr, VAX::ADDL3_rm, true},
+      {VAX::SUBL3_rr, VAX::SUBL3_rm, false},
+  };
+  for (const auto &F : Alu3Folds) {
+    if (Opc != F.FromOpc)
+      continue;
+    Register Dst = MI.getOperand(0).getReg();
+    // Fold operand 1 (src1) directly.
+    if (OpIdx == 1) {
+      Register Src2 = MI.getOperand(2).getReg();
+      auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc), Dst);
+      addFrameMemOps(MIB, FrameIndex);
+      MIB.addReg(Src2);
+      return MIB;
+    }
+    // Fold operand 2 (src2) for commutative ops by swapping.
+    if (OpIdx == 2 && F.Commutative) {
+      Register Src1 = MI.getOperand(1).getReg();
+      auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc), Dst);
+      addFrameMemOps(MIB, FrameIndex);
+      MIB.addReg(Src1);
+      return MIB;
+    }
+    return nullptr;
+  }
+
+  // --- ALU 2-operand: fold src (operand 1) into memory ---
+  // ALU2_rr: [0]=dst(def,tied), [1]=src, [2]=src2(tied to dst)
+  // ALU2_rm: [0]=dst(def,tied), [1..4]=VAXMemOp(src), [5]=src2(tied to dst)
+  // Only fold operand 1 (the non-tied source).
+  struct Alu2Fold {
+    unsigned FromOpc, ToOpc;
+  };
+  static const Alu2Fold Alu2Folds[] = {
+      {VAX::ADDL2_rr, VAX::ADDL2_rm}, {VAX::SUBL2_rr, VAX::SUBL2_rm},
+      {VAX::MULL2_rr, VAX::MULL2_rm}, {VAX::DIVL2_rr, VAX::DIVL2_rm},
+      {VAX::BISL2_rr, VAX::BISL2_rm}, {VAX::BICL2_rr, VAX::BICL2_rm},
+      {VAX::XORL2_rr, VAX::XORL2_rm},
+  };
+  for (const auto &F : Alu2Folds) {
+    if (Opc != F.FromOpc)
+      continue;
+    if (OpIdx != 1)
+      return nullptr;
+    Register DstReg = MI.getOperand(0).getReg();
+    auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc));
+    MIB.addDef(DstReg);
+    addFrameMemOps(MIB, FrameIndex);
+    MIB.addReg(DstReg); // tied src2
+    return MIB;
+  }
+
+  return nullptr;
+}
+
 void VAXInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator MI,
                                         Register SrcReg, bool isKill,
