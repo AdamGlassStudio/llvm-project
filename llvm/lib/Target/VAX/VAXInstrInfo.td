@@ -1931,59 +1931,61 @@ def EDIV_m : InstVAX<0x7B, (outs),
 // --- Branch-on-bit instructions ---
 
 // BBS (0xE0): branch on bit set. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBS : InstVAX<0xE0, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbs\t$pos, $base, $disp", []>;
 
 // BBC (0xE1): branch on bit clear. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBC : InstVAX<0xE1, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbc\t$pos, $base, $disp", []>;
 
 // BBSS (0xE2): branch on bit set and set. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBSS : InstVAX<0xE2, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbss\t$pos, $base, $disp", []>;
 
 // BBCS (0xE3): branch on bit clear and set. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBCS : InstVAX<0xE3, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcs\t$pos, $base, $disp", []>;
 
 // BBSC (0xE4): branch on bit set and clear. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBSC : InstVAX<0xE4, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbsc\t$pos, $base, $disp", []>;
 
 // BBCC (0xE5): branch on bit clear and clear. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBCC : InstVAX<0xE5, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcc\t$pos, $base, $disp", []>;
 
 // BBSSI (0xE6): branch on bit set and set interlocked. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBSSI : InstVAX<0xE6, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbssi\t$pos, $base, $disp", []>;
 
 // BBCCI (0xE7): branch on bit clear and clear interlocked. pos.rl, base.rl, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def BBCCI : InstVAX<0xE7, (outs),
     (ins VAXMemOp:$pos, VAXMemOp:$base, brtarget:$disp),
     "bbcci\t$pos, $base, $disp", []>;
 
 // BLBS (0xE8): branch on low bit set. src.rl, disp.bb
+let isBranch = 1, isTerminator = 1 in
 def BLBS : InstVAX<0xE8, (outs),
     (ins VAXMemOp:$src, brtarget:$disp),
     "blbs\t$src, $disp", []>;
 
 // BLBC (0xE9): branch on low bit clear. src.rl, disp.bb
+let isBranch = 1, isTerminator = 1 in
 def BLBC : InstVAX<0xE9, (outs),
     (ins VAXMemOp:$src, brtarget:$disp),
     "blbc\t$src, $disp", []>;
@@ -2678,10 +2680,12 @@ def JSB_m : InstVAX<0x16, (outs), (ins VAXMemOp:$target),
 //===----------------------------------------------------------------------===//
 
 // BVC/BVS: branch on overflow clear/set (0x1C/0x1D).
+let Uses = [PSW], isBranch = 1, isTerminator = 1 in {
 def BVC : InstVAX<0x1C, (outs), (ins brtarget:$dst), "bvc\t$dst", []>,
     Sched<[WriteBRcc]>;
 def BVS : InstVAX<0x1D, (outs), (ins brtarget:$dst), "bvs\t$dst", []>,
     Sched<[WriteBRcc]>;
+}
 
 let HasMemOp = 1 in {
 
@@ -3128,3 +3132,47 @@ def : Pat<(nonvolatile_store (i32 (xor (i32 (nonvolatile_load VAXMemLong:$dst)),
                          (i32 imm:$src))),
                              VAXMemLong:$dst),
           (XORL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
+
+//===----------------------------------------------------------------------===//
+// GAS j-prefix branch aliases
+//
+// GAS uses j-prefixed mnemonics (jbr, jeql, jneq, ...) as "jump" forms that
+// automatically relax between byte-displacement and word-displacement.  Our
+// assembler handles relaxation separately, so these are simple aliases.
+//===----------------------------------------------------------------------===//
+
+// Unconditional branch
+def : InstAlias<"jbr\t$dst", (BRB brtarget:$dst)>;
+def : InstAlias<"jr\t$dst",  (BRB brtarget:$dst)>;
+
+// Signed conditional branches
+def : InstAlias<"jeql\t$dst", (BEQL brtarget:$dst)>;
+def : InstAlias<"jeq\t$dst",  (BEQL brtarget:$dst)>;
+def : InstAlias<"jneq\t$dst", (BNEQ brtarget:$dst)>;
+def : InstAlias<"jne\t$dst",  (BNEQ brtarget:$dst)>;
+def : InstAlias<"jgtr\t$dst", (BGTR brtarget:$dst)>;
+def : InstAlias<"jgeq\t$dst", (BGEQ brtarget:$dst)>;
+def : InstAlias<"jlss\t$dst", (BLSS brtarget:$dst)>;
+def : InstAlias<"jleq\t$dst", (BLEQ brtarget:$dst)>;
+
+// Unsigned conditional branches
+def : InstAlias<"jgtru\t$dst", (BGTRU brtarget:$dst)>;
+def : InstAlias<"jgequ\t$dst", (BGEQU brtarget:$dst)>;
+def : InstAlias<"jlssu\t$dst", (BLSSU brtarget:$dst)>;
+def : InstAlias<"jlequ\t$dst", (BLEQU brtarget:$dst)>;
+
+// Carry/overflow aliases
+def : InstAlias<"jcc\t$dst", (BGEQU brtarget:$dst)>;  // carry clear = BGEQU
+def : InstAlias<"jcs\t$dst", (BLSSU brtarget:$dst)>;  // carry set = BLSSU
+def : InstAlias<"jvc\t$dst", (BVC brtarget:$dst)>;
+def : InstAlias<"jvs\t$dst", (BVS brtarget:$dst)>;
+
+// Low-bit branch aliases
+def : InstAlias<"jlbs\t$src, $dst", (BLBS VAXMemOp:$src, brtarget:$dst)>;
+def : InstAlias<"jlbc\t$src, $dst", (BLBC VAXMemOp:$src, brtarget:$dst)>;
+
+// Bit-field branch aliases
+def : InstAlias<"jbs\t$pos, $base, $dst",
+                (BBS VAXMemOp:$pos, VAXMemOp:$base, brtarget:$dst)>;
+def : InstAlias<"jbc\t$pos, $base, $dst",
+                (BBC VAXMemOp:$pos, VAXMemOp:$base, brtarget:$dst)>;
