@@ -138,12 +138,33 @@ static Register getTSTReg(const MachineInstr &MI) {
   }
 }
 
+/// Return true if the given opcode is known to set PSW condition codes (N, Z,
+/// V, C) even though its TableGen definition does not include Defs=[PSW].
+/// On VAX, nearly all data-manipulation instructions set condition codes.
+/// MOVL_rr, MOVL_rm, MOVL_mr, and MOVL_mi are intentionally defined without
+/// Defs=[PSW] to avoid interfering with the register allocator's dead-def
+/// elimination (see VAXInstrInfo.td for rationale).  The peephole uses this
+/// helper to recognise the flag-setting behaviour for redundant-TST
+/// elimination.
+static bool inherentlySetsPSW(unsigned Opc) {
+  switch (Opc) {
+  case VAX::MOVL_rr:
+  case VAX::MOVL_rm:
+  case VAX::MOVL_mr:
+  case VAX::MOVL_mi:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// Check if MI defines the given physical register as an explicit def
 /// (i.e. it writes a result to that register, setting N/Z flags on it).
 /// We exclude CMP/TST instructions since they set PSW but don't write a GPR.
 static bool definesRegWithFlags(const MachineInstr &MI, Register Reg) {
   // Must define PSW (set condition codes).
-  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr))
+  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr) &&
+      !inherentlySetsPSW(MI.getOpcode()))
     return false;
 
   // Check explicit defs — the result register(s) of the instruction.
@@ -163,7 +184,8 @@ static bool setsFlagsFromSource(const MachineInstr &MI, Register Reg,
                                 unsigned TstOpc) {
   unsigned Opc = MI.getOpcode();
 
-  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr))
+  if (!MI.modifiesRegister(VAX::PSW, /*TRI=*/nullptr) &&
+      !inherentlySetsPSW(Opc))
     return false;
 
   Register SrcReg;

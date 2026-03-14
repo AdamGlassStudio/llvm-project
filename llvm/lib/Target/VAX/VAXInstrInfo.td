@@ -111,23 +111,27 @@ def CLRL_ms : InstVAX<0xD4, (outs), (ins VAXMemOp:$dst),
 // MOVL (opcode 0xD0) — longword (32-bit) move, various operand forms.
 // All variants share the opcode; operand specifiers encode the addressing mode.
 // All MOV/MOVAL instructions set PSW condition codes.
-let Defs = [PSW] in {
+// MOVL_rr, MOVL_rm, MOVL_mr, MOVL_mi — kept OUTSIDE the Defs=[PSW] block.
+//
+// Real VAX movl sets condition codes, but modelling this as Defs=[PSW] on
+// the instructions used for spills, reloads, and register copies causes the
+// register allocator's dead-def elimination to fail: when a MOVL_rm becomes
+// dead (e.g. after rematerialisation removes all uses), eliminateDeadDef
+// asserts allDefsAreDead(), which fails when implicit-def $psw isn't dead.
+//
+// The condition-code setting is instead handled post-RA by the peephole pass
+// (tryEliminateRedundantTST), which knows these opcodes set PSW and can
+// eliminate redundant TSTL instructions without the .td annotation.
 
 // reg <- reg  (register copy; no DAG pattern — emitted by copyPhysReg)
 def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
     "movl\t$src, $dst", []>, Sched<[WriteMOV]>;
 
-// reg <- immediate  (assembler emits $imm literal)
-// Rematerializable: the RA can recompute an immediate load instead of
-// spilling/reloading. This is critical for avoiding unnecessary stack traffic
-// on VAX where memory operands are multi-byte.
-let isReMaterializable = 1, isAsCheapAsAMove = 1 in
-def MOVL_ri : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$imm),
-    "movl\t$imm, $dst",
-    [(set GPRnoPC:$dst, (i32 imm:$imm))]>, Sched<[WriteMOV]>;
-
 // reg <- memory  (displacement/deferred load)
-let HasMemOp = 1 in
+// Rematerializable: the RA will check isLoadFromStackSlot() +
+// isImmutableObjectIndex() to allow remat only for loads from immutable
+// fixed stack slots (e.g. function arguments via AP).
+let HasMemOp = 1, isReMaterializable = 1 in
 def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "movl\t$src, $dst",
     [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>, Sched<[WriteMOV]>;
@@ -143,6 +147,17 @@ let HasMemOp = 1 in
 def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
     "movl\t$imm, $dst",
     [(store (i32 imm:$imm), VAXMemLong:$dst)]>, Sched<[WriteMOV]>;
+
+let Defs = [PSW] in {
+
+// reg <- immediate  (assembler emits $imm literal)
+// Rematerializable: the RA can recompute an immediate load instead of
+// spilling/reloading. This is critical for avoiding unnecessary stack traffic
+// on VAX where memory operands are multi-byte.
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in
+def MOVL_ri : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins i32imm:$imm),
+    "movl\t$imm, $dst",
+    [(set GPRnoPC:$dst, (i32 imm:$imm))]>, Sched<[WriteMOV]>;
 
 // ISel-only PC-relative variants — not visible to the asm matcher.
 // The assembler uses the _rm/_mm memory-operand forms which encode the
@@ -243,7 +258,7 @@ multiclass VAXAlu2<bits<16> opc, string mn, SchedWrite sched = WriteALU> {
     let Constraints = "$src = $dst";
   }
   // Memory source: addl2 mem, dst. Used by peephole (3op→2op with mem source).
-  let HasMemOp = 1 in
+  let HasMemOp = 1, mayLoad = 1 in
   def _rm : InstVAX<opc, (outs GPRnoPC:$dst),
       (ins VAXMemOp:$s, GPRnoPC:$src),
       mn # "\t$s, $dst", []>, Sched<[sched]> {
@@ -640,6 +655,7 @@ def TSTF_BRANCH : Pseudo<(outs),
 def TSTD_BRANCH : Pseudo<(outs),
     (ins QPR:$src, i32imm:$cc, brtarget:$dst), "", []>;
 // Memory-operand compare/test fused pseudos:
+let mayLoad = 1 in {
 def CMP_BRANCH_rm : Pseudo<(outs),
     (ins VAXMemOp:$lhs, GPRnoPC:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def CMP_BRANCH_mm : Pseudo<(outs),
@@ -648,15 +664,18 @@ def CMP_BRANCH_mi : Pseudo<(outs),
     (ins VAXMemOp:$lhs, i32imm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TST_BRANCH_m : Pseudo<(outs),
     (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
+} // let mayLoad = 1
 // Byte/word compare/test fused pseudos:
 def CMPB_BRANCH : Pseudo<(outs),
     (ins GPRB:$lhs, GPRB:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+let mayLoad = 1 in {
 def CMPB_BRANCH_mi : Pseudo<(outs),
     (ins VAXMemOp:$lhs, ByteImm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTB_BRANCH : Pseudo<(outs),
     (ins GPRB:$src, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTB_BRANCH_m : Pseudo<(outs),
     (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
+} // let mayLoad = 1
 def CMPW_BRANCH : Pseudo<(outs),
     (ins GPRW:$lhs, GPRW:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTW_BRANCH : Pseudo<(outs),
@@ -2213,6 +2232,7 @@ let isCodeGenOnly = 0, HasMemOp = 1 in {
 let Defs = [PSW] in {
 
 // PUSHL: push longword onto stack. Only had _r and _i.
+let mayLoad = 1, mayStore = 1 in
 def PUSHL_m : InstVAX<0xDD, (outs), (ins VAXMemOp:$src),
     "pushl\t$src", []>;
 
