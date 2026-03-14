@@ -148,10 +148,59 @@ static Register getTSTReg(const MachineInstr &MI) {
 /// elimination.
 static bool inherentlySetsPSW(unsigned Opc) {
   switch (Opc) {
+  // MOVL variants
   case VAX::MOVL_rr:
   case VAX::MOVL_rm:
   case VAX::MOVL_mr:
   case VAX::MOVL_mi:
+  case VAX::MOVL_mm:
+  // MOVB truncating store variants
+  case VAX::MOVB_mm:
+  case VAX::MOVB_mr:
+  case VAX::MOVB_mg:
+  case VAX::MOVBstore:
+  case VAX::MOVBstore_i:
+  case VAX::MOVBstore_ga:
+  // MOVW truncating store variants
+  case VAX::MOVW_mm:
+  case VAX::MOVW_mr:
+  case VAX::MOVW_mg:
+  case VAX::MOVWstore:
+  case VAX::MOVWstore_i:
+  case VAX::MOVWstore_ga:
+  case VAX::MOVQ_mm:
+  // MOVZBL/MOVZWL (zero-extend loads)
+  case VAX::MOVZBL_rm:
+  case VAX::MOVZBL_rm_e:
+  case VAX::MOVZBL_rg:
+  case VAX::MOVZBL_rg_e:
+  case VAX::MOVZBL_rr:
+  case VAX::MOVZWL_rm:
+  case VAX::MOVZWL_rm_e:
+  case VAX::MOVZWL_rg:
+  case VAX::MOVZWL_rg_e:
+  case VAX::MOVZWL_rr:
+  // CVTBL/CVTWL (sign-extend conversions)
+  case VAX::CVTBL_rm:
+  case VAX::CVTBL_rg:
+  case VAX::CVTBL_rr:
+  case VAX::CVTBL_rr_ext:
+  case VAX::CVTWL_rm:
+  case VAX::CVTWL_rg:
+  case VAX::CVTWL_rr:
+  case VAX::CVTWL_rr_ext:
+  // CVTBW/MOVZBW (byte to word)
+  case VAX::CVTBW_rr:
+  case VAX::MOVZBW_rr:
+  // Native byte/word loads and copies
+  case VAX::MOVBload:
+  case VAX::MOVBload_ga:
+  case VAX::MOVBrr:
+  case VAX::MOVBri:
+  case VAX::MOVWload:
+  case VAX::MOVWload_ga:
+  case VAX::MOVWrr:
+  case VAX::MOVWri:
     return true;
   default:
     return false;

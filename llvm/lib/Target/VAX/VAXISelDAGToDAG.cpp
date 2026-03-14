@@ -310,7 +310,21 @@ bool VAXDAGToDAGISel::tryNarrowCmpToByte(SDNode *N) {
     return false;
   if (Load->getMemoryVT() != MVT::i8)
     return false;
+  // Don't fold volatile loads — the chain output from the compare node would
+  // flow through lifetime markers into the TokenFactor consumed by the branch,
+  // creating a scheduling cycle (the branch is glue-connected to the compare).
+  if (Load->isVolatile())
+    return false;
   if (!LHS.hasOneUse())
+    return false;
+
+  // Don't fold when the load's chain output has users — redirecting them to
+  // the compare node's chain creates scheduling cycles.  The compare is
+  // glue-connected to the branch, which reads the BB's final TokenFactor.
+  // If any of the load's chain users (lifetime markers, stores, etc.) feed
+  // into that TokenFactor, the cycle is:
+  //   CMPB_mi:ch → users → TokenFactor → BNEQ (same SUnit via glue).
+  if (!LHS.getValue(1).use_empty())
     return false;
 
   // RHS must be a constant that fits in a byte (0..255).

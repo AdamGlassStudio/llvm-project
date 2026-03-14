@@ -59,7 +59,11 @@ define i32 @load_volatile() {
 
 define void @store_volatile(i32 %v) {
 ; CHECK-LABEL: store_volatile:
-; CHECK: movl 4(%ap), g32
+; Volatile stores go through a register to avoid scheduling cycle issues with
+; nonvolatile PatFrags (volatile loads/stores are not folded into compound
+; mem-to-mem instructions).
+; CHECK: movl 4(%ap), %r0
+; CHECK-NEXT: movl %r0, g32
   store volatile i32 %v, ptr @g32
   ret void
 }

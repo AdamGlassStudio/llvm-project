@@ -76,6 +76,28 @@ def VAXMemAddr : ComplexPattern<iPTR, 4, "SelectVAXAddrNonTrivial",
 def VAXMemLong : ComplexPattern<iPTR, 4, "SelectVAXAddrLong",
                                 [frameindex, add], []>;
 
+// Non-volatile load/store PatFrags — prevent folding volatile memory ops
+// into compound instructions (mem-to-mem MOV, RMW ALU) that the scheduler
+// cannot split.  Volatile ops must remain as separate load/store nodes.
+class NonvolatileLoad<SDPatternOperator load>
+  : PatFrag<(ops node:$addr), (load node:$addr), [{
+  return !cast<LoadSDNode>(N)->isVolatile();
+}]>;
+class NonvolatileStore<SDPatternOperator store>
+  : PatFrag<(ops node:$src, node:$addr), (store node:$src, node:$addr), [{
+  return !cast<StoreSDNode>(N)->isVolatile();
+}]>;
+def nonvolatile_load        : NonvolatileLoad<load>;
+def nonvolatile_extloadi8   : NonvolatileLoad<extloadi8>;
+def nonvolatile_zextloadi8  : NonvolatileLoad<zextloadi8>;
+def nonvolatile_sextloadi8  : NonvolatileLoad<sextloadi8>;
+def nonvolatile_extloadi16  : NonvolatileLoad<extloadi16>;
+def nonvolatile_zextloadi16 : NonvolatileLoad<zextloadi16>;
+def nonvolatile_sextloadi16 : NonvolatileLoad<sextloadi16>;
+def nonvolatile_store           : NonvolatileStore<store>;
+def nonvolatile_truncstorei8    : NonvolatileStore<truncstorei8>;
+def nonvolatile_truncstorei16   : NonvolatileStore<truncstorei16>;
+
 //===----------------------------------------------------------------------===//
 // Real instructions (Phase 3 — enough for "int f() { return 0; }")
 //===----------------------------------------------------------------------===//
@@ -465,9 +487,13 @@ def BICL3_rm : InstVAX<0xCB, (outs GPRnoPC:$dst),
     [(set GPRnoPC:$dst, (vax_bicl GPRnoPC:$mask, (load VAXMemLong:$src)))]>,
     Sched<[WriteALU]>;
 
+} // let Defs = [PSW] — end of integer ALU block
+
 // MOVZBL — zero-extend byte to longword.
+// Moved out of Defs=[PSW]: data movement instructions with implicit PSW defs
+// create scheduling cycles when interacting with volatile memory chains.
+// The peephole's inherentlySetsPSW() handles redundant-TST elimination.
 defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8, ByteImm>;
-} // let Defs = [PSW] — end of integer ALU + MOVZBL block
 
 //===----------------------------------------------------------------------===//
 // Phase 6 — Comparisons + Branches
@@ -527,7 +553,7 @@ def CMPL_ri : InstVAX<0xD1, (outs), (ins GPRnoPC:$a, i32imm:$b),
 let HasMemOp = 1 in
 def CMPL_rm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, GPRnoPC:$b),
     "cmpl\t$a, $b",
-    [(vax_cmp (load VAXMemLong:$a), GPRnoPC:$b)]>,
+    [(vax_cmp (nonvolatile_load VAXMemLong:$a), GPRnoPC:$b)]>,
     Sched<[WriteALU]>;
 // TSTL — Test Longword: equivalent to cmpl reg, $0 but one byte shorter.
 def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
@@ -537,7 +563,7 @@ def TSTL : InstVAX<0xD5, (outs), (ins GPRnoPC:$a),
 let HasMemOp = 1 in
 def TSTL_m : InstVAX<0xD5, (outs), (ins VAXMemOp:$a),
     "tstl\t$a",
-    [(vax_cmp (load VAXMemLong:$a), (i32 0))]>,
+    [(vax_cmp (nonvolatile_load VAXMemLong:$a), (i32 0))]>,
     Sched<[WriteALU]>;
 }
 
@@ -700,8 +726,10 @@ def DECL : InstVAX<0xD7, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
 // Phase 7 — Sign/Zero-Extend Loads + Truncating Stores
 //===----------------------------------------------------------------------===//
 
-// All these conversion/move instructions set PSW condition codes.
-let Defs = [PSW] in {
+// Conversion/move instructions set PSW on real hardware, but modeling
+// Defs=[PSW] on data-movement instructions creates scheduling cycles with
+// volatile memory chains (same issue as MOVL/MOVB stores above).
+// The peephole's inherentlySetsPSW() handles redundant-TST elimination.
 
 // CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
 // source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
@@ -713,20 +741,23 @@ defm MOVZWL : VAXMovZext<0x3C, "movzwl", zextloadi16, extloadi16, WordImm>;
 // CVTWL (0x32) — Convert Word to Longword: sign-extends low 16 bits.
 defm CVTWL : VAXSextConv<0x32, "cvtwl", sextloadi16, i16, WordImm>;
 
-// MOVB (0x90) — Move Byte: used for truncating stores of i32 to i8 memory.
+// MOVB/MOVW truncating stores set PSW on real hardware, but modeling Defs=[PSW]
+// on store-only instructions (no register output) makes PSW the sole data
+// output.  The ISel scheduler then creates ordering edges through PSW that
+// interact with volatile memory chains and call sequences, producing
+// unresolvable cycles (VerifyScheduledDAG assertion).  The peephole's
+// inherentlySetsPSW() recognizes these as implicit flag setters for
+// redundant-TST elimination.
 defm MOVB : VAXTruncStore<0x90, "movb", truncstorei8>;
-
-// MOVW (0xB0) — Move Word: used for truncating stores of i32 to i16 memory.
 defm MOVW : VAXTruncStore<0xB0, "movw", truncstorei16>;
-} // let Defs = [PSW] — end of Phase 7 conversion/move block
 
 //===----------------------------------------------------------------------===//
 // Phase 33B — Native byte/word loads, stores, extends, truncates
 //===----------------------------------------------------------------------===//
 
-let Defs = [PSW] in {
+// All byte/word MOV/CVT instructions — no Defs=[PSW] (same rationale as above).
 
-// MOVB (0x90) — native i8 load/store/copy (byte register class).
+// MOVB (0x90) — native i8 load/copy (byte register class).
 // reg <- mem (byte load)
 let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVBload : InstVAX<0x90, (outs GPRB:$dst), (ins VAXMemOp:$src),
@@ -737,21 +768,6 @@ let isCodeGenOnly = 1 in
 def MOVBload_ga : InstVAX<0x90, (outs GPRB:$dst), (ins i32imm:$sym),
     "movb\t$sym, $dst",
     [(set GPRB:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-// mem <- reg (byte store)
-let isCodeGenOnly = 1, HasMemOp = 1 in
-def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
-    "movb\t$src, $dst",
-    [(store GPRB:$src, VAXMem:$dst)]>;
-// mem <- imm (byte store immediate)
-let isCodeGenOnly = 1, HasMemOp = 1 in
-def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
-    "movb\t$src, $dst",
-    [(store (i8 imm:$src), VAXMem:$dst)]>;
-// globaladdr <- reg (byte store via PC-relative)
-let isCodeGenOnly = 1 in
-def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
-    "movb\t$src, $sym",
-    [(store GPRB:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 // reg <- reg (byte copy; no DAG pattern — emitted by copyPhysReg)
 let isCodeGenOnly = 1 in
 def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
@@ -762,7 +778,7 @@ def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins i8imm:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (i8 imm:$src))]>;
 
-// MOVW (0xB0) — native i16 load/store/copy (word register class).
+// MOVW (0xB0) — native i16 load/copy (word register class).
 // reg <- mem (word load)
 let isCodeGenOnly = 1, HasMemOp = 1 in
 def MOVWload : InstVAX<0xB0, (outs GPRW:$dst), (ins VAXMemOp:$src),
@@ -773,21 +789,6 @@ let isCodeGenOnly = 1 in
 def MOVWload_ga : InstVAX<0xB0, (outs GPRW:$dst), (ins i32imm:$sym),
     "movw\t$sym, $dst",
     [(set GPRW:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
-// mem <- reg (word store)
-let isCodeGenOnly = 1, HasMemOp = 1 in
-def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
-    "movw\t$src, $dst",
-    [(store GPRW:$src, VAXMem:$dst)]>;
-// mem <- imm (word store immediate)
-let isCodeGenOnly = 1, HasMemOp = 1 in
-def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
-    "movw\t$src, $dst",
-    [(store (i16 imm:$src), VAXMem:$dst)]>;
-// globaladdr <- reg (word store via PC-relative)
-let isCodeGenOnly = 1 in
-def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
-    "movw\t$src, $sym",
-    [(store GPRW:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 // reg <- reg (word copy; no DAG pattern — emitted by copyPhysReg)
 let isCodeGenOnly = 1 in
 def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
@@ -822,20 +823,52 @@ def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "cvtwl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRW:$src))]>;
 
-} // let Defs = [PSW]
+// MOVB/MOVW store instructions — moved out of Defs=[PSW] for the same reason
+// as MOVB_mr/MOVW_mr above: store-only instructions with PSW as sole data
+// output create unresolvable scheduler cycles with volatile memory chains.
+// mem <- reg (byte store)
+let isCodeGenOnly = 1, HasMemOp = 1 in
+def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
+    "movb\t$src, $dst",
+    [(store GPRB:$src, VAXMem:$dst)]>;
+// mem <- imm (byte store immediate)
+let isCodeGenOnly = 1, HasMemOp = 1 in
+def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
+    "movb\t$src, $dst",
+    [(store (i8 imm:$src), VAXMem:$dst)]>;
+// globaladdr <- reg (byte store via PC-relative)
+let isCodeGenOnly = 1 in
+def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
+    "movb\t$src, $sym",
+    [(store GPRB:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
+// mem <- reg (word store)
+let isCodeGenOnly = 1, HasMemOp = 1 in
+def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
+    "movw\t$src, $dst",
+    [(store GPRW:$src, VAXMem:$dst)]>;
+// mem <- imm (word store immediate)
+let isCodeGenOnly = 1, HasMemOp = 1 in
+def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
+    "movw\t$src, $dst",
+    [(store (i16 imm:$src), VAXMem:$dst)]>;
+// globaladdr <- reg (word store via PC-relative)
+let isCodeGenOnly = 1 in
+def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
+    "movw\t$src, $sym",
+    [(store GPRW:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 
 // anyext i8/i16→i32: use MOVZBL/MOVZWL (zero-fill is cheapest).
 def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
 def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
 
 // CVTBW (0x99) reg <- reg: sign-extend i8 to i16.
-let Defs = [PSW], isCodeGenOnly = 1 in
+let isCodeGenOnly = 1 in
 def CVTBW_rr : InstVAX<0x99, (outs GPRW:$dst), (ins GPRB:$src),
     "cvtbw\t$src, $dst",
     [(set GPRW:$dst, (sext GPRB:$src))]>;
 
 // MOVZBW (0x9B) reg <- reg: zero-extend i8 to i16.
-let Defs = [PSW], isCodeGenOnly = 1 in
+let isCodeGenOnly = 1 in
 def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
     "movzbw\t$src, $dst",
     [(set GPRW:$dst, (zext GPRB:$src))]>;
@@ -2290,13 +2323,14 @@ def MOVPSL_m : InstVAX<0xDC, (outs), (ins VAXMemOp:$dst),
 
 // --- Two-operand instructions (2 mem operands) ---
 
-let Defs = [PSW] in {
-
-// MOVL: move longword. Add all-memory variant.
+// MOV_mm instructions kept OUTSIDE Defs=[PSW] for the same reason as
+// MOVL_rr/rm/mr/mi above: the implicit-def $psw creates scheduling
+// dependencies that cause VerifyScheduledDAG assertion failures when
+// memory-to-memory moves interact with call sequences. The peephole's
+// inherentlySetsPSW() handles these for redundant-TST elimination.
 def MOVL_mm : InstVAX<0xD0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movl\t$src, $dst", []>;
 
-// MOVB/MOVW: move byte/word. All-memory.
 let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def MOVB_mm : InstVAX<0x90, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movb\t$src, $dst", []>;
@@ -2304,10 +2338,11 @@ let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def MOVW_mm : InstVAX<0xB0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movw\t$src, $dst", []>;
 
-// MOVQ: move quadword. All-memory.
 let MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def MOVQ_mm : InstVAX<0x7D, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movq\t$src, $dst", []>;
+
+let Defs = [PSW] in {
 
 // CMPL/CMPB/CMPW: compare. All-memory.
 def CMPL_mm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
@@ -2431,7 +2466,12 @@ def MTPR_mm : InstVAX<0xDA, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 def MFPR_mm : InstVAX<0xDB, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
     "mfpr\t$src, $dst", []>;
 
-let Defs = [PSW] in {
+// Memory-operand ALU instructions: kept OUTSIDE Defs=[PSW].
+// These are all (outs) instructions — no register output — so PSW would be
+// their sole data output, creating scheduling cycles with volatile memory
+// chains and call sequences (same root cause as MOV stores above).
+// The peephole never tries to eliminate TST after these (it only checks
+// instructions with register outputs), so removing PSW is safe.
 
 // 2-operand ALU: all-memory variants.
 def ADDL2_mm : InstVAX<0xC0, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
@@ -2464,10 +2504,16 @@ def BICL2_mi : InstVAX<0xCA, (outs), (ins i32imm:$src, VAXMemOp:$dst),
 def XORL2_mi : InstVAX<0xCC, (outs), (ins i32imm:$src, VAXMemOp:$dst),
     "xorl2\t$src, $dst", []>;
 
-// Compare: memory against immediate.
+// Compare: memory against immediate — CMPL_mi DOES need Defs=[PSW] for the
+// ISel pattern to connect the compare result (glue) to the branch. Unlike the
+// ALU memory ops above, CMPL_mi is a compare that legitimately produces
+// condition codes consumed by branch instructions.
+// Use nonvolatile load to prevent volatile loads from being folded in
+// (volatile chains through lifetime markers would create scheduling cycles).
+let Defs = [PSW] in
 def CMPL_mi : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, i32imm:$b),
     "cmpl\t$a, $b",
-    [(vax_cmp (load VAXMemLong:$a), (i32 imm:$b))]>,
+    [(vax_cmp (nonvolatile_load VAXMemLong:$a), (i32 imm:$b))]>,
     Sched<[WriteALU]>;
 
 // 2-operand byte/word ALU: all-memory.
@@ -2596,8 +2642,6 @@ def MULD3_mm : InstVAX<0x65, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$ds
 def DIVD3_mm : InstVAX<0x67, (outs), (ins VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst),
     "divd3\t$a, $b, $dst", []>, Sched<[WriteFPDDIV]>;
 } // MemOpWidth0 = 3, MemOpWidth1 = 3, MemOpWidth2 = 3
-
-} // Defs = [PSW]
 
 // CALLS: all-memory variant (call with args count + memory target).
 // Does not set condition codes (CALLS saves/restores PSW via call frame).
@@ -2909,32 +2953,41 @@ def ADAWI_mm : InstVAX<0x58, (outs), (ins VAXMemOp:$src, VAXMemOp:$dst),
 //===----------------------------------------------------------------------===//
 
 // --- i32 memory-to-memory ---
-def : Pat<(store (i32 (load VAXMemLong:$src)), VAXMemLong:$dst),
+// Use nonvolatile PatFrags: folding volatile load+store into a single node
+// creates chain dependency cycles that the scheduler cannot resolve.
+def : Pat<(nonvolatile_store (i32 (nonvolatile_load VAXMemLong:$src)),
+                             VAXMemLong:$dst),
           (MOVL_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- i8 memory-to-memory (byte copy) ---
 // After type legalization, byte copy = truncstorei8(i32 extload(i8 addr)).
-def : Pat<(truncstorei8 (i32 (extloadi8 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei8 (i32 (nonvolatile_extloadi8 VAXMem:$src)),
+                                    VAXMem:$dst),
           (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
-def : Pat<(truncstorei8 (i32 (zextloadi8 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei8 (i32 (nonvolatile_zextloadi8 VAXMem:$src)),
+                                    VAXMem:$dst),
           (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
-def : Pat<(truncstorei8 (i32 (sextloadi8 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei8 (i32 (nonvolatile_sextloadi8 VAXMem:$src)),
+                                    VAXMem:$dst),
           (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- i16 memory-to-memory (word copy) ---
-def : Pat<(truncstorei16 (i32 (extloadi16 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_extloadi16 VAXMem:$src)),
+                                     VAXMem:$dst),
           (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
-def : Pat<(truncstorei16 (i32 (zextloadi16 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_zextloadi16 VAXMem:$src)),
+                                     VAXMem:$dst),
           (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
-def : Pat<(truncstorei16 (i32 (sextloadi16 VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_sextloadi16 VAXMem:$src)),
+                                     VAXMem:$dst),
           (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- f32 memory-to-memory (F_float copy) ---
-def : Pat<(store (f32 (load VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_store (f32 (nonvolatile_load VAXMem:$src)), VAXMem:$dst),
           (MOVF_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- f64 memory-to-memory (D_float copy) ---
-def : Pat<(store (f64 (load VAXMem:$src)), VAXMem:$dst),
+def : Pat<(nonvolatile_store (f64 (nonvolatile_load VAXMem:$src)), VAXMem:$dst),
           (MOVD_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 //===----------------------------------------------------------------------===//
@@ -2947,68 +3000,83 @@ def : Pat<(store (f64 (load VAXMem:$src)), VAXMem:$dst),
 
 // --- Unary ALU: memory source, memory destination ---
 // MNEGL_mm: dst = -(load src)
-def : Pat<(store (i32 (ineg (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (ineg (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (MNEGL_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 // MCOML_mm: dst = ~(load src)
-def : Pat<(store (i32 (not (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (not (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (MCOML_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- 3-operand ALU: two memory sources, result to memory ---
 // addl3 (load a), (load b), dst  — commutative
-def : Pat<(store (i32 (add (i32 (load VAXMemLong:$a)),
-                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (add (i32 (nonvolatile_load VAXMemLong:$a)),
+                           (i32 (nonvolatile_load VAXMemLong:$b)))),
+                             VAXMemLong:$dst),
           (ADDL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
 // subl3 (load a), (load b), dst  — dst = b - a
-def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$b)),
-                           (i32 (load VAXMemLong:$a)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (sub (i32 (nonvolatile_load VAXMemLong:$b)),
+                           (i32 (nonvolatile_load VAXMemLong:$a)))),
+                             VAXMemLong:$dst),
           (SUBL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
 // mull3 (load a), (load b), dst  — commutative
-def : Pat<(store (i32 (mul (i32 (load VAXMemLong:$a)),
-                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (mul (i32 (nonvolatile_load VAXMemLong:$a)),
+                          (i32 (nonvolatile_load VAXMemLong:$b)))),
+                             VAXMemLong:$dst),
           (MULL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
 // bisl3 (load a), (load b), dst  — commutative
-def : Pat<(store (i32 (or (i32 (load VAXMemLong:$a)),
-                          (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (or (i32 (nonvolatile_load VAXMemLong:$a)),
+                          (i32 (nonvolatile_load VAXMemLong:$b)))),
+                             VAXMemLong:$dst),
           (BISL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
 // xorl3 (load a), (load b), dst  — commutative
-def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$a)),
-                           (i32 (load VAXMemLong:$b)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (xor (i32 (nonvolatile_load VAXMemLong:$a)),
+                           (i32 (nonvolatile_load VAXMemLong:$b)))),
+                             VAXMemLong:$dst),
           (XORL3_mm VAXMemOp:$a, VAXMemOp:$b, VAXMemOp:$dst)>;
 // bicl3 (load mask), (load src), dst  — dst = src & ~mask
-def : Pat<(store (i32 (vax_bicl (i32 (load VAXMemLong:$mask)),
-                                (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (vax_bicl (i32 (nonvolatile_load VAXMemLong:$mask)),
+                                (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (BICL3_mm VAXMemOp:$mask, VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- RMW: increment/decrement memory ---
 // INCL_m: mem = mem + 1
-def : Pat<(store (i32 (add (i32 (load VAXMemLong:$addr)), (i32 1))),
-                 VAXMemLong:$addr),
+def : Pat<(nonvolatile_store (i32 (add (i32 (nonvolatile_load VAXMemLong:$addr)),
+                          (i32 1))),
+                             VAXMemLong:$addr),
           (INCL_m VAXMemOp:$addr)>;
 // DECL_m: mem = mem - 1  (add -1)
-def : Pat<(store (i32 (add (i32 (load VAXMemLong:$addr)), (i32 -1))),
-                 VAXMemLong:$addr),
+def : Pat<(nonvolatile_store (i32 (add (i32 (nonvolatile_load VAXMemLong:$addr)),
+                          (i32 -1))),
+                             VAXMemLong:$addr),
           (DECL_m VAXMemOp:$addr)>;
 
 // --- RMW 2-operand ALU: mem_dst OP= (load mem_src) ---
 // ADDL2_mm: dst = dst + src
-def : Pat<(store (i32 (add (i32 (load VAXMemLong:$dst)),
-                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (add (i32 (nonvolatile_load VAXMemLong:$dst)),
+                           (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (ADDL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 // SUBL2_mm: dst = dst - src
-def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$dst)),
-                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (sub (i32 (nonvolatile_load VAXMemLong:$dst)),
+                           (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (SUBL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 // BISL2_mm: dst = dst | src
-def : Pat<(store (i32 (or (i32 (load VAXMemLong:$dst)),
-                          (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (or (i32 (nonvolatile_load VAXMemLong:$dst)),
+                          (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (BISL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 // BICL2_mm: dst = dst & ~src
-def : Pat<(store (i32 (vax_bicl (i32 (load VAXMemLong:$src)),
-                                (i32 (load VAXMemLong:$dst)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (vax_bicl (i32 (nonvolatile_load VAXMemLong:$src)),
+                                (i32 (nonvolatile_load VAXMemLong:$dst)))),
+                             VAXMemLong:$dst),
           (BICL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 // XORL2_mm: dst = dst ^ src
-def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)),
-                           (i32 (load VAXMemLong:$src)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (xor (i32 (nonvolatile_load VAXMemLong:$dst)),
+                          (i32 (nonvolatile_load VAXMemLong:$src)))),
+                             VAXMemLong:$dst),
           (XORL2_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 //===----------------------------------------------------------------------===//
@@ -3021,22 +3089,27 @@ def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)),
 
 // --- RMW 2-operand ALU: mem_dst OP= immediate ---
 // ADDL2_mi: dst = dst + imm
-def : Pat<(store (i32 (add (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
-                 VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (add (i32 (nonvolatile_load VAXMemLong:$dst)),
+                         (i32 imm:$src))),
+                             VAXMemLong:$dst),
           (ADDL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
 // SUBL2_mi: dst = dst - imm  (implemented as addl2 of negated immediate)
-def : Pat<(store (i32 (sub (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
-                 VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (sub (i32 (nonvolatile_load VAXMemLong:$dst)),
+                         (i32 imm:$src))),
+                             VAXMemLong:$dst),
           (SUBL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
 // BISL2_mi: dst = dst | imm
-def : Pat<(store (i32 (or (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
-                 VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (or (i32 (nonvolatile_load VAXMemLong:$dst)),
+                        (i32 imm:$src))),
+                             VAXMemLong:$dst),
           (BISL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
 // BICL2_mi: dst = dst & ~imm
-def : Pat<(store (i32 (vax_bicl (i32 imm:$src),
-                                (i32 (load VAXMemLong:$dst)))), VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (vax_bicl (i32 imm:$src),
+                                (i32 (nonvolatile_load VAXMemLong:$dst)))),
+                             VAXMemLong:$dst),
           (BICL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
 // XORL2_mi: dst = dst ^ imm
-def : Pat<(store (i32 (xor (i32 (load VAXMemLong:$dst)), (i32 imm:$src))),
-                 VAXMemLong:$dst),
+def : Pat<(nonvolatile_store (i32 (xor (i32 (nonvolatile_load VAXMemLong:$dst)),
+                         (i32 imm:$src))),
+                             VAXMemLong:$dst),
           (XORL2_mi (i32 imm:$src), VAXMemOp:$dst)>;
