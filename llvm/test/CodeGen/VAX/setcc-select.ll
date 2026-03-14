@@ -92,10 +92,11 @@ define i32 @cmp_zero(i32 %a) {
 ; Select pattern (conditional move)
 define i32 @select_i32(i32 %a, i32 %b, i32 %c) {
 ; CHECK-LABEL: select_i32:
-; CHECK:       addl3	$8, %ap, %r0
+; CHECK:       moval	12(%ap), %r1
+; CHECK:       moval	8(%ap), %r0
 ; CHECK:       tstl	4(%ap)
 ; CHECK:       beql	.LBB7_2
-; CHECK:       addl3	$12, %ap, %r0
+; CHECK:       movl	%r1, %r0
 ; CHECK:       .LBB7_2:
 ; CHECK:       movl	(%r0), %r0
 ; CHECK:       ret

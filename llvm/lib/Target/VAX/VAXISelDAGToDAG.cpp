@@ -278,8 +278,11 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
     return true;
   }
 
-  if (Addr.getOpcode() == ISD::ADD) {
+  if (Addr.getOpcode() == ISD::ADD ||
+      (Addr.getOpcode() == ISD::OR &&
+       Addr->getFlags().hasDisjoint())) {
     // ADD(FrameIndex, Constant) — stack slot with displacement.
+    // OR-disjoint is equivalent to ADD when low bits are known zero.
     if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr.getOperand(0)))
       if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
         Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
