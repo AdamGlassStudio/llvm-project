@@ -50,13 +50,12 @@ define i32 @multi_call() {
 declare i32 @get_val()
 declare i32 @inc_val(i32)
 
-; Function with local variable: prologue allocates frame, local at FP-relative.
+; Function with local variable: arg now accessed directly from AP frame,
+; optimizer eliminates the redundant alloca store/load pair.
 define i32 @with_local(i32 %a) {
 ; CHECK-LABEL: with_local:
-; CHECK: subl2	$4, %sp
-; CHECK-NEXT: movl	4(%ap), %r0
-; CHECK-NEXT: movl	%r0, -4(%fp)
-; CHECK-NEXT: incl	%r0
+; CHECK: movl	$1, %r0
+; CHECK-NEXT: addl2	4(%ap), %r0
 ; CHECK-NEXT: ret
   %p = alloca i32
   store i32 %a, ptr %p

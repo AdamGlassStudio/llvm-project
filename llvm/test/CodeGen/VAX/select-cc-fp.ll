@@ -5,10 +5,11 @@
 
 define double @select_cc_f64(double %a, double %b, i32 %c) {
 ; CHECK-LABEL: select_cc_f64:
-; CHECK:       addl3	$4, %ap, %r0
+; CHECK:       moval	12(%ap), %r1
+; CHECK:       moval	4(%ap), %r0
 ; CHECK:       tstl	20(%ap)
 ; CHECK:       bgtr	.LBB0_2
-; CHECK:       addl3	$12, %ap, %r0
+; CHECK:       movl	%r1, %r0
 ; CHECK:       .LBB0_2:
 ; CHECK:       movd	(%r0), %r0
 ; CHECK:       ret
@@ -19,10 +20,11 @@ define double @select_cc_f64(double %a, double %b, i32 %c) {
 
 define float @select_cc_f32(float %a, float %b, i32 %c) {
 ; CHECK-LABEL: select_cc_f32:
-; CHECK:       addl3	$4, %ap, %r0
+; CHECK:       moval	8(%ap), %r1
+; CHECK:       moval	4(%ap), %r0
 ; CHECK:       tstl	12(%ap)
 ; CHECK:       bgtr	.LBB1_2
-; CHECK:       addl3	$8, %ap, %r0
+; CHECK:       movl	%r1, %r0
 ; CHECK:       .LBB1_2:
 ; CHECK:       movf	(%r0), %r0
 ; CHECK:       ret
