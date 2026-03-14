@@ -154,6 +154,7 @@ def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
 // isImmutableObjectIndex() to allow remat only for loads from immutable
 // fixed stack slots (e.g. function arguments via AP).
 let HasMemOp = 1, isReMaterializable = 1 in
+let isReMaterializable = 1, mayLoad = 1 in
 def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
     "movl\t$src, $dst",
     [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>, Sched<[WriteMOV]>;
