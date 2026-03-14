@@ -502,6 +502,7 @@ bool VAXMCCodeEmitter::isBranch(unsigned Opcode) const {
   case VAX::BEQL: case VAX::BNEQ: case VAX::BGTR: case VAX::BGEQ:
   case VAX::BLSS: case VAX::BLEQ: case VAX::BGTRU: case VAX::BGEQU:
   case VAX::BLSSU: case VAX::BLEQU:
+  case VAX::BVC: case VAX::BVS:
     return true;
   default:
     return false;
