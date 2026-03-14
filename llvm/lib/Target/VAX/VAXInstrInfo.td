@@ -133,31 +133,10 @@ def CLRL_ms : InstVAX<0xD4, (outs), (ins VAXMemOp:$dst),
 // MOVL (opcode 0xD0) — longword (32-bit) move, various operand forms.
 // All variants share the opcode; operand specifiers encode the addressing mode.
 // All MOV/MOVAL instructions set PSW condition codes.
-// MOVL_rr, MOVL_rm, MOVL_mr, MOVL_mi — kept OUTSIDE the Defs=[PSW] block.
-//
-// Real VAX movl sets condition codes, but modelling this as Defs=[PSW] on
-// the instructions used for spills, reloads, and register copies causes the
-// register allocator's dead-def elimination to fail: when a MOVL_rm becomes
-// dead (e.g. after rematerialisation removes all uses), eliminateDeadDef
-// asserts allDefsAreDead(), which fails when implicit-def $psw isn't dead.
-//
-// The condition-code setting is instead handled post-RA by the peephole pass
-// (tryEliminateRedundantTST), which knows these opcodes set PSW and can
-// eliminate redundant TSTL instructions without the .td annotation.
-
-// reg <- reg  (register copy; no DAG pattern — emitted by copyPhysReg)
-def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
-    "movl\t$src, $dst", []>, Sched<[WriteMOV]>;
-
-// reg <- memory  (displacement/deferred load)
-// Rematerializable: the RA will check isLoadFromStackSlot() +
-// isImmutableObjectIndex() to allow remat only for loads from immutable
-// fixed stack slots (e.g. function arguments via AP).
-let HasMemOp = 1, isReMaterializable = 1 in
-let isReMaterializable = 1, mayLoad = 1 in
-def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
-    "movl\t$src, $dst",
-    [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>, Sched<[WriteMOV]>;
+// Store-only MOVL variants: MOVL_mr, MOVL_mi — kept OUTSIDE Defs=[PSW].
+// On store-only instructions ((outs)), PSW becomes the sole data output,
+// which creates scheduling cycles with volatile memory chains + call glue.
+// The peephole's inherentlySetsPSW() handles these for TST elimination.
 
 // memory <- reg  (displacement/deferred store)
 let HasMemOp = 1 in
@@ -171,7 +150,19 @@ def MOVL_mi : InstVAX<0xD0, (outs), (ins i32imm:$imm, VAXMemOp:$dst),
     "movl\t$imm, $dst",
     [(store (i32 imm:$imm), VAXMemLong:$dst)]>, Sched<[WriteMOV]>;
 
+// Register-output MOVL variants get Defs=[PSW] — the register result is
+// the primary data output, so PSW is secondary and doesn't cause cycles.
 let Defs = [PSW] in {
+
+// reg <- reg  (register copy; no DAG pattern — emitted by copyPhysReg)
+def MOVL_rr : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
+    "movl\t$src, $dst", []>, Sched<[WriteMOV]>;
+
+// reg <- memory  (displacement/deferred load)
+let HasMemOp = 1, isReMaterializable = 1, mayLoad = 1 in
+def MOVL_rm : InstVAX<0xD0, (outs GPRnoPC:$dst), (ins VAXMemOp:$src),
+    "movl\t$src, $dst",
+    [(set GPRnoPC:$dst, (load VAXMemLong:$src))]>, Sched<[WriteMOV]>;
 
 // reg <- immediate  (assembler emits $imm literal)
 // Rematerializable: the RA can recompute an immediate load instead of
@@ -491,9 +482,9 @@ def BICL3_rm : InstVAX<0xCB, (outs GPRnoPC:$dst),
 } // let Defs = [PSW] — end of integer ALU block
 
 // MOVZBL — zero-extend byte to longword.
-// Moved out of Defs=[PSW]: data movement instructions with implicit PSW defs
-// create scheduling cycles when interacting with volatile memory chains.
-// The peephole's inherentlySetsPSW() handles redundant-TST elimination.
+// Register-output variants get Defs=[PSW] — PSW is secondary to the register
+// result, so no scheduling cycles. Store-only _mm variants stay without PSW.
+let Defs = [PSW] in
 defm MOVZBL : VAXMovZext<0x9A, "movzbl", zextloadi8, extloadi8, ByteImm>;
 
 //===----------------------------------------------------------------------===//
@@ -734,12 +725,15 @@ def DECL : InstVAX<0xD7, (outs GPRnoPC:$dst), (ins GPRnoPC:$src),
 
 // CVTBL (0x98) — Convert Byte to Longword: sign-extends the low byte of the
 // source operand to 32 bits.  Covers sextloadi8 and sext_inreg i8.
+let Defs = [PSW] in
 defm CVTBL : VAXSextConv<0x98, "cvtbl", sextloadi8, i8, ByteImm>;
 
 // MOVZWL (0x3C) — Move Zero-Extended Word to Longword.
+let Defs = [PSW] in
 defm MOVZWL : VAXMovZext<0x3C, "movzwl", zextloadi16, extloadi16, WordImm>;
 
 // CVTWL (0x32) — Convert Word to Longword: sign-extends low 16 bits.
+let Defs = [PSW] in
 defm CVTWL : VAXSextConv<0x32, "cvtwl", sextloadi16, i16, WordImm>;
 
 // MOVB/MOVW truncating stores set PSW on real hardware, but modeling Defs=[PSW]
@@ -756,7 +750,11 @@ defm MOVW : VAXTruncStore<0xB0, "movw", truncstorei16>;
 // Phase 33B — Native byte/word loads, stores, extends, truncates
 //===----------------------------------------------------------------------===//
 
-// All byte/word MOV/CVT instructions — no Defs=[PSW] (same rationale as above).
+// All byte/word reg←reg and reg←mem/imm instructions get Defs=[PSW] —
+// they have register outputs, so PSW is secondary (no scheduling cycles).
+// Store-only byte/word variants stay without PSW.
+
+let Defs = [PSW] in {
 
 // MOVB (0x90) — native i8 load/copy (byte register class).
 // reg <- mem (byte load)
@@ -824,6 +822,8 @@ def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "cvtwl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRW:$src))]>;
 
+} // let Defs = [PSW] — end of register-output byte/word block
+
 // MOVB/MOVW store instructions — moved out of Defs=[PSW] for the same reason
 // as MOVB_mr/MOVW_mr above: store-only instructions with PSW as sole data
 // output create unresolvable scheduler cycles with volatile memory chains.
@@ -863,13 +863,13 @@ def : Pat<(i32 (anyext GPRB:$src)), (MOVZBL_rr GPRB:$src)>;
 def : Pat<(i32 (anyext GPRW:$src)), (MOVZWL_rr GPRW:$src)>;
 
 // CVTBW (0x99) reg <- reg: sign-extend i8 to i16.
-let isCodeGenOnly = 1 in
+let isCodeGenOnly = 1, Defs = [PSW] in
 def CVTBW_rr : InstVAX<0x99, (outs GPRW:$dst), (ins GPRB:$src),
     "cvtbw\t$src, $dst",
     [(set GPRW:$dst, (sext GPRB:$src))]>;
 
 // MOVZBW (0x9B) reg <- reg: zero-extend i8 to i16.
-let isCodeGenOnly = 1 in
+let isCodeGenOnly = 1, Defs = [PSW] in
 def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
     "movzbw\t$src, $dst",
     [(set GPRW:$dst, (zext GPRB:$src))]>;
