@@ -278,7 +278,17 @@ MCRegister VAXAsmParser::matchRegister(StringRef Name) {
   MCRegister Reg = MatchRegisterName(FullName);
   if (Reg)
     return Reg;
-  return MatchRegisterAltName(FullName);
+  Reg = MatchRegisterAltName(FullName);
+  if (Reg)
+    return Reg;
+
+  // GAS accepts %r12-%r15 as aliases for %ap, %fp, %sp, %pc.
+  if (Name == "r12") return VAX::AP;
+  if (Name == "r13") return VAX::FP;
+  if (Name == "r14") return VAX::SP;
+  if (Name == "r15") return VAX::PC;
+
+  return MCRegister();
 }
 
 bool VAXAsmParser::parseRegister(MCRegister &Reg, SMLoc &StartLoc,
