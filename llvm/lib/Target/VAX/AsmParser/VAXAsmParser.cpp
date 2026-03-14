@@ -240,6 +240,18 @@ class VAXAsmParser : public MCTargetAsmParser {
   ParseStatus parseDirective(AsmToken DirectiveID) override;
 
   bool parseLiteralValues(unsigned Size, SMLoc L);
+  bool parseDirectiveVAXFloat(bool IsDouble, SMLoc L);
+
+  /// Parse a GAS float literal that may have a 0d/0f prefix.
+  /// Handles tokenization quirks: "0d-1.5e-13" becomes multiple tokens.
+  /// Returns the parsed value as a double. Sets \p Negate if a leading
+  /// minus was present.
+  bool parseGASFloatValue(double &Val);
+
+  /// Convert an IEEE 754 double to VAX D_float (8 bytes) or F_float (4 bytes).
+  /// Returns the encoded value in little-endian VAX word-swapped format.
+  /// Reports errors via \p Loc.
+  bool encodeVAXFloat(double Val, bool IsDouble, SMLoc Loc, uint64_t &Encoded);
 
   bool parseOperand(OperandVector &Operands);
   MCRegister tryParseIndexSuffix();
@@ -445,6 +457,173 @@ MCRegister VAXAsmParser::tryParseIndexSuffix() {
   return Reg;
 }
 
+/// Encode an IEEE 754 double value as VAX D_float (8 bytes) or F_float
+/// (4 bytes). Returns the encoded value in VAX word-swapped little-endian
+/// format suitable for emitIntValue().
+bool VAXAsmParser::encodeVAXFloat(double Val, bool IsDouble, SMLoc Loc,
+                                  uint64_t &Encoded) {
+  if (Val == 0.0) {
+    Encoded = 0;
+    return false;
+  }
+
+  uint64_t IEEE;
+  memcpy(&IEEE, &Val, 8);
+  uint64_t Sign = (IEEE >> 63) & 1;
+  int64_t IEEEExp = ((IEEE >> 52) & 0x7FF);
+  uint64_t IEEEFrac = IEEE & ((1ULL << 52) - 1);
+
+  if (IEEEExp == 0 || IEEEExp == 0x7FF)
+    return Error(Loc, "VAX floats do not support denormals, infinity, or NaN");
+
+  // VAX exponent: rebias from IEEE (1023) to VAX (128), +1 for
+  // the hidden-bit convention difference (VAX: 0.1xxx, IEEE: 1.xxx)
+  int64_t VAXExp = IEEEExp - 1023 + 128 + 1;
+  if (VAXExp <= 0 || VAXExp > 255)
+    return Error(Loc, "floating-point value out of VAX range");
+
+  if (IsDouble) {
+    // D_float: 55 fraction bits (IEEE has 52, shift left 3)
+    uint64_t VFrac = IEEEFrac << 3;
+    uint16_t W0 =
+        (Sign << 15) | ((VAXExp & 0xFF) << 7) | ((VFrac >> 48) & 0x7F);
+    uint16_t W1 = (VFrac >> 32) & 0xFFFF;
+    uint16_t W2 = (VFrac >> 16) & 0xFFFF;
+    uint16_t W3 = VFrac & 0xFFFF;
+    Encoded = (uint64_t)W3 << 48 | (uint64_t)W2 << 32 | (uint64_t)W1 << 16 |
+              W0;
+  } else {
+    // F_float: 23 fraction bits (IEEE double has 52, shift right 29)
+    uint32_t VFrac = IEEEFrac >> 29;
+    uint16_t W0 =
+        (Sign << 15) | ((VAXExp & 0xFF) << 7) | ((VFrac >> 16) & 0x7F);
+    uint16_t W1 = VFrac & 0xFFFF;
+    Encoded = (uint32_t)W1 << 16 | W0;
+  }
+  return false;
+}
+
+/// Parse a GAS float value, optionally with 0d/0f prefix.
+/// Handles: "0d+1.5e-3", "0f0.5", "+1.5", "-7.53e-13", "1.5"
+/// The lexer splits "0d-1.5" into tokens: Integer(0), Identifier("d"),
+/// Minus, Real(1.5) or Integer(0), Identifier("d"), Minus, Integer(1),
+/// Dot, Integer(5) etc. We reconstruct the float string from tokens.
+bool VAXAsmParser::parseGASFloatValue(double &Val) {
+  // Check for 0d/0f prefix: Integer(0) followed by char 'd'/'f'
+  bool HasPrefix = false;
+  if (getLexer().is(AsmToken::Integer) &&
+      getLexer().getTok().getIntVal() == 0) {
+    StringRef TokStr = getLexer().getTok().getString();
+    const char *After = TokStr.end();
+    if (*After == 'd' || *After == 'D' ||
+        *After == 'f' || *After == 'F') {
+      HasPrefix = true;
+      getLexer().Lex(); // eat '0'
+      // The prefix letter is the first char of the next Identifier token.
+      // If followed immediately by digits: Identifier("d1") or Identifier("f0")
+      // If followed by +/-: Identifier("d") then Plus/Minus
+      if (getLexer().is(AsmToken::Identifier)) {
+        StringRef Id = getLexer().getTok().getString();
+        if (Id.size() == 1) {
+          // Just "d" or "f" alone — sign or dot follows
+          getLexer().Lex(); // eat the single-char identifier
+        } else {
+          // "d1" or "f0" — strip prefix, put digits back
+          // We'll handle this below in the float reconstruction
+        }
+      }
+    }
+  }
+
+  // Now parse the actual float value. Could be:
+  // - A Real token (1.5, 1.5e-3)
+  // - An Integer token followed by dot and more
+  // - A sign (Plus/Minus) followed by the above
+  // - After stripping 0d/0f prefix, an Identifier like "d1" with digits
+
+  std::string FltStr;
+
+  // If we have a prefix and the identifier had digits (e.g. "d1"), use them
+  if (HasPrefix && getLexer().is(AsmToken::Identifier)) {
+    StringRef Id = getLexer().getTok().getString();
+    // Strip the d/f prefix letter
+    FltStr = Id.drop_front(1).str();
+    getLexer().Lex(); // eat identifier
+  }
+
+  // Handle leading sign
+  if (getLexer().is(AsmToken::Minus)) {
+    FltStr = "-" + FltStr;
+    getLexer().Lex();
+  } else if (getLexer().is(AsmToken::Plus)) {
+    FltStr = "+" + FltStr;
+    getLexer().Lex();
+  }
+
+  // Now collect the numeric part
+  if (getLexer().is(AsmToken::Real)) {
+    FltStr += getLexer().getTok().getString().str();
+    getLexer().Lex();
+  } else if (getLexer().is(AsmToken::Integer)) {
+    FltStr += getLexer().getTok().getString().str();
+    getLexer().Lex();
+    // Check for fractional part
+    if (getLexer().is(AsmToken::Dot)) {
+      FltStr += '.';
+      getLexer().Lex();
+      if (getLexer().is(AsmToken::Integer)) {
+        FltStr += getLexer().getTok().getString().str();
+        getLexer().Lex();
+      }
+    }
+  } else if (FltStr.empty()) {
+    return Error(getLexer().getLoc(), "expected floating-point value");
+  }
+
+  // Handle exponent: e/E followed by optional sign and digits
+  // The lexer may produce Identifier("e") or the exponent may be part of Real
+  if (getLexer().is(AsmToken::Identifier)) {
+    StringRef Id = getLexer().getTok().getString();
+    if (Id.starts_with_insensitive("e")) {
+      FltStr += Id.str();
+      getLexer().Lex();
+      // Exponent sign and digits may follow as separate tokens
+      if (getLexer().is(AsmToken::Minus) || getLexer().is(AsmToken::Plus)) {
+        FltStr += getLexer().getTok().getString().str();
+        getLexer().Lex();
+      }
+      if (getLexer().is(AsmToken::Integer)) {
+        FltStr += getLexer().getTok().getString().str();
+        getLexer().Lex();
+      }
+    }
+  }
+
+  if (FltStr.empty() || StringRef(FltStr).getAsDouble(Val))
+    return Error(getLexer().getLoc(), "invalid floating-point literal");
+
+  return false;
+}
+
+/// Parse .double / .float directive, emitting VAX D_float / F_float format.
+bool VAXAsmParser::parseDirectiveVAXFloat(bool IsDouble, SMLoc L) {
+  unsigned Size = IsDouble ? 8 : 4;
+
+  auto parseOne = [&]() -> bool {
+    double Val;
+    if (parseGASFloatValue(Val))
+      return true;
+
+    uint64_t Encoded;
+    if (encodeVAXFloat(Val, IsDouble, L, Encoded))
+      return true;
+
+    getParser().getStreamer().emitIntValue(Encoded, Size);
+    return false;
+  };
+  return parseMany(parseOne);
+}
+
 /// Parse a single operand. VAX GAS syntax:
 ///   $expr          — immediate
 ///   %reg           — register
@@ -476,76 +655,17 @@ bool VAXAsmParser::parseOperand(OperandVector &Operands) {
       if (*After == 'd' || *After == 'D' ||
           *After == 'f' || *After == 'F') {
         bool IsDouble = (*After == 'd' || *After == 'D');
-        getLexer().Lex(); // eat '0'
 
-        // Collect the remaining text: "d1.5" or "f0.0" etc.
-        // The identifier token gives us "d<digits>", then optionally ".<digits>"
-        if (getLexer().isNot(AsmToken::Identifier))
-          return Error(getLexer().getLoc(), "expected float value after '0d'/'0f'");
-        StringRef FltId = getLexer().getTok().getString();
-        // Strip the d/f prefix to get the integer part
-        StringRef IntPart = FltId.drop_front(1);
-        getLexer().Lex(); // eat identifier
-
-        // Check for fractional part: . digits
-        std::string FltStr(IntPart);
-        if (getLexer().is(AsmToken::Dot)) {
-          getLexer().Lex(); // eat '.'
-          FltStr += '.';
-          if (getLexer().is(AsmToken::Integer)) {
-            FltStr += getLexer().getTok().getString();
-            getLexer().Lex(); // eat fraction digits
-          }
-        }
-
-        // Parse the float value
         double Val;
-        if (FltStr.empty() || StringRef(FltStr).getAsDouble(Val))
-          return Error(StartLoc, "invalid floating-point literal");
+        if (parseGASFloatValue(Val))
+          return true;
 
-        // Convert to VAX float encoding
-        int64_t Encoded;
-        if (Val == 0.0) {
-          Encoded = 0;
-        } else {
-          // Convert IEEE double to VAX D_float or F_float
-          uint64_t IEEE;
-          memcpy(&IEEE, &Val, 8);
-          uint64_t Sign = (IEEE >> 63) & 1;
-          int64_t IEEEExp = ((IEEE >> 52) & 0x7FF);
-          uint64_t IEEEFrac = IEEE & ((1ULL << 52) - 1);
+        uint64_t Encoded;
+        if (encodeVAXFloat(Val, IsDouble, StartLoc, Encoded))
+          return true;
 
-          if (IEEEExp == 0 || IEEEExp == 0x7FF)
-            return Error(StartLoc,
-                         "VAX floats do not support denormals, infinity, or NaN");
-
-          // VAX exponent: rebias from IEEE (1023) to VAX (128), +1 for
-          // the hidden-bit convention difference (VAX: 0.1xxx, IEEE: 1.xxx)
-          int64_t VAXExp = IEEEExp - 1023 + 128 + 1;
-          if (VAXExp <= 0 || VAXExp > 255)
-            return Error(StartLoc, "floating-point value out of VAX range");
-
-          if (IsDouble) {
-            // D_float: 55 fraction bits (IEEE has 52, shift left 3)
-            uint64_t VFrac = IEEEFrac << 3;
-            uint16_t W0 = (Sign << 15) | ((VAXExp & 0xFF) << 7) |
-                          ((VFrac >> 48) & 0x7F);
-            uint16_t W1 = (VFrac >> 32) & 0xFFFF;
-            uint16_t W2 = (VFrac >> 16) & 0xFFFF;
-            uint16_t W3 = VFrac & 0xFFFF;
-            Encoded = (int64_t)((uint64_t)W3 << 48 | (uint64_t)W2 << 32 |
-                                (uint64_t)W1 << 16 | W0);
-          } else {
-            // F_float: 23 fraction bits (IEEE double has 52, shift right 29)
-            uint32_t VFrac = IEEEFrac >> 29;
-            uint16_t W0 =
-                (Sign << 15) | ((VAXExp & 0xFF) << 7) | ((VFrac >> 16) & 0x7F);
-            uint16_t W1 = VFrac & 0xFFFF;
-            Encoded = (int64_t)((uint32_t)W1 << 16 | W0);
-          }
-        }
-
-        const MCExpr *Expr = MCConstantExpr::create(Encoded, getContext());
+        const MCExpr *Expr =
+            MCConstantExpr::create((int64_t)Encoded, getContext());
         Operands.push_back(
             VAXOperand::createImm(Expr, StartLoc, getLexer().getLoc(),
                                   /*DollarPrefixed=*/true));
@@ -846,6 +966,12 @@ ParseStatus VAXAsmParser::parseDirective(AsmToken DirectiveID) {
     return parseLiteralValues(4, DirectiveID.getLoc());
   if (IDVal.equals_insensitive(".byte"))
     return parseLiteralValues(1, DirectiveID.getLoc());
+  // Override .double/.float to emit VAX D_float/F_float format and handle
+  // GAS 0d/0f decimal float prefixes.
+  if (IDVal.equals_insensitive(".double"))
+    return parseDirectiveVAXFloat(/*IsDouble=*/true, DirectiveID.getLoc());
+  if (IDVal.equals_insensitive(".float"))
+    return parseDirectiveVAXFloat(/*IsDouble=*/false, DirectiveID.getLoc());
   return ParseStatus::NoMatch;
 }
 
