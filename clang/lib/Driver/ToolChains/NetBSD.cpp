@@ -453,6 +453,7 @@ ToolChain::CXXStdlibType NetBSD::GetDefaultCXXStdlibType() const {
   case llvm::Triple::riscv64:
   case llvm::Triple::sparc:
   case llvm::Triple::sparcv9:
+  case llvm::Triple::vax:
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
     return ToolChain::CST_Libcxx;
