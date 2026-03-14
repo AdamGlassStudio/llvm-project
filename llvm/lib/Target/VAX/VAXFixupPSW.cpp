@@ -86,7 +86,9 @@ static unsigned fusedToCmpOpcode(unsigned Opc) {
   case VAX::TSTF_BRANCH:   return VAX::TSTF;
   case VAX::TSTD_BRANCH:   return VAX::TSTD;
   case VAX::CMPB_BRANCH:   return VAX::CMPB_rr;
+  case VAX::CMPB_BRANCH_mi: return VAX::CMPB_mi;
   case VAX::TSTB_BRANCH:   return VAX::TSTB;
+  case VAX::TSTB_BRANCH_m: return VAX::TSTB_m;
   case VAX::CMPW_BRANCH:   return VAX::CMPW_rr;
   case VAX::TSTW_BRANCH:   return VAX::TSTW;
   default: return 0;
@@ -112,7 +114,9 @@ static bool isCompareOrTest(const MachineInstr &MI) {
   case VAX::TSTF:
   case VAX::TSTD:
   case VAX::CMPB_rr:
+  case VAX::CMPB_mi:
   case VAX::TSTB:
+  case VAX::TSTB_m:
   case VAX::CMPW_rr:
   case VAX::TSTW:
     return true;
@@ -136,7 +140,9 @@ static unsigned cmpToFusedOpcode(unsigned CmpOpc) {
   case VAX::TSTF:    return VAX::TSTF_BRANCH;
   case VAX::TSTD:    return VAX::TSTD_BRANCH;
   case VAX::CMPB_rr: return VAX::CMPB_BRANCH;
+  case VAX::CMPB_mi: return VAX::CMPB_BRANCH_mi;
   case VAX::TSTB:    return VAX::TSTB_BRANCH;
+  case VAX::TSTB_m:  return VAX::TSTB_BRANCH_m;
   case VAX::CMPW_rr: return VAX::CMPW_BRANCH;
   case VAX::TSTW:    return VAX::TSTW_BRANCH;
   default: return 0;

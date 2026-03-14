@@ -64,6 +64,11 @@ def WordImm : Operand<i32> {
 // Index is always NoReg and flags is always 0 (Disp) from SelectionDAG.
 def VAXMem : ComplexPattern<iPTR, 4, "SelectVAXAddr", [frameindex, add], []>;
 
+// Like VAXMem but does NOT match bare registers. Used by PUSHAL so that
+// "pushl reg" is preferred over "pushal (reg)" for plain register values.
+def VAXMemAddr : ComplexPattern<iPTR, 4, "SelectVAXAddrNonTrivial",
+                                [frameindex, add], []>;
+
 // Enhanced ComplexPattern for longword (4-byte) memory operands.
 // Matches everything VAXMem does plus indexed: ADD(base, SHL(idx, 2)).
 // Only use for instructions with 4-byte data size (MOVL, MOVF, etc.)
@@ -646,8 +651,12 @@ def TST_BRANCH_m : Pseudo<(outs),
 // Byte/word compare/test fused pseudos:
 def CMPB_BRANCH : Pseudo<(outs),
     (ins GPRB:$lhs, GPRB:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPB_BRANCH_mi : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, ByteImm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTB_BRANCH : Pseudo<(outs),
     (ins GPRB:$src, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTB_BRANCH_m : Pseudo<(outs),
+    (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
 def CMPW_BRANCH : Pseudo<(outs),
     (ins GPRW:$lhs, GPRW:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTW_BRANCH : Pseudo<(outs),
@@ -1197,7 +1206,6 @@ def PUSHL_i : InstVAX<0xDD, (outs), (ins i32imm:$imm),
 }
 
 // PUSHAx — push address onto stack (SP autodecrement)
-// These are assembly-only (used in hand-written .S files like crtbegin.S)
 // MOVAx/PUSHAx set N/Z based on the address value and clear V; C unchanged.
 let Defs = [SP, PSW], Uses = [SP], HasMemOp = 1 in {
 def PUSHAB : InstVAX<0x9F, (outs), (ins VAXMemOp:$src),
@@ -1205,8 +1213,13 @@ def PUSHAB : InstVAX<0x9F, (outs), (ins VAXMemOp:$src),
     Sched<[WritePUSHA]>;
 def PUSHAW : InstVAX<0x3F, (outs), (ins VAXMemOp:$src),
     "pushaw\t$src", []>;
+// PUSHAL: push effective address of memory operand onto stack.
+// ISel pattern matches (vax_pushl addr) where addr is a base+displacement
+// the ComplexPattern can decompose, emitting "pushal disp(reg)" instead of
+// the two-instruction "moval disp(reg), rN" + "pushl rN" sequence.
+// Also used by post-RA peephole (LEA_FI+PUSHL→PUSHAL, ADDL3+PUSHL→PUSHAL).
 def PUSHAL : InstVAX<0xDF, (outs), (ins VAXMemOp:$src),
-    "pushal\t$src", []>,
+    "pushal\t$src", [(vax_pushl VAXMemAddr:$src)]>,
     Sched<[WritePUSHA]>;
 def PUSHAQ : InstVAX<0x7F, (outs), (ins VAXMemOp:$src),
     "pushaq\t$src", []>;
@@ -2283,6 +2296,15 @@ def CMPL_mm : InstVAX<0xD1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
     Sched<[WriteALU]>;
 let MemOpWidth0 = 1, MemOpWidth1 = 1 in
 def CMPB_mm : InstVAX<0x91, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
+    "cmpb\t$a, $b", []>;
+// CMPB_mi — compare byte in memory with byte immediate.
+// Created by VAXPeephole: MOVZBL+CMPL_ri → CMPB_mi when imm < 256.
+let MemOpWidth0 = 1 in
+def CMPB_mi : InstVAX<0x91, (outs), (ins VAXMemOp:$a, ByteImm:$b),
+    "cmpb\t$a, $b", []>;
+// CMPB_rm — compare byte in memory with byte register.
+let MemOpWidth0 = 1 in
+def CMPB_rm : InstVAX<0x91, (outs), (ins VAXMemOp:$a, GPRB:$b),
     "cmpb\t$a, $b", []>;
 let MemOpWidth0 = 2, MemOpWidth1 = 2 in
 def CMPW_mm : InstVAX<0xB1, (outs), (ins VAXMemOp:$a, VAXMemOp:$b),
