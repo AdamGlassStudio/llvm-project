@@ -81,14 +81,16 @@ declare void @sink(i32, i32)
 
 define void @push_ashl() {
 ; CHECK-LABEL: push_ashl:
-; CHECK: ashl $11, $1, -(%sp)
+; CHECK:       pushl $0
+; CHECK-NEXT:  ashl $11, $1, -(%sp)
   call void @sink(i32 2048, i32 0)
   ret void
 }
 
 define void @push_mnegl() {
 ; CHECK-LABEL: push_mnegl:
-; CHECK: mnegl $1, -(%sp)
+; CHECK:       pushl $0
+; CHECK-NEXT:  mnegl $1, -(%sp)
   call void @sink(i32 -1, i32 0)
   ret void
 }
