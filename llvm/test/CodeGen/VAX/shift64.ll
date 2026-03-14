@@ -15,10 +15,10 @@ define i64 @shl64(i64 %a, i32 %n) {
 
 define i64 @lshr64(i64 %a, i32 %n) {
 ; CHECK-LABEL: lshr64:
-; CHECK:       pushl	12(%ap)
-; CHECK:       pushl	8(%ap)
-; CHECK:       pushl	4(%ap)
-; CHECK:       calls	$3, __lshrdi3
+; CHECK:       pushl 12(%ap)
+; CHECK-NEXT:  pushl 8(%ap)
+; CHECK-NEXT:  pushl 4(%ap)
+; CHECK-NEXT:  calls	$3, __lshrdi3
 ; CHECK:       ret
   %ext = zext i32 %n to i64
   %r = lshr i64 %a, %ext

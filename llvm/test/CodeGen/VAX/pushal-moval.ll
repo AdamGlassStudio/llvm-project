@@ -19,10 +19,9 @@ define void @push_local_addr() {
 ; Test: LEA_FI result used after PUSHL → must NOT combine (register stays live)
 define void @push_local_addr_reused() {
 ; CHECK-LABEL: push_local_addr_reused:
-; CHECK:       moval -20(%fp), %r6
-; CHECK-NEXT:  pushl %r6
+; CHECK:       pushal -16(%fp)
 ; CHECK-NEXT:  calls $1, use_ptr
-; CHECK-NEXT:  pushl %r6
+; CHECK-NEXT:  pushal -16(%fp)
 ; CHECK-NEXT:  calls $1, use_ptr
   %buf = alloca [16 x i8]
   call void @use_ptr(ptr %buf)

@@ -29,12 +29,22 @@ public:
 
   void Select(SDNode *N) override;
 
+  // Try to narrow VAXISD::CMP to a byte compare (CMPB_mi/TSTB_m) when
+  // the LHS is a zero-extending byte load and the RHS is a small constant.
+  bool tryNarrowCmpToByte(SDNode *N);
+
   // ComplexPattern selector for base+displacement memory operands.
   // Returns true and sets Base/Offset/Index/Flags when Addr matches a known
   // form: FrameIndex, ADD(FrameIndex, Const), ADD(Reg, Const), bare Reg.
   // Index is always NoReg — use SelectVAXAddrLong for indexed addressing.
   bool SelectVAXAddr(SDValue Addr, SDValue &Base, SDValue &Offset,
                      SDValue &Index, SDValue &Flags);
+
+  // Like SelectVAXAddr but does NOT match bare registers. Only matches when
+  // there is an actual address computation: FrameIndex, Reg+Const, PCRel.
+  // Used by PUSHAL to avoid turning "pushl reg" into "pushal (reg)".
+  bool SelectVAXAddrNonTrivial(SDValue Addr, SDValue &Base, SDValue &Offset,
+                               SDValue &Index, SDValue &Flags);
 
   // Enhanced ComplexPattern selector for longword (4-byte) memory operands.
   // Matches everything SelectVAXAddr does, plus indexed addressing:
@@ -258,7 +268,109 @@ fallthrough_pushl:
     return;
   }
 
+  // Try to narrow VAXISD::CMP to CMPB/TSTB when comparing a zero-extended
+  // byte load against a small constant.
+  if (N->getOpcode() == VAXISD::CMP) {
+    if (tryNarrowCmpToByte(N))
+      return;
+  }
+
   SelectCode(N);
+}
+
+// Try to narrow (VAXISD::CMP (zextload i8 addr), const<256>) → CMPB_mi/TSTB_m.
+//
+// After type legalization, an i8 comparison becomes:
+//   %1 = (zextload i8 addr)   ;; MOVZBL — extends byte to i32
+//   (vax_cmp %1, imm)         ;; CMPL — compares full longwords
+//
+// Since the loaded value is in [0,255] and the constant is < 256, comparing
+// the byte at memory directly against the byte immediate gives the same PSW
+// result for equality and unsigned conditions. This eliminates the MOVZBL
+// and shrinks CMPL→CMPB (or TSTB if 0).
+//
+// IMPORTANT: CMPB treats bytes as signed (-128..127), so narrowing is UNSAFE
+// for signed comparisons when the byte value could be >= 128. A zext'd byte
+// of 200 is i32 +200, but cmpb sees it as -56. We restrict to:
+//   - Equality (BEQL=0, BNEQ=1)
+//   - Unsigned (BGTRU=6, BGEQU=7, BLSSU=8, BLEQU=9)
+//
+// We only fold when the zextload has a single use (the CMP) so we don't keep
+// the MOVZBL alive for other consumers.
+bool VAXDAGToDAGISel::tryNarrowCmpToByte(SDNode *N) {
+  SDValue LHS = N->getOperand(0);
+  SDValue RHS = N->getOperand(1);
+
+  // LHS must be a zero-extending byte load with a single use.
+  if (LHS.getOpcode() != ISD::LOAD)
+    return false;
+  LoadSDNode *Load = cast<LoadSDNode>(LHS);
+  if (Load->getExtensionType() != ISD::ZEXTLOAD &&
+      Load->getExtensionType() != ISD::EXTLOAD)
+    return false;
+  if (Load->getMemoryVT() != MVT::i8)
+    return false;
+  if (!LHS.hasOneUse())
+    return false;
+
+  // RHS must be a constant that fits in a byte (0..255).
+  auto *RHSC = dyn_cast<ConstantSDNode>(RHS);
+  if (!RHSC)
+    return false;
+  uint64_t Imm = RHSC->getZExtValue();
+  if (Imm > 255)
+    return false;
+
+  // Check that all users of the CMP's glue use only equality or unsigned
+  // condition codes. Signed comparisons (BGTR=2..BLEQ=5) are unsafe because
+  // cmpb treats bytes as signed but the zext'd i32 value is unsigned.
+  for (SDNode *User : N->users()) {
+    unsigned UOpc = User->isMachineOpcode() ? User->getMachineOpcode()
+                                            : User->getOpcode();
+    // After ISel pattern matching, BRCC+CC becomes specific branch opcodes.
+    // Check for signed branch opcodes — these are unsafe to narrow.
+    if (UOpc == VAX::BGTR || UOpc == VAX::BGEQ ||
+        UOpc == VAX::BLSS || UOpc == VAX::BLEQ ||
+        UOpc == VAX::LongBGTR || UOpc == VAX::LongBGEQ ||
+        UOpc == VAX::LongBLSS || UOpc == VAX::LongBLEQ)
+      return false; // Signed condition — cannot narrow.
+    // Also check unmatched BRCC/SELECT_CC nodes (in case ISel order varies).
+    if (UOpc == VAXISD::BRCC || UOpc == VAXISD::SELECT_CC) {
+      unsigned CC = User->getConstantOperandVal(2);
+      if (CC >= 2 && CC <= 5)
+        return false;
+    }
+  }
+
+  // Decompose the load address.
+  SDValue Base, Offset, Index, Flags;
+  if (!SelectVAXAddr(Load->getBasePtr(), Base, Offset, Index, Flags))
+    return false;
+
+  SDLoc DL(N);
+  SmallVector<SDValue, 6> Ops;
+
+  SDNode *CmpNode;
+  if (Imm == 0) {
+    // TSTB_m: test byte at memory (equivalent to cmpb mem, $0).
+    Ops = {Base, Offset, Index, Flags, Load->getChain()};
+    CmpNode = CurDAG->getMachineNode(VAX::TSTB_m, DL, MVT::Other, MVT::Glue,
+                                     Ops);
+  } else {
+    // CMPB_mi: compare byte at memory against byte immediate.
+    SDValue ImmOp = CurDAG->getTargetConstant(Imm, DL, MVT::i32);
+    Ops = {Base, Offset, Index, Flags, ImmOp, Load->getChain()};
+    CmpNode = CurDAG->getMachineNode(VAX::CMPB_mi, DL, MVT::Other, MVT::Glue,
+                                     Ops);
+  }
+
+  // Replace the glue output (condition codes) and propagate the chain.
+  // Result 0 = chain (MVT::Other), Result 1 = glue (MVT::Glue).
+  ReplaceUses(SDValue(N, 0), SDValue(CmpNode, 1));
+  // The load's chain is consumed by the CMPB/TSTB; update chain users.
+  ReplaceUses(LHS.getValue(1), SDValue(CmpNode, 0));
+  CurDAG->RemoveDeadNode(N);
+  return true;
 }
 
 bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
@@ -309,6 +421,21 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
   Base = Addr;
   Offset = CurDAG->getTargetConstant(0, DL, MVT::i32);
   return true;
+}
+
+// SelectVAXAddrNonTrivial — like SelectVAXAddr but rejects bare registers.
+// Used for PUSHAL patterns where we only want to match real address
+// computations (FrameIndex, Reg+Disp, PCRel), not plain register values.
+bool VAXDAGToDAGISel::SelectVAXAddrNonTrivial(SDValue Addr, SDValue &Base,
+                                               SDValue &Offset, SDValue &Index,
+                                               SDValue &Flags) {
+  // Reject bare registers — these should use PUSHL, not PUSHAL.
+  if (Addr.getOpcode() != ISD::FrameIndex &&
+      Addr.getOpcode() != ISD::ADD &&
+      !(Addr.getOpcode() == ISD::OR && Addr->getFlags().hasDisjoint()) &&
+      Addr.getOpcode() != VAXISD::PCRelWrapper)
+    return false;
+  return SelectVAXAddr(Addr, Base, Offset, Index, Flags);
 }
 
 bool VAXDAGToDAGISel::SelectVAXAddrLong(SDValue Addr, SDValue &Base,
