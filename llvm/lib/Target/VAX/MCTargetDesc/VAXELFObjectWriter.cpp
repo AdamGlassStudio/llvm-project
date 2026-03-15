@@ -9,9 +9,13 @@
 #include "VAXFixupKinds.h"
 #include "VAXMCTargetDesc.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCFixup.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
+#include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/MCSymbolELF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -26,6 +30,15 @@ public:
                                 /*EMachine=*/ELF::EM_VAX,
                                 /*HasRelocationAddend=*/true) {}
 
+  /// Check PIC lazily via the MCAssembler (set after construction).
+  bool isPositionIndependent() const {
+    if (!Asm)
+      return false;
+    if (auto *MOFI = getContext().getObjectFileInfo())
+      return MOFI->isPositionIndependent();
+    return false;
+  }
+
   unsigned getRelocType(const MCFixup &Fixup, const MCValue &Target,
                         bool IsPCRel) const override {
     unsigned Kind = Fixup.getKind();
@@ -38,8 +51,23 @@ public:
         return ELF::R_VAX_PC8;
       case VAX::fixup_vax_pcrel_16:
         return ELF::R_VAX_PC16;
-      case VAX::fixup_vax_pcrel_32:
+      case VAX::fixup_vax_pcrel_32: {
+        // PIC promotion: like GAS -k, promote unresolved PC-relative
+        // references to PLT relocations for undefined global symbols.
+        // Only undefined, non-local symbols should get PLT — defined or
+        // local symbols may later be converted to section symbols by the
+        // ELF writer, and the linker asserts h!=NULL for PLT relocs.
+        if (isPositionIndependent()) {
+          const MCSymbol *Sym = Target.getAddSym();
+          if (Sym && !Sym->isTemporary()) {
+            auto &ElfSym = static_cast<const MCSymbolELF &>(*Sym);
+            if (ElfSym.isUndefined() &&
+                ElfSym.getBinding() != ELF::STB_LOCAL)
+              return ELF::R_VAX_PLT32;
+          }
+        }
         return ELF::R_VAX_PC32;
+      }
       case VAX::fixup_vax_got_32:
         return ELF::R_VAX_GOT32;
       case VAX::fixup_vax_plt_32:

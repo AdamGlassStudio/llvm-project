@@ -788,10 +788,12 @@ SDValue VAXTargetLowering::LowerGlobalAddress(SDValue Op,
   const GlobalValue *GV = GN->getGlobal();
   SDLoc DL(GN);
 
-  // Note: VAX GAS does not support @GOT relocations.  Even for PIC,
-  // emit plain PC-relative addressing.  True shared library support
-  // would require a different approach (not GOT/PLT).
+  // In PIC mode, external/interposable symbols must be accessed through the
+  // GOT so the dynamic linker can resolve them.  This produces R_VAX_GOT32
+  // relocations.  DSO-local symbols can use plain PC-relative addressing.
   unsigned TF = VAXII::MO_NO_FLAG;
+  if (isPositionIndependent() && !GV->isDSOLocal())
+    TF = VAXII::MO_GOT;
 
   SDValue GA = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, GN->getOffset(), TF);
   SDValue Addr = DAG.getNode(VAXISD::PCRelWrapper, DL, MVT::i32, GA);
@@ -1164,15 +1166,19 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   // Wrap callee for direct calls.
-  // Note: VAX GAS does not support @PLT relocations.  Even when building
-  // position-independent code, emit plain calls — the linker resolves
-  // cross-DSO references via other mechanisms.
+  // In PIC mode, external/interposable calls must go through the PLT so that
+  // the dynamic linker can resolve them.  This produces R_VAX_PLT32
+  // relocations (GAS achieves the same effect via its -k flag).
+  bool IsPIC = isPositionIndependent();
   if (auto *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
-    Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, MVT::i32, 0,
-                                        VAXII::MO_NO_FLAG);
+    const GlobalValue *GV = G->getGlobal();
+    unsigned TF = VAXII::MO_NO_FLAG;
+    if (IsPIC && !GV->isDSOLocal())
+      TF = VAXII::MO_PLT;
+    Callee = DAG.getTargetGlobalAddress(GV, DL, MVT::i32, 0, TF);
   } else if (auto *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
-    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32,
-                                         VAXII::MO_NO_FLAG);
+    unsigned TF = IsPIC ? VAXII::MO_PLT : VAXII::MO_NO_FLAG;
+    Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32, TF);
   }
 
   // Build VAXISD::CALL node.
