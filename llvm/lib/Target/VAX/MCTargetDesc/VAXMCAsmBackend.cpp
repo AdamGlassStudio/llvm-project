@@ -121,8 +121,11 @@ public:
     }
   }
 
-  bool fixupNeedsRelaxation(const MCFixup &Fixup,
-                            uint64_t Value) const override {
+  bool fixupNeedsRelaxationAdvanced(const MCFragment &, const MCFixup &Fixup,
+                                    const MCValue &, uint64_t Value,
+                                    bool Resolved) const override {
+    if (!Resolved)
+      return true;
     // An 8-bit PC-relative branch displacement that doesn't fit needs
     // relaxation (BRB → BRW).
     if ((unsigned)Fixup.getKind() == VAX::fixup_vax_pcrel_8)
