@@ -52,18 +52,18 @@ public:
       case VAX::fixup_vax_pcrel_16:
         return ELF::R_VAX_PC16;
       case VAX::fixup_vax_pcrel_32: {
-        // PIC promotion: like GAS -k, promote unresolved PC-relative
-        // references to PLT relocations for undefined global symbols.
-        // Only undefined, non-local symbols should get PLT — defined or
-        // local symbols may later be converted to section symbols by the
-        // ELF writer, and the linker asserts h!=NULL for PLT relocs.
+        // PIC promotion: promote bare PC-relative references to undefined
+        // global symbols to GOT32, matching GAS -k behavior.  GOT32 lets
+        // the BFD linker set the deferred bit and route through the GOT,
+        // giving NULL for undefined weak symbols (so NULL-checks work).
+        // Explicit @PLT references already arrive as fixup_vax_plt_32.
         if (isPositionIndependent()) {
           const MCSymbol *Sym = Target.getAddSym();
           if (Sym && !Sym->isTemporary()) {
             auto &ElfSym = static_cast<const MCSymbolELF &>(*Sym);
             if (ElfSym.isUndefined() &&
                 ElfSym.getBinding() != ELF::STB_LOCAL)
-              return ELF::R_VAX_PLT32;
+              return ELF::R_VAX_GOT32;
           }
         }
         return ELF::R_VAX_PC32;
