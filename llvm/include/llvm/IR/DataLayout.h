@@ -110,6 +110,12 @@ private:
   bool BigEndian = false;
   bool VectorsAreElementAligned = false;
 
+  /// Target uses non-IEEE floating-point format (e.g., VAX D_float/F_float).
+  /// When set, the constant folder must not reinterpret raw memory bytes as
+  /// IEEE 754 floating-point values, since the in-memory representation
+  /// differs from the IEEE format used by LLVM IR's float/double types.
+  bool NonIEEEFloat = false;
+
   unsigned AllocaAddrSpace = 0;
   unsigned ProgramAddrSpace = 0;
   unsigned DefaultGlobalsAddrSpace = 0;
@@ -217,6 +223,12 @@ public:
 
   /// Whether vectors are element aligned, rather than naturally aligned.
   bool vectorsAreElementAligned() const { return VectorsAreElementAligned; }
+
+  /// Returns true if the target uses non-IEEE floating-point format in memory.
+  /// When true, bitcasting integer data to floating-point should not be
+  /// constant-folded, since the in-memory byte pattern does not match the
+  /// IEEE 754 semantics that LLVM IR's float/double types assume.
+  bool hasNonIEEEFloat() const { return NonIEEEFloat; }
 
   /// Returns the string representation of the DataLayout.
   ///

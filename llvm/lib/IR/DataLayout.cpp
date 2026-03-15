@@ -208,6 +208,7 @@ DataLayout &DataLayout::operator=(const DataLayout &Other) {
   StringRepresentation = Other.StringRepresentation;
   BigEndian = Other.BigEndian;
   VectorsAreElementAligned = Other.VectorsAreElementAligned;
+  NonIEEEFloat = Other.NonIEEEFloat;
   AllocaAddrSpace = Other.AllocaAddrSpace;
   ProgramAddrSpace = Other.ProgramAddrSpace;
   DefaultGlobalsAddrSpace = Other.DefaultGlobalsAddrSpace;
@@ -229,6 +230,7 @@ bool DataLayout::operator==(const DataLayout &Other) const {
   // NOTE: StringRepresentation might differ, it is not canonicalized.
   return BigEndian == Other.BigEndian &&
          VectorsAreElementAligned == Other.VectorsAreElementAligned &&
+         NonIEEEFloat == Other.NonIEEEFloat &&
          AllocaAddrSpace == Other.AllocaAddrSpace &&
          ProgramAddrSpace == Other.ProgramAddrSpace &&
          DefaultGlobalsAddrSpace == Other.DefaultGlobalsAddrSpace &&
@@ -514,6 +516,12 @@ Error DataLayout::parsePointerSpec(
 Error DataLayout::parseSpecification(
     StringRef Spec, SmallVectorImpl<unsigned> &NonIntegralAddressSpaces,
     SmallDenseSet<StringRef, 8> &AddrSpaceNames) {
+  // The "nif" specifier indicates non-IEEE floating-point memory format.
+  if (Spec == "nif") {
+    NonIEEEFloat = true;
+    return Error::success();
+  }
+
   // The "ni" specifier is the only two-character specifier. Handle it first.
   if (Spec.starts_with("ni")) {
     // ni:<address space>[:<address space>]...
