@@ -252,9 +252,9 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
           Kind = MCFixupKind(VAX::fixup_vax_got_32);
         else if (Spec == VAX::S_PLT)
           Kind = MCFixupKind(VAX::fixup_vax_plt_32);
-        else if (UseLongword)
+        else if (UseLongword) {
           Kind = MCFixupKind(VAX::fixup_vax_pcrel_32);
-        else
+        } else
           Kind = MCFixupKind(VAX::fixup_vax_pcrel_16);
 
         if (UseLongword) {
