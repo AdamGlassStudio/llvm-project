@@ -284,7 +284,7 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
       break;
     case MachineOperand::MO_JumpTableIndex: {
       SmallString<64> Name;
-      raw_svector_ostream(Name) << MAI->getPrivateGlobalPrefix()
+      raw_svector_ostream(Name) << MAI->getPrivateLabelPrefix()
                                 << "JTI" << getFunctionNumber()
                                 << '_' << MO.getIndex();
       const MCSymbol *Sym = OutContext.getOrCreateSymbol(Name);
@@ -469,8 +469,9 @@ void VAXAsmPrinter::emitConstantPool() {
     if (!CPE.isMachineConstantPoolEntry())
       C = CPE.Val.ConstVal;
 
+    const Function *F = MF ? &MF->getFunction() : nullptr;
     MCSection *S = getObjFileLowering().getSectionForConstant(
-        DL, Kind, C, Alignment);
+        DL, Kind, C, Alignment, F);
     OutStreamer->switchSection(S);
     emitAlignment(Alignment);
     OutStreamer->emitLabel(Sym);
