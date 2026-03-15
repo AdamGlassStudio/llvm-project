@@ -32,6 +32,13 @@ StringRef llvm::object::getELFRelocationTypeName(uint32_t Machine,
       break;
     }
     break;
+  case ELF::EM_VAX:
+    switch (Type) {
+#include "llvm/BinaryFormat/ELFRelocs/VAX.def"
+    default:
+      break;
+    }
+    break;
   case ELF::EM_X86_64:
     switch (Type) {
 #include "llvm/BinaryFormat/ELFRelocs/x86_64.def"
@@ -238,6 +245,8 @@ uint32_t llvm::object::getELFRelativeRelocationType(uint32_t Machine) {
   case ELF::EM_SPARC32PLUS:
   case ELF::EM_SPARCV9:
     return ELF::R_SPARC_RELATIVE;
+  case ELF::EM_VAX:
+    return ELF::R_VAX_RELATIVE;
   case ELF::EM_CSKY:
     return ELF::R_CKCORE_RELATIVE;
   case ELF::EM_VE:
