@@ -881,6 +881,22 @@ def MOVZBW_rr : InstVAX<0x9B, (outs GPRW:$dst), (ins GPRB:$src),
     "movzbw\t$src, $dst",
     [(set GPRW:$dst, (zext GPRB:$src))]>;
 
+// MOVZBW (0x9B) reg <- mem: zero-extending load i8 → i16.
+let HasMemOp = 1, Defs = [PSW] in {
+def MOVZBW_rm : InstVAX<0x9B, (outs GPRW:$dst), (ins VAXMemOp:$src),
+    "movzbw\t$src, $dst",
+    [(set GPRW:$dst, (zextloadi8 VAXMem:$src))]>, Sched<[WriteCVT]>;
+def MOVZBW_rm_e : InstVAX<0x9B, (outs GPRW:$dst), (ins VAXMemOp:$src),
+    "movzbw\t$src, $dst",
+    [(set GPRW:$dst, (extloadi8 VAXMem:$src))]>, Sched<[WriteCVT]>;
+}
+
+// CVTBW (0x99) reg <- mem: sign-extending load i8 → i16.
+let HasMemOp = 1, Defs = [PSW] in
+def CVTBW_rm : InstVAX<0x99, (outs GPRW:$dst), (ins VAXMemOp:$src),
+    "cvtbw\t$src, $dst",
+    [(set GPRW:$dst, (sextloadi8 VAXMem:$src))]>, Sched<[WriteCVT]>;
+
 // i8→i16 any-extend: use zero-extend (cheapest).
 def : Pat<(i16 (anyext GPRB:$src)), (MOVZBW_rr GPRB:$src)>;
 
@@ -888,6 +904,10 @@ def : Pat<(i16 (anyext GPRB:$src)), (MOVZBW_rr GPRB:$src)>;
 def : Pat<(i8  (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_8lo)>;
 def : Pat<(i16 (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_16lo)>;
 def : Pat<(i8  (trunc GPRW:$src)),    (EXTRACT_SUBREG GPRW:$src, sub_8lo)>;
+
+// Truncating store i16 → i8: extract low byte, store it.
+def : Pat<(truncstorei8 GPRW:$src, VAXMem:$dst),
+          (MOVBstore (EXTRACT_SUBREG GPRW:$src, sub_8lo), VAXMemOp:$dst)>;
 
 //===----------------------------------------------------------------------===//
 // Native byte/word arithmetic (i8/i16 are legal types)

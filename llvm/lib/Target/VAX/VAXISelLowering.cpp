@@ -175,16 +175,19 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // Enable target DAG combine to catch the i64 comparison expansion pattern.
   setTargetDAGCombine(ISD::SELECT_CC);
 
-  // Shifts: SHL/SRA/SRL all need custom lowering for i32 (ASHL/EXTZV).
-  // For i8/i16, promote to i32 — no native byte/word shift instructions.
-  setOperationAction(ISD::SRA, MVT::i32, Custom);
-  setOperationAction(ISD::SRL, MVT::i32, Custom);
+  // Shifts: SHL/SRA/SRL all need custom lowering (ASHL/EXTZV).
+  // VAX has no byte/word shift instructions, so i8/i16 shifts are custom
+  // lowered by extending to i32, shifting, and truncating back.
+  // Note: Promote doesn't work here because LLVM's operation legalizer
+  // cannot promote shifts when the value type is legal.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::SHL, VT, Custom);
+    setOperationAction(ISD::SRA, VT, Custom);
+    setOperationAction(ISD::SRL, VT, Custom);
+  }
   for (auto VT : {MVT::i8, MVT::i16}) {
-    setOperationAction(ISD::SHL, VT, Promote);
-    setOperationAction(ISD::SRA, VT, Promote);
-    setOperationAction(ISD::SRL, VT, Promote);
-    setOperationAction(ISD::ROTL, VT, Promote);
-    setOperationAction(ISD::ROTR, VT, Promote);
+    setOperationAction(ISD::ROTL, VT, Expand);
+    setOperationAction(ISD::ROTR, VT, Expand);
   }
 
   // Frame intrinsics for exception handling and debugging.
@@ -380,6 +383,7 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
+  case ISD::SHL:           return LowerSHL(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
@@ -568,13 +572,36 @@ SDValue VAXTargetLowering::LowerAND(SDValue Op, SelectionDAG &DAG) const {
   return DAG.getNode(VAXISD::BICL, DL, VT, NotB, A);
 }
 
-SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
-  // VAX ASHL with negative count does arithmetic right shift.
-  // Only called for i32 — i8/i16 shifts are promoted.
+SDValue VAXTargetLowering::LowerSHL(SDValue Op, SelectionDAG &DAG) const {
+  // VAX ASHL is i32-only. For i8/i16, extend to i32, shift, truncate.
   SDLoc DL(Op);
+  EVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
-  assert(Op.getSimpleValueType() == MVT::i32 && "SRA only for i32");
+
+  if (VT != MVT::i32) {
+    SDValue Ext = DAG.getNode(ISD::ANY_EXTEND, DL, MVT::i32, Src);
+    SDValue Shift = DAG.getNode(ISD::SHL, DL, MVT::i32, Ext, Cnt);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+  }
+
+  // i32: lower directly to ASHL.
+  return DAG.getNode(VAXISD::ASHL, DL, MVT::i32, Cnt, Src);
+}
+
+SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
+  // VAX ASHL with negative count does arithmetic right shift.
+  // For i8/i16, sign-extend to i32, shift, truncate.
+  SDLoc DL(Op);
+  EVT VT = Op.getSimpleValueType();
+  SDValue Src = Op.getOperand(0);
+  SDValue Cnt = Op.getOperand(1);
+
+  if (VT != MVT::i32) {
+    SDValue Ext = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, Src);
+    SDValue Shift = DAG.getNode(ISD::SRA, DL, MVT::i32, Ext, Cnt);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+  }
 
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     int64_t NegAmt = -CN->getSExtValue();
@@ -588,11 +615,17 @@ SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
   // VAX has no logical right shift instruction. Use EXTZV (extract field).
-  // Only called for i32 — i8/i16 shifts are promoted.
+  // For i8/i16, zero-extend to i32, shift, truncate.
   SDLoc DL(Op);
+  EVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
-  assert(Op.getSimpleValueType() == MVT::i32 && "SRL only for i32");
+
+  if (VT != MVT::i32) {
+    SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
+    SDValue Shift = DAG.getNode(ISD::SRL, DL, MVT::i32, Ext, Cnt);
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
+  }
 
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     unsigned N = CN->getZExtValue() & 31;
