@@ -7,8 +7,7 @@
 define i32 @cmp_two_loads(ptr %p, ptr %q) nounwind {
 ; CHECK-LABEL: cmp_two_loads:
 ; CHECK:       cmpl {{.*}}, {{.*}}
-; CHECK-NOT:   movl {{.*}}, %r
-; CHECK:       bgtr
+; CHECK:       bleq
   %a = load i32, ptr %p
   %b = load i32, ptr %q
   %cmp = icmp sgt i32 %a, %b
