@@ -6,7 +6,7 @@
 ; Basic equality comparison against constant: uses cmpb.
 define i32 @cmpb_eq_42(ptr %p) {
 ; CHECK-LABEL: cmpb_eq_42:
-; CHECK:       cmpb %r{{[0-9]+}}, %r{{[0-9]+}}
+; CHECK:       cmpb %r{{[0-9]+}}, $42
 ; CHECK-NEXT:  bneq
   %v = load i8, ptr %p
   %zext = zext i8 %v to i32
@@ -36,7 +36,7 @@ else:
 ; Unsigned less-than: should use cmpb with unsigned branch.
 define i32 @cmpb_ult(ptr %p) {
 ; CHECK-LABEL: cmpb_ult:
-; CHECK:       cmpb %r{{[0-9]+}}, %r{{[0-9]+}}
+; CHECK:       cmpb %r{{[0-9]+}}, $9
 ; CHECK-NEXT:  bgtru
   %v = load i8, ptr %p
   %zext = zext i8 %v to i32
@@ -51,7 +51,7 @@ else:
 ; Comparison against max byte value (255 = -1 in i8).
 define i32 @cmpb_eq_255(ptr %p) {
 ; CHECK-LABEL: cmpb_eq_255:
-; CHECK:       cmpb %r{{[0-9]+}}, %r{{[0-9]+}}
+; CHECK:       cmpb %r{{[0-9]+}}, $-1
 ; CHECK-NEXT:  bneq
   %v = load i8, ptr %p
   %zext = zext i8 %v to i32
@@ -81,7 +81,7 @@ else:
 ; Multi-use of zero-extended value: cmpb for comparison, movzbl for return.
 define i32 @no_narrow_multi_use(ptr %p) {
 ; CHECK-LABEL: no_narrow_multi_use:
-; CHECK:       cmpb %r{{[0-9]+}}, %r{{[0-9]+}}
+; CHECK:       cmpb %r{{[0-9]+}}, $42
 ; CHECK:       movzbl %r{{[0-9]+}}, %r0
   %v = load i8, ptr %p
   %zext = zext i8 %v to i32

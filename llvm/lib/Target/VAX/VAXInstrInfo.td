@@ -923,10 +923,16 @@ def ADDB3_rr : InstVAX<0x81, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
     [(set GPRB:$dst, (add GPRB:$a, GPRB:$b))]> {
   let isCommutable = 1;
 }
+def ADDB3_ri : InstVAX<0x81, (outs GPRB:$dst), (ins ByteImm8:$a, GPRB:$b),
+    "addb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (add GPRB:$b, (i8 imm:$a)))]>;
 // SUBB3 (0x83) — byte subtract: dst = src2 - src1
 def SUBB3_rr : InstVAX<0x83, (outs GPRB:$dst), (ins GPRB:$s, GPRB:$m),
     "subb3\t$s, $m, $dst",
     [(set GPRB:$dst, (sub GPRB:$m, GPRB:$s))]>;
+def SUBB3_ri : InstVAX<0x83, (outs GPRB:$dst), (ins ByteImm8:$s, GPRB:$m),
+    "subb3\t$s, $m, $dst",
+    [(set GPRB:$dst, (sub GPRB:$m, (i8 imm:$s)))]>;
 
 // MNEGB (0x8E) — byte negate: dst = -src
 def MNEGB : InstVAX<0x8E, (outs GPRB:$dst), (ins GPRB:$src),
@@ -939,10 +945,16 @@ def ADDW3_rr : InstVAX<0xA1, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
     [(set GPRW:$dst, (add GPRW:$a, GPRW:$b))]> {
   let isCommutable = 1;
 }
+def ADDW3_ri : InstVAX<0xA1, (outs GPRW:$dst), (ins WordImm16:$a, GPRW:$b),
+    "addw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (add GPRW:$b, (i16 imm:$a)))]>;
 // SUBW3 (0xA3) — word subtract: dst = src2 - src1
 def SUBW3_rr : InstVAX<0xA3, (outs GPRW:$dst), (ins GPRW:$s, GPRW:$m),
     "subw3\t$s, $m, $dst",
     [(set GPRW:$dst, (sub GPRW:$m, GPRW:$s))]>;
+def SUBW3_ri : InstVAX<0xA3, (outs GPRW:$dst), (ins WordImm16:$s, GPRW:$m),
+    "subw3\t$s, $m, $dst",
+    [(set GPRW:$dst, (sub GPRW:$m, (i16 imm:$s)))]>;
 
 // MNEGW (0xAE) — word negate: dst = -src
 def MNEGW : InstVAX<0xAE, (outs GPRW:$dst), (ins GPRW:$src),
@@ -957,6 +969,9 @@ def MNEGW : InstVAX<0xAE, (outs GPRW:$dst), (ins GPRW:$src),
 def CMPB_rr : InstVAX<0x91, (outs), (ins GPRB:$a, GPRB:$b),
     "cmpb\t$a, $b",
     [(vax_cmp GPRB:$a, GPRB:$b)]>;
+def CMPB_ri : InstVAX<0x91, (outs), (ins GPRB:$a, ByteImm8:$b),
+    "cmpb\t$a, $b",
+    [(vax_cmp GPRB:$a, (i8 imm:$b))]>;
 // TSTB (0x95) — test byte: sets PSW from op - 0
 def TSTB : InstVAX<0x95, (outs), (ins GPRB:$a),
     "tstb\t$a",
@@ -966,6 +981,9 @@ def TSTB : InstVAX<0x95, (outs), (ins GPRB:$a),
 def CMPW_rr : InstVAX<0xB1, (outs), (ins GPRW:$a, GPRW:$b),
     "cmpw\t$a, $b",
     [(vax_cmp GPRW:$a, GPRW:$b)]>;
+def CMPW_ri : InstVAX<0xB1, (outs), (ins GPRW:$a, WordImm16:$b),
+    "cmpw\t$a, $b",
+    [(vax_cmp GPRW:$a, (i16 imm:$b))]>;
 // TSTW (0xB5) — test word: sets PSW from op - 0
 def TSTW : InstVAX<0xB5, (outs), (ins GPRW:$a),
     "tstw\t$a",
@@ -987,6 +1005,9 @@ def BISB3_rr : InstVAX<0x89, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
     [(set GPRB:$dst, (or GPRB:$a, GPRB:$b))]> {
   let isCommutable = 1;
 }
+def BISB3_ri : InstVAX<0x89, (outs GPRB:$dst), (ins ByteImm8:$a, GPRB:$b),
+    "bisb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (or GPRB:$b, (i8 imm:$a)))]>;
 
 // BISW3 (0xA9) — bit set word (OR): dst = src1 | src2
 def BISW3_rr : InstVAX<0xA9, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
@@ -994,6 +1015,9 @@ def BISW3_rr : InstVAX<0xA9, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
     [(set GPRW:$dst, (or GPRW:$a, GPRW:$b))]> {
   let isCommutable = 1;
 }
+def BISW3_ri : InstVAX<0xA9, (outs GPRW:$dst), (ins WordImm16:$a, GPRW:$b),
+    "bisw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (or GPRW:$b, (i16 imm:$a)))]>;
 
 // XORB3 (0x8D) — exclusive-or byte: dst = src1 ^ src2
 def XORB3_rr : InstVAX<0x8D, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
@@ -1001,6 +1025,9 @@ def XORB3_rr : InstVAX<0x8D, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
     [(set GPRB:$dst, (xor GPRB:$a, GPRB:$b))]> {
   let isCommutable = 1;
 }
+def XORB3_ri : InstVAX<0x8D, (outs GPRB:$dst), (ins ByteImm8:$a, GPRB:$b),
+    "xorb3\t$a, $b, $dst",
+    [(set GPRB:$dst, (xor GPRB:$b, (i8 imm:$a)))]>;
 
 // XORW3 (0xAD) — exclusive-or word: dst = src1 ^ src2
 def XORW3_rr : InstVAX<0xAD, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
@@ -1008,6 +1035,9 @@ def XORW3_rr : InstVAX<0xAD, (outs GPRW:$dst), (ins GPRW:$a, GPRW:$b),
     [(set GPRW:$dst, (xor GPRW:$a, GPRW:$b))]> {
   let isCommutable = 1;
 }
+def XORW3_ri : InstVAX<0xAD, (outs GPRW:$dst), (ins WordImm16:$a, GPRW:$b),
+    "xorw3\t$a, $b, $dst",
+    [(set GPRW:$dst, (xor GPRW:$b, (i16 imm:$a)))]>;
 
 // BICB3 (0x8B) — bit clear byte: dst = src & ~mask
 def BICB3_rr : InstVAX<0x8B, (outs GPRB:$dst),
@@ -3012,6 +3042,9 @@ def : Pat<(nonvolatile_truncstorei8 (i32 (nonvolatile_zextloadi8 VAXMem:$src)),
 def : Pat<(nonvolatile_truncstorei8 (i32 (nonvolatile_sextloadi8 VAXMem:$src)),
                                     VAXMem:$dst),
           (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// Native i8 mem-to-mem (when i8 is a legal type).
+def : Pat<(nonvolatile_store (i8 (nonvolatile_load VAXMem:$src)), VAXMem:$dst),
+          (MOVB_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- i16 memory-to-memory (word copy) ---
 def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_extloadi16 VAXMem:$src)),
@@ -3022,6 +3055,9 @@ def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_zextloadi16 VAXMem:$src))
           (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 def : Pat<(nonvolatile_truncstorei16 (i32 (nonvolatile_sextloadi16 VAXMem:$src)),
                                      VAXMem:$dst),
+          (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
+// Native i16 mem-to-mem (when i16 is a legal type).
+def : Pat<(nonvolatile_store (i16 (nonvolatile_load VAXMem:$src)), VAXMem:$dst),
           (MOVW_mm VAXMemOp:$src, VAXMemOp:$dst)>;
 
 // --- f32 memory-to-memory (F_float copy) ---
