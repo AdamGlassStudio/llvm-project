@@ -703,19 +703,34 @@ def CMP_BRANCH_mi : Pseudo<(outs),
 def TST_BRANCH_m : Pseudo<(outs),
     (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
 } // let mayLoad = 1
-// Byte/word compare/test fused pseudos:
+// Byte compare/test fused pseudos:
 def CMPB_BRANCH : Pseudo<(outs),
     (ins GPRB:$lhs, GPRB:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPB_BRANCH_ri : Pseudo<(outs),
+    (ins GPRB:$lhs, ByteImm8:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 let mayLoad = 1 in {
 def CMPB_BRANCH_mi : Pseudo<(outs),
     (ins VAXMemOp:$lhs, ByteImm:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPB_BRANCH_rm : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, GPRB:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPB_BRANCH_mm : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, VAXMemOp:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTB_BRANCH : Pseudo<(outs),
     (ins GPRB:$src, i32imm:$cc, brtarget:$dst), "", []>;
 def TSTB_BRANCH_m : Pseudo<(outs),
     (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
 } // let mayLoad = 1
+// Word compare/test fused pseudos:
 def CMPW_BRANCH : Pseudo<(outs),
     (ins GPRW:$lhs, GPRW:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def CMPW_BRANCH_ri : Pseudo<(outs),
+    (ins GPRW:$lhs, WordImm16:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+let mayLoad = 1 in {
+def CMPW_BRANCH_mm : Pseudo<(outs),
+    (ins VAXMemOp:$lhs, VAXMemOp:$rhs, i32imm:$cc, brtarget:$dst), "", []>;
+def TSTW_BRANCH_m : Pseudo<(outs),
+    (ins VAXMemOp:$src, i32imm:$cc, brtarget:$dst), "", []>;
+} // let mayLoad = 1
 def TSTW_BRANCH : Pseudo<(outs),
     (ins GPRW:$src, i32imm:$cc, brtarget:$dst), "", []>;
 }
@@ -1082,14 +1097,12 @@ def vax_select_cc : SDNode<"VAXISD::SELECT_CC", SDT_VAXSelectCC,
 // during ISel.  Uses = [PSW] tells the register allocator that PSW is live
 // across this pseudo.
 //
-// These pseudos are expanded post-RA by VAXInstrInfo::expandPostRAPseudo()
-// into a three-block diamond.  This MUST happen post-RA because on VAX every
-// register copy instruction (MOVB/MOVW/MOVL) clobbers PSW.  Pre-RA expansion
-// (via usesCustomInserter + PHI nodes) causes PHI elimination to insert copies
-// in the CMP block — between the compare and the branch — corrupting flags.
-// Post-RA expansion places copies only in the true/false blocks, never in the
-// CMP block.
-let Uses = [PSW] in {
+// SELECT_CC pseudos expanded pre-RA by EmitInstrWithCustomInserter into a
+// diamond + PHI.  The CMP_BRANCH fusion pass (VAXFuseCmpBranch) fuses the
+// preceding compare with the branch before PHI elimination runs, so the
+// PHI-elimination copies land in the true/false blocks — never between the
+// compare and the branch.
+let usesCustomInserter = 1, Uses = [PSW] in {
 def SELECT_CC_Pseudo : Pseudo<(outs GPRnoPC:$dst),
     (ins GPRnoPC:$truev, GPRnoPC:$falsev, i32imm:$cc),
     "#SELECT_CC $truev, $falsev, $cc",
@@ -1608,8 +1621,8 @@ def TSTF : InstVAX<0x53, (outs), (ins GPRI:$a),
     [(vax_fcmp GPRI:$a, (f32 fpimm_zero))]>;
 }
 
-// SELECT_CC for f32 results (expanded post-RA, same as integer variants).
-let Uses = [PSW] in
+// SELECT_CC for f32 results (expanded pre-RA, same as integer variants).
+let usesCustomInserter = 1, Uses = [PSW] in
 def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
     (ins GPRI:$truev, GPRI:$falsev, i32imm:$cc),
     "#SELECT_CC_F $truev, $falsev, $cc",
@@ -1710,8 +1723,8 @@ def TSTD : InstVAX<0x73, (outs), (ins QPR:$a),
     [(vax_fcmp QPR:$a, (f64 fpimm_zero))]>;
 }
 
-// SELECT_CC for f64 results (expanded post-RA, same as integer variants).
-let Uses = [PSW] in
+// SELECT_CC for f64 results (expanded pre-RA, same as integer variants).
+let usesCustomInserter = 1, Uses = [PSW] in
 def SELECT_CC_D_Pseudo : Pseudo<(outs QPR:$dst),
     (ins QPR:$truev, QPR:$falsev, i32imm:$cc),
     "#SELECT_CC_D $truev, $falsev, $cc",

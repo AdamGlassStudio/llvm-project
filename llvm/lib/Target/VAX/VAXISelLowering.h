@@ -120,6 +120,10 @@ private:
                               MachineBasicBlock *BB) const override;
 
   MachineBasicBlock *
+  EmitSELECT_CC(MachineInstr &MI,
+                 MachineBasicBlock *BB) const;
+
+  MachineBasicBlock *
   EmitSELECT_CC_I64(MachineInstr &MI,
                      MachineBasicBlock *BB) const;
 

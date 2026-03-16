@@ -1440,12 +1440,93 @@ SDValue VAXTargetLowering::PerformDAGCombine(SDNode *N,
 MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
                                                  MachineBasicBlock *BB) const {
-  // Only the I64 select pseudo uses the custom inserter.  The regular
-  // SELECT_CC pseudos are expanded post-RA by VAXInstrInfo::expandPostRAPseudo
-  // to avoid PSW corruption from PHI-elimination copies.
-  assert(MI.getOpcode() == VAX::SELECT_CC_I64_Pseudo &&
+  unsigned Opc = MI.getOpcode();
+  if (Opc == VAX::SELECT_CC_I64_Pseudo)
+    return EmitSELECT_CC_I64(MI, BB);
+
+  // All other SELECT_CC variants share the same expansion: a diamond with PHI.
+  assert((Opc == VAX::SELECT_CC_Pseudo ||
+          Opc == VAX::SELECT_CC_B_Pseudo ||
+          Opc == VAX::SELECT_CC_W_Pseudo ||
+          Opc == VAX::SELECT_CC_F_Pseudo ||
+          Opc == VAX::SELECT_CC_D_Pseudo) &&
          "Unexpected custom inserter opcode");
-  return EmitSELECT_CC_I64(MI, BB);
+  return EmitSELECT_CC(MI, BB);
+}
+
+// Map VAXCC condition code integer to the corresponding Bcc opcode.
+static unsigned vaxCCToBranchOpcode(unsigned VAXCC) {
+  static const unsigned BrOpcodes[] = {
+    VAX::BEQL, VAX::BNEQ, VAX::BGTR, VAX::BGEQ,
+    VAX::BLSS, VAX::BLEQ, VAX::BGTRU, VAX::BGEQU,
+    VAX::BLSSU, VAX::BLEQU
+  };
+  assert(VAXCC < std::size(BrOpcodes) && "Invalid VAXCC");
+  return BrOpcodes[VAXCC];
+}
+
+/// Expand a SELECT_CC pseudo into a diamond + PHI (pre-RA).
+///
+///   BB:        CMP ...  ; sets PSW
+///              Bcc TrueMBB, implicit $psw
+///   FalseMBB:  BRW SinkMBB
+///   TrueMBB:   BRW SinkMBB
+///   SinkMBB:   PHI dst = [TrueReg:TrueMBB, FalseReg:FalseMBB]
+///              ... (original continuation)
+///
+/// The preceding CMP + Bcc are then fused by VAXFuseCmpBranch into a single
+/// CMP_BRANCH pseudo, preventing PHI-elimination from inserting copies between
+/// the compare and the branch.
+MachineBasicBlock *
+VAXTargetLowering::EmitSELECT_CC(MachineInstr &MI,
+                                   MachineBasicBlock *BB) const {
+  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+
+  Register DstReg  = MI.getOperand(0).getReg();
+  Register TrueReg = MI.getOperand(1).getReg();
+  Register FalseReg = MI.getOperand(2).getReg();
+  unsigned VAXCC   = MI.getOperand(3).getImm();
+  unsigned BrOpc   = vaxCCToBranchOpcode(VAXCC);
+
+  MachineFunction *MF = BB->getParent();
+  const BasicBlock *LLVMBB = BB->getBasicBlock();
+  MachineFunction::iterator InsertPt = ++BB->getIterator();
+
+  auto *FalseMBB = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *TrueMBB  = MF->CreateMachineBasicBlock(LLVMBB);
+  auto *SinkMBB  = MF->CreateMachineBasicBlock(LLVMBB);
+  MF->insert(InsertPt, FalseMBB);
+  MF->insert(InsertPt, TrueMBB);
+  MF->insert(InsertPt, SinkMBB);
+
+  // Move everything after the SELECT_CC pseudo into SinkMBB.
+  SinkMBB->splice(SinkMBB->begin(), BB,
+                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
+  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
+
+  // BB: conditional branch to TrueMBB, fall through to FalseMBB.
+  BB->addSuccessor(FalseMBB);
+  BB->addSuccessor(TrueMBB);
+  BuildMI(BB, DL, TII.get(BrOpc)).addMBB(TrueMBB);
+
+  // FalseMBB: jump to SinkMBB.
+  FalseMBB->addSuccessor(SinkMBB);
+  BuildMI(FalseMBB, DL, TII.get(VAX::BRW)).addMBB(SinkMBB);
+
+  // TrueMBB: fall through to SinkMBB (or jump if not adjacent).
+  TrueMBB->addSuccessor(SinkMBB);
+  BuildMI(TrueMBB, DL, TII.get(VAX::BRW)).addMBB(SinkMBB);
+
+  // SinkMBB: PHI to merge true/false values.
+  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
+      .addReg(TrueReg)
+      .addMBB(TrueMBB)
+      .addReg(FalseReg)
+      .addMBB(FalseMBB);
+
+  MI.eraseFromParent();
+  return SinkMBB;
 }
 
 

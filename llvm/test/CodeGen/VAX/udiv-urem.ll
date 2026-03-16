@@ -16,7 +16,7 @@
 define i32 @udiv_var(i32 %a, i32 %b) {
 ; CHECK-LABEL: udiv_var:
 ; CHECK:       ediv
-; CHECK:       blss
+; CHECK:       bgeq
   %r = udiv i32 %a, %b
   ret i32 %r
 }
@@ -55,7 +55,7 @@ define i32 @udiv_small_const(i32 %a) {
 define i32 @urem_var(i32 %a, i32 %b) {
 ; CHECK-LABEL: urem_var:
 ; CHECK:       ediv
-; CHECK:       blss
+; CHECK:       bgeq
   %r = urem i32 %a, %b
   ret i32 %r
 }
