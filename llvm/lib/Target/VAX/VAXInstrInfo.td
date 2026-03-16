@@ -1077,7 +1077,19 @@ def SDT_VAXSelectCC : SDTypeProfile<1, 3, [SDTCisSameAs<0, 1>,
 def vax_select_cc : SDNode<"VAXISD::SELECT_CC", SDT_VAXSelectCC,
     [SDNPInGlue]>;
 
-let usesCustomInserter = 1 in {
+// SELECT_CC pseudos consume PSW flags set by the preceding CMP/TST.
+// The DAG-level glue (SDNPInGlue on vax_select_cc) keeps them adjacent
+// during ISel.  Uses = [PSW] tells the register allocator that PSW is live
+// across this pseudo.
+//
+// These pseudos are expanded post-RA by VAXInstrInfo::expandPostRAPseudo()
+// into a three-block diamond.  This MUST happen post-RA because on VAX every
+// register copy instruction (MOVB/MOVW/MOVL) clobbers PSW.  Pre-RA expansion
+// (via usesCustomInserter + PHI nodes) causes PHI elimination to insert copies
+// in the CMP block — between the compare and the branch — corrupting flags.
+// Post-RA expansion places copies only in the true/false blocks, never in the
+// CMP block.
+let Uses = [PSW] in {
 def SELECT_CC_Pseudo : Pseudo<(outs GPRnoPC:$dst),
     (ins GPRnoPC:$truev, GPRnoPC:$falsev, i32imm:$cc),
     "#SELECT_CC $truev, $falsev, $cc",
@@ -1596,8 +1608,8 @@ def TSTF : InstVAX<0x53, (outs), (ins GPRI:$a),
     [(vax_fcmp GPRI:$a, (f32 fpimm_zero))]>;
 }
 
-// SELECT_CC for f32 results (same diamond expansion as i32).
-let usesCustomInserter = 1 in
+// SELECT_CC for f32 results (expanded post-RA, same as integer variants).
+let Uses = [PSW] in
 def SELECT_CC_F_Pseudo : Pseudo<(outs GPRI:$dst),
     (ins GPRI:$truev, GPRI:$falsev, i32imm:$cc),
     "#SELECT_CC_F $truev, $falsev, $cc",
@@ -1698,8 +1710,8 @@ def TSTD : InstVAX<0x73, (outs), (ins QPR:$a),
     [(vax_fcmp QPR:$a, (f64 fpimm_zero))]>;
 }
 
-// SELECT_CC for f64 results.
-let usesCustomInserter = 1 in
+// SELECT_CC for f64 results (expanded post-RA, same as integer variants).
+let Uses = [PSW] in
 def SELECT_CC_D_Pseudo : Pseudo<(outs QPR:$dst),
     (ins QPR:$truev, QPR:$falsev, i32imm:$cc),
     "#SELECT_CC_D $truev, $falsev, $cc",
