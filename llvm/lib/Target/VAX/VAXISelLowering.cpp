@@ -82,13 +82,12 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
                                      const VAXSubtarget &STI)
     : TargetLowering(TM, STI) {
   // Register classes by value type.
-  // NOTE: i8/i16 are NOT registered as legal types. All sub-i32 integer
-  // arithmetic is promoted to i32. Byte/word loads and stores are handled
-  // via extending-load and truncating-store patterns (MOVZBL, CVTBL,
-  // MOVZWL, CVTWL, MOVB, MOVW) which don't require legal i8/i16 types.
-  // Registering i8/i16 caused LLVM to keep computations narrow, but VAX
-  // byte/word instructions leave upper register bits unchanged (not zeroed),
-  // leading to incorrect results when LLVM narrows i32 comparisons to i8.
+  // i8/i16/i32 are all legal integer types. VAX has native byte (ADDB3, CMPB,
+  // BICB3, etc.) and word (ADDW3, CMPW, BICW3, etc.) instructions.
+  // Upper register bits are NOT zeroed by byte/word operations — LLVM handles
+  // this via sub-register tracking (same approach as x86).
+  addRegisterClass(MVT::i8,  &VAX::GPRBRegClass);
+  addRegisterClass(MVT::i16, &VAX::GPRWRegClass);
   addRegisterClass(MVT::i32, &VAX::GPRnoPCRegClass);
   addRegisterClass(MVT::f32, &VAX::GPRIRegClass);
   addRegisterClass(MVT::f64, &VAX::QPRRegClass);
@@ -100,9 +99,7 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setSchedulingPreference(Sched::RegPressure);
 
   //===------------------------------------------------------------------===//
-  // i8/i16 type legalization: NOT legal types.
-  // All sub-i32 integer operations are promoted to i32 by the type legalizer.
-  // We only need extending-load and truncating-store settings (below).
+  // Operation actions for i32 (longword)
   //===------------------------------------------------------------------===//
 
   // Global addresses are lowered to PC-relative wrappers.
@@ -115,11 +112,13 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::JumpTable, MVT::i32, Custom);
 
   // AND is lowered to BICL (bit-clear) since VAX has no direct AND instruction.
-  setOperationAction(ISD::AND, MVT::i32, Custom);
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32})
+    setOperationAction(ISD::AND, VT, Custom);
 
   // Branches: lower ISD::BR_CC to VAXISD::CMP + VAXISD::BRCC.
   // Expanding BRCOND causes the DAG builder to produce BR_CC directly.
-  setOperationAction(ISD::BR_CC,   MVT::i32,   Custom);
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32})
+    setOperationAction(ISD::BR_CC, VT, Custom);
   setOperationAction(ISD::BRCOND,  MVT::Other,  Expand);
 
   // Switch/jump tables: custom-lower BR_JT to CASEL instruction.
@@ -131,28 +130,41 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::VACOPY,  MVT::Other, Expand);
   setOperationAction(ISD::VAEND,   MVT::Other, Expand);
 
-  // Conditional value selection: SELECT_CC is custom (needed by i64 expansion),
-  // SELECT expands to SELECT_CC.
-  setOperationAction(ISD::SELECT,    MVT::i32, Expand);
-  setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
+  // Conditional value selection: SELECT_CC is custom, SELECT expands.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::SELECT,    VT, Expand);
+    setOperationAction(ISD::SELECT_CC, VT, Custom);
+  }
 
   // Extend SELECT_CC_Pseudo to also handle f32 results.
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
 
   // VAX DIVL is signed only; use EDIV for unsigned div/rem and signed rem.
+  // No byte/word div instructions exist — promote to i32.
   setOperationAction(ISD::UDIV, MVT::i32, Custom);
   setOperationAction(ISD::UREM, MVT::i32, Custom);
   setOperationAction(ISD::SREM, MVT::i32, Custom);
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::SDIV, VT, Promote);
+    setOperationAction(ISD::UDIV, VT, Promote);
+    setOperationAction(ISD::SREM, VT, Promote);
+    setOperationAction(ISD::UREM, VT, Promote);
+  }
 
   // i64 mul: EMUL (32×32→64) handles both SMUL_LOHI and UMUL_LOHI.
-  // SMUL_LOHI maps directly to EMUL. UMUL_LOHI uses EMUL + unsigned fixup.
-  // This lets the type legalizer expand i64 MUL inline (no __muldi3 libcall):
-  //   sign-extended inputs → SMUL_LOHI → EMUL (1 instruction)
-  //   general i64 × i64   → UMUL_LOHI + cross terms → EMUL + fixup + mull3
   setOperationAction(ISD::SMUL_LOHI, MVT::i32, Custom);
   setOperationAction(ISD::UMUL_LOHI, MVT::i32, Custom);
   setOperationAction(ISD::MULHU, MVT::i32, Expand);
   setOperationAction(ISD::MULHS, MVT::i32, Expand);
+
+  // i8/i16 multiply: no byte/word MUL instructions — promote to i32.
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::MUL,       VT, Promote);
+    setOperationAction(ISD::SMUL_LOHI, VT, Promote);
+    setOperationAction(ISD::UMUL_LOHI, VT, Promote);
+    setOperationAction(ISD::MULHU,     VT, Promote);
+    setOperationAction(ISD::MULHS,     VT, Promote);
+  }
 
   // Carry-chained add/sub for i64 support: ADDL3 sets PSW.C, ADWC uses it.
   setOperationAction(ISD::ADDC, MVT::i32, Legal);
@@ -160,45 +172,51 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::SUBC, MVT::i32, Legal);
   setOperationAction(ISD::SUBE, MVT::i32, Legal);
 
-  // Enable target DAG combine to catch the i64 comparison expansion pattern
-  // (SELECT(SETCC,SETCC,SETCC) feeding SELECT_CC) and replace it with an
-  // efficient multi-block branch sequence (SELECT_CC_I64_Pseudo).
+  // Enable target DAG combine to catch the i64 comparison expansion pattern.
   setTargetDAGCombine(ISD::SELECT_CC);
 
-  // Shifts: SHL is handled directly by ASHL. SRA and SRL need custom lowering
-  // because VAX ASHL uses negative count for right shift (arithmetic), and
-  // logical right shift has no dedicated instruction.
+  // Shifts: SHL/SRA/SRL all need custom lowering for i32 (ASHL/EXTZV).
+  // For i8/i16, promote to i32 — no native byte/word shift instructions.
   setOperationAction(ISD::SRA, MVT::i32, Custom);
   setOperationAction(ISD::SRL, MVT::i32, Custom);
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::SHL, VT, Promote);
+    setOperationAction(ISD::SRA, VT, Promote);
+    setOperationAction(ISD::SRL, VT, Promote);
+    setOperationAction(ISD::ROTL, VT, Promote);
+    setOperationAction(ISD::ROTR, VT, Promote);
+  }
 
   // Frame intrinsics for exception handling and debugging.
   setOperationAction(ISD::FRAMEADDR,  MVT::i32, Custom);
   setOperationAction(ISD::RETURNADDR, MVT::i32, Custom);
   setOperationAction(ISD::EH_RETURN,  MVT::Other, Custom);
 
-  // Extending loads: all byte/word variants now legal via CVT/MOVZ instructions.
-  // i8 zero-extend: MOVZBL (Phase 5); i8 sign-extend: CVTBL (Phase 7).
-  // i16 zero-extend: MOVZWL (Phase 7); i16 sign-extend: CVTWL (Phase 7).
+  // Extending loads: all byte/word variants legal via CVT/MOVZ instructions.
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i8,  Legal); // MOVZBL
   setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i8,  Legal); // MOVZBL (anyext)
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i8,  Legal); // CVTBL
   setLoadExtAction(ISD::ZEXTLOAD, MVT::i32, MVT::i16, Legal); // MOVZWL
   setLoadExtAction(ISD::EXTLOAD,  MVT::i32, MVT::i16, Legal); // MOVZWL (anyext)
   setLoadExtAction(ISD::SEXTLOAD, MVT::i32, MVT::i16, Legal); // CVTWL
-  // i1 loads: C _Bool is i1 in LLVM IR. Promote to byte load (MOVZBL).
+  // i16 extending load from i8.
+  setLoadExtAction(ISD::ZEXTLOAD, MVT::i16, MVT::i8,  Legal); // MOVZBW
+  setLoadExtAction(ISD::EXTLOAD,  MVT::i16, MVT::i8,  Legal); // MOVZBW
+  setLoadExtAction(ISD::SEXTLOAD, MVT::i16, MVT::i8,  Legal); // CVTBW
+  // i1 loads: C _Bool is i1 in LLVM IR. Promote to byte load.
   for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
     setLoadExtAction(ISD::ZEXTLOAD, VT, MVT::i1, Promote);
     setLoadExtAction(ISD::EXTLOAD,  VT, MVT::i1, Promote);
     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1, Promote);
   }
 
-  // SIGN_EXTEND_INREG i1: no VAX instruction; expand to shift pair.
-  // i8 and i16 are handled by CVTBL/CVTWL patterns in TableGen.
+  // SIGN_EXTEND_INREG: i1 must expand; i8/i16 handled by CVTBL/CVTWL.
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
   // Truncating stores: MOVB (i8) and MOVW (i16).
   setTruncStoreAction(MVT::i32, MVT::i8,  Legal);
   setTruncStoreAction(MVT::i32, MVT::i16, Legal);
+  setTruncStoreAction(MVT::i16, MVT::i8,  Legal);
 
   // Truncating f64→f32 store: custom-lower to CVTDF + MOVF.
   setTruncStoreAction(MVT::f64, MVT::f32, Custom);
@@ -211,14 +229,24 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
 
   // Integer SETCC must be expanded — VAX sets condition codes but has no
   // instruction that directly produces a 0/1 result from a comparison.
-  setOperationAction(ISD::SETCC,      MVT::i32, Expand);
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32})
+    setOperationAction(ISD::SETCC, VT, Expand);
 
-  // UDIVREM/SDIVREM pairs: expand (individual udiv/urem/srem are Custom above).
-  setOperationAction(ISD::UDIVREM,    MVT::i32, Expand);
-  setOperationAction(ISD::SDIVREM,    MVT::i32, Expand);
+  // UDIVREM/SDIVREM pairs: expand.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::UDIVREM, VT, Expand);
+    setOperationAction(ISD::SDIVREM, VT, Expand);
+  }
 
-    // Bit manipulation: VAX has no native CLZ, bswap, or popcount.
-  // CTTZ_ZERO_UNDEF uses VAX FFS instruction directly.
+  // Bit manipulation: promote i8/i16 to i32; expand for i32.
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::CTLZ,       VT, Promote);
+    setOperationAction(ISD::CTTZ,       VT, Promote);
+    setOperationAction(ISD::CTPOP,      VT, Promote);
+    setOperationAction(ISD::BSWAP,      VT, Promote);
+    setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Promote);
+    setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Promote);
+  }
   setOperationAction(ISD::CTLZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTTZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTPOP,      MVT::i32, Expand);
@@ -352,7 +380,6 @@ SDValue VAXTargetLowering::LowerOperation(SDValue Op,
   case ISD::ConstantPool:  return LowerConstantPool(Op, DAG);
   case ISD::JumpTable:     return LowerJumpTable(Op, DAG);
   case ISD::AND:           return LowerAND(Op, DAG);
-  case ISD::SHL:           return LowerSHL(Op, DAG);
   case ISD::SRA:           return LowerSRA(Op, DAG);
   case ISD::SRL:           return LowerSRL(Op, DAG);
   case ISD::SHL_PARTS:     return LowerSHL_PARTS(Op, DAG);
@@ -543,28 +570,12 @@ SDValue VAXTargetLowering::LowerAND(SDValue Op, SelectionDAG &DAG) const {
 
 SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
   // VAX ASHL with negative count does arithmetic right shift.
+  // Only called for i32 — i8/i16 shifts are promoted.
   SDLoc DL(Op);
-  MVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
+  assert(Op.getSimpleValueType() == MVT::i32 && "SRA only for i32");
 
-  // Sub-i32: sign-extend to i32, use VAXISD::ASHL(-cnt), truncate back.
-  // Must use target-specific node to prevent DAGCombine infinite loop.
-  if (VT != MVT::i32) {
-    SDValue Ext = DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i32, Src);
-    SDValue NegCnt;
-    if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
-      int64_t NegAmt = -CN->getSExtValue();
-      NegCnt = DAG.getSignedConstant(NegAmt, DL, MVT::i32);
-    } else {
-      NegCnt = DAG.getNode(ISD::SUB, DL, MVT::i32,
-                           DAG.getConstant(0, DL, MVT::i32), Cnt);
-    }
-    SDValue Shift = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, NegCnt, Ext);
-    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
-  }
-
-  // i32: lower sra(x, n) → VAXISD::ASHL(-n, x).
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     int64_t NegAmt = -CN->getSExtValue();
     return DAG.getNode(VAXISD::ASHL, DL, MVT::i32,
@@ -576,36 +587,13 @@ SDValue VAXTargetLowering::LowerSRA(SDValue Op, SelectionDAG &DAG) const {
 }
 
 SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
-  // VAX has no logical right shift instruction.
+  // VAX has no logical right shift instruction. Use EXTZV (extract field).
+  // Only called for i32 — i8/i16 shifts are promoted.
   SDLoc DL(Op);
-  MVT VT = Op.getSimpleValueType();
   SDValue Src = Op.getOperand(0);
   SDValue Cnt = Op.getOperand(1);
+  assert(Op.getSimpleValueType() == MVT::i32 && "SRL only for i32");
 
-  // Sub-i32: zero-extend to i32, use VAXISD::EXTZV, truncate back.
-  // Must use target-specific node to prevent DAGCombine infinite loop.
-  if (VT != MVT::i32) {
-    SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
-    if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
-      unsigned N = CN->getZExtValue();
-      unsigned TypeBits = VT.getSizeInBits();
-      if (N == 0) return Src;
-      if (N >= TypeBits)
-        return DAG.getConstant(0, DL, VT);
-      SDValue Shifted = DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
-                                    DAG.getConstant(N, DL, MVT::i32),
-                                    DAG.getConstant(32 - N, DL, MVT::i32),
-                                    Ext);
-      return DAG.getNode(ISD::TRUNCATE, DL, VT, Shifted);
-    }
-    SDValue Size = DAG.getNode(ISD::SUB, DL, MVT::i32,
-                               DAG.getConstant(32, DL, MVT::i32), Cnt);
-    SDValue Shifted = DAG.getNode(VAXISD::EXTZV, DL, MVT::i32,
-                                  Cnt, Size, Ext);
-    return DAG.getNode(ISD::TRUNCATE, DL, VT, Shifted);
-  }
-
-  // i32: srl(x, n) = extzv(n, 32-n, x).
   if (auto *CN = dyn_cast<ConstantSDNode>(Cnt)) {
     unsigned N = CN->getZExtValue() & 31;
     if (N == 0) return Src;
@@ -616,20 +604,6 @@ SDValue VAXTargetLowering::LowerSRL(SDValue Op, SelectionDAG &DAG) const {
   SDValue Size = DAG.getNode(ISD::SUB, DL, MVT::i32,
                              DAG.getConstant(32, DL, MVT::i32), Cnt);
   return DAG.getNode(VAXISD::EXTZV, DL, MVT::i32, Cnt, Size, Src);
-}
-
-SDValue VAXTargetLowering::LowerSHL(SDValue Op, SelectionDAG &DAG) const {
-  // Sub-i32 SHL: zero-extend to i32, use VAXISD::ASHL, truncate back.
-  // Must use target-specific ASHL node (not ISD::SHL) to prevent DAGCombine
-  // from folding trunc(shl(zext(x), c)) back to shl(x, c) and looping.
-  SDLoc DL(Op);
-  MVT VT = Op.getSimpleValueType();
-
-  SDValue Src = Op.getOperand(0);
-  SDValue Cnt = Op.getOperand(1);
-  SDValue Ext = DAG.getNode(ISD::ZERO_EXTEND, DL, MVT::i32, Src);
-  SDValue Shift = DAG.getNode(VAXISD::ASHL, DL, MVT::i32, Cnt, Ext);
-  return DAG.getNode(ISD::TRUNCATE, DL, VT, Shift);
 }
 
 SDValue VAXTargetLowering::LowerSHL_PARTS(SDValue Op,

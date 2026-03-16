@@ -755,23 +755,21 @@ defm MOVB : VAXTruncStore<0x90, "movb", truncstorei8>;
 defm MOVW : VAXTruncStore<0xB0, "movw", truncstorei16>;
 
 //===----------------------------------------------------------------------===//
-// Phase 33B — Native byte/word loads, stores, extends, truncates
+// Native byte/word loads, stores, extends, truncates
 //===----------------------------------------------------------------------===//
 
-// All byte/word reg←reg and reg←mem/imm instructions get Defs=[PSW] —
-// they have register outputs, so PSW is secondary (no scheduling cycles).
+// Byte/word reg←reg and reg←mem/imm instructions get Defs=[PSW].
 // Store-only byte/word variants stay without PSW.
 
 let Defs = [PSW] in {
 
 // MOVB (0x90) — native i8 load/copy (byte register class).
 // reg <- mem (byte load)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVBload : InstVAX<0x90, (outs GPRB:$dst), (ins VAXMemOp:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (load VAXMem:$src))]>;
 // reg <- globaladdr (byte load via PC-relative)
-let isCodeGenOnly = 1 in
 def MOVBload_ga : InstVAX<0x90, (outs GPRB:$dst), (ins i32imm:$sym),
     "movb\t$sym, $dst",
     [(set GPRB:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
@@ -780,19 +778,17 @@ let isCodeGenOnly = 1 in
 def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
     "movb\t$src, $dst", []>;
 // reg <- imm (byte immediate load)
-let isCodeGenOnly = 1 in
 def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins i8imm:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (i8 imm:$src))]>;
 
 // MOVW (0xB0) — native i16 load/copy (word register class).
 // reg <- mem (word load)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVWload : InstVAX<0xB0, (outs GPRW:$dst), (ins VAXMemOp:$src),
     "movw\t$src, $dst",
     [(set GPRW:$dst, (load VAXMem:$src))]>;
 // reg <- globaladdr (word load via PC-relative)
-let isCodeGenOnly = 1 in
 def MOVWload_ga : InstVAX<0xB0, (outs GPRW:$dst), (ins i32imm:$sym),
     "movw\t$sym, $dst",
     [(set GPRW:$dst, (load (vax_pcrelwrapper tglobaladdr:$sym)))]>;
@@ -801,67 +797,58 @@ let isCodeGenOnly = 1 in
 def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
     "movw\t$src, $dst", []>;
 // reg <- imm (word immediate load)
-let isCodeGenOnly = 1 in
 def MOVWri : InstVAX<0xB0, (outs GPRW:$dst), (ins i16imm:$src),
     "movw\t$src, $dst",
     [(set GPRW:$dst, (i16 imm:$src))]>;
 
 // MOVZBL (0x9A) reg <- reg: zero-extend i8 to i32.
-let isCodeGenOnly = 1 in
 def MOVZBL_rr : InstVAX<0x9A, (outs GPRnoPC:$dst), (ins GPRB:$src),
     "movzbl\t$src, $dst",
     [(set GPRnoPC:$dst, (zext GPRB:$src))]>;
 
 // CVTBL (0x98) reg <- reg: sign-extend i8 to i32.
-let isCodeGenOnly = 1 in
 def CVTBL_rr_ext : InstVAX<0x98, (outs GPRnoPC:$dst), (ins GPRB:$src),
     "cvtbl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRB:$src))]>;
 
 // MOVZWL (0x3C) reg <- reg: zero-extend i16 to i32.
-let isCodeGenOnly = 1 in
 def MOVZWL_rr : InstVAX<0x3C, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "movzwl\t$src, $dst",
     [(set GPRnoPC:$dst, (zext GPRW:$src))]>;
 
 // CVTWL (0x32) reg <- reg: sign-extend i16 to i32.
-let isCodeGenOnly = 1 in
 def CVTWL_rr_ext : InstVAX<0x32, (outs GPRnoPC:$dst), (ins GPRW:$src),
     "cvtwl\t$src, $dst",
     [(set GPRnoPC:$dst, (sext GPRW:$src))]>;
 
 } // let Defs = [PSW] — end of register-output byte/word block
 
-// MOVB/MOVW store instructions — moved out of Defs=[PSW] for the same reason
-// as MOVB_mr/MOVW_mr above: store-only instructions with PSW as sole data
-// output create unresolvable scheduler cycles with volatile memory chains.
+// MOVB/MOVW store instructions — outside Defs=[PSW] block (store-only).
 // mem <- reg (byte store)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store GPRB:$src, VAXMem:$dst)]>;
 // mem <- imm (byte store immediate)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store (i8 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (byte store via PC-relative)
-let isCodeGenOnly = 1 in
 def MOVBstore_ga : InstVAX<0x90, (outs), (ins GPRB:$src, i32imm:$sym),
     "movb\t$src, $sym",
     [(store GPRB:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
 // mem <- reg (word store)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store GPRW:$src, VAXMem:$dst)]>;
 // mem <- imm (word store immediate)
-let isCodeGenOnly = 1, HasMemOp = 1 in
+let HasMemOp = 1 in
 def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store (i16 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (word store via PC-relative)
-let isCodeGenOnly = 1 in
 def MOVWstore_ga : InstVAX<0xB0, (outs), (ins GPRW:$src, i32imm:$sym),
     "movw\t$src, $sym",
     [(store GPRW:$src, (vax_pcrelwrapper tglobaladdr:$sym))]>;
@@ -891,10 +878,10 @@ def : Pat<(i16 (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_16lo)>;
 def : Pat<(i8  (trunc GPRW:$src)),    (EXTRACT_SUBREG GPRW:$src, sub_8lo)>;
 
 //===----------------------------------------------------------------------===//
-// Phase 33B+ — Native byte/word arithmetic
+// Native byte/word arithmetic (i8/i16 are legal types)
 //===----------------------------------------------------------------------===//
 
-let Defs = [PSW], isCodeGenOnly = 1 in {
+let Defs = [PSW] in {
 def ADDB3_rr : InstVAX<0x81, (outs GPRB:$dst), (ins GPRB:$a, GPRB:$b),
     "addb3\t$a, $b, $dst",
     [(set GPRB:$dst, (add GPRB:$a, GPRB:$b))]> {
