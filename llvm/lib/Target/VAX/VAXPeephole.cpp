@@ -671,7 +671,8 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     Register Src2 = Use.getOperand(2).getReg();
 
     // Fold when src1 is the reloaded register.
-    if (Src1 == RR && Use.getOperand(1).isKill()) {
+    // Skip if src2 also uses the same register.
+    if (Src1 == RR && Use.getOperand(1).isKill() && Src2 != RR) {
       MachineInstrBuilder MIB =
           BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
       MIB.addDef(Dst);
@@ -688,7 +689,9 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     }
 
     // For commutative ops: fold when src2 is the reloaded register.
-    if (F.Commutative && Src2 == RR && Use.getOperand(2).isKill()) {
+    // Skip if src1 also uses the same register.
+    if (F.Commutative && Src2 == RR && Use.getOperand(2).isKill() &&
+        Src1 != RR) {
       MachineInstrBuilder MIB =
           BuildMI(MBB, II, Use.getDebugLoc(), TII->get(F.ToOpc));
       MIB.addDef(Dst);
@@ -708,10 +711,14 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
   // --- Pattern 5: CMPL_rr → CMPL_rm ---
   // CMPL_rr: [0]=$a, [1]=$b; CMPL_rm: [0..3]=VAXMemOp_a, [4]=$b
   // Only fold when the reload feeds the first operand ($a).
+  // Skip if both operands are the same register (self-compare) — folding
+  // would eliminate the only def of that register.
   if (UseOpc == VAX::CMPL_rr &&
       Use.getOperand(0).getReg() == RR &&
       Use.getOperand(0).isKill()) {
     Register OtherReg = Use.getOperand(1).getReg();
+    if (OtherReg == RR)
+      return false;
     MachineInstrBuilder MIB =
         BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::CMPL_rm));
     addMemOps(MIB, Reload, MemStart);
@@ -730,10 +737,13 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
   // CMP_BRANCH_rr: [0]=$lhs, [1]=$rhs, [2]=$cc, [3]=$dst
   // CMP_BRANCH_rm: [0..3]=VAXMemOp_lhs, [4]=$rhs, [5]=$cc, [6]=$dst
   // Only fold when the reload feeds $lhs (first operand).
+  // Skip if both operands are the same register (self-compare).
   if (UseOpc == VAX::CMP_BRANCH_rr &&
       Use.getOperand(0).getReg() == RR &&
       Use.getOperand(0).isKill()) {
     Register RhsReg = Use.getOperand(1).getReg();
+    if (RhsReg == RR)
+      return false;
     int64_t CC = Use.getOperand(2).getImm();
     MachineBasicBlock *Target = Use.getOperand(3).getMBB();
     MachineInstrBuilder MIB =
