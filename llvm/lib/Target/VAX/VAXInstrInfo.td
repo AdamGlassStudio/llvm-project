@@ -53,8 +53,20 @@ def ByteImm : Operand<i32> {
   let OperandNamespace = "VAXOp";
 }
 
+// Byte-width immediate for i8-typed patterns (MOVBri, BICB3_ri, etc.).
+def ByteImm8 : Operand<i8> {
+  let OperandType = "OPERAND_BYTE_IMM";
+  let OperandNamespace = "VAXOp";
+}
+
 // Word-width immediate operand (.rw context). The MC encoder emits 2 bytes.
 def WordImm : Operand<i32> {
+  let OperandType = "OPERAND_WORD_IMM";
+  let OperandNamespace = "VAXOp";
+}
+
+// Word-width immediate for i16-typed patterns (MOVWri, BICW3_ri, etc.).
+def WordImm16 : Operand<i16> {
   let OperandType = "OPERAND_WORD_IMM";
   let OperandNamespace = "VAXOp";
 }
@@ -778,7 +790,7 @@ let isCodeGenOnly = 1 in
 def MOVBrr : InstVAX<0x90, (outs GPRB:$dst), (ins GPRB:$src),
     "movb\t$src, $dst", []>;
 // reg <- imm (byte immediate load)
-def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins i8imm:$src),
+def MOVBri : InstVAX<0x90, (outs GPRB:$dst), (ins ByteImm8:$src),
     "movb\t$src, $dst",
     [(set GPRB:$dst, (i8 imm:$src))]>;
 
@@ -797,7 +809,7 @@ let isCodeGenOnly = 1 in
 def MOVWrr : InstVAX<0xB0, (outs GPRW:$dst), (ins GPRW:$src),
     "movw\t$src, $dst", []>;
 // reg <- imm (word immediate load)
-def MOVWri : InstVAX<0xB0, (outs GPRW:$dst), (ins i16imm:$src),
+def MOVWri : InstVAX<0xB0, (outs GPRW:$dst), (ins WordImm16:$src),
     "movw\t$src, $dst",
     [(set GPRW:$dst, (i16 imm:$src))]>;
 
@@ -831,7 +843,7 @@ def MOVBstore : InstVAX<0x90, (outs), (ins GPRB:$src, VAXMemOp:$dst),
     [(store GPRB:$src, VAXMem:$dst)]>;
 // mem <- imm (byte store immediate)
 let HasMemOp = 1 in
-def MOVBstore_i : InstVAX<0x90, (outs), (ins i8imm:$src, VAXMemOp:$dst),
+def MOVBstore_i : InstVAX<0x90, (outs), (ins ByteImm8:$src, VAXMemOp:$dst),
     "movb\t$src, $dst",
     [(store (i8 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (byte store via PC-relative)
@@ -845,7 +857,7 @@ def MOVWstore : InstVAX<0xB0, (outs), (ins GPRW:$src, VAXMemOp:$dst),
     [(store GPRW:$src, VAXMem:$dst)]>;
 // mem <- imm (word store immediate)
 let HasMemOp = 1 in
-def MOVWstore_i : InstVAX<0xB0, (outs), (ins i16imm:$src, VAXMemOp:$dst),
+def MOVWstore_i : InstVAX<0xB0, (outs), (ins WordImm16:$src, VAXMemOp:$dst),
     "movw\t$src, $dst",
     [(store (i16 imm:$src), VAXMem:$dst)]>;
 // globaladdr <- reg (word store via PC-relative)
@@ -979,7 +991,7 @@ def BICB3_rr : InstVAX<0x8B, (outs GPRB:$dst),
     "bicb3\t$mask, $src, $dst",
     [(set GPRB:$dst, (vax_bicl GPRB:$mask, GPRB:$src))]>;
 def BICB3_ri : InstVAX<0x8B, (outs GPRB:$dst),
-    (ins i8imm:$mask, GPRB:$src),
+    (ins ByteImm8:$mask, GPRB:$src),
     "bicb3\t$mask, $src, $dst",
     [(set GPRB:$dst, (vax_bicl (i8 imm:$mask), GPRB:$src))]>;
 
@@ -989,7 +1001,7 @@ def BICW3_rr : InstVAX<0xAB, (outs GPRW:$dst),
     "bicw3\t$mask, $src, $dst",
     [(set GPRW:$dst, (vax_bicl GPRW:$mask, GPRW:$src))]>;
 def BICW3_ri : InstVAX<0xAB, (outs GPRW:$dst),
-    (ins i16imm:$mask, GPRW:$src),
+    (ins WordImm16:$mask, GPRW:$src),
     "bicw3\t$mask, $src, $dst",
     [(set GPRW:$dst, (vax_bicl (i16 imm:$mask), GPRW:$src))]>;
 
