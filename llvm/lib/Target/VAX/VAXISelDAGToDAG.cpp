@@ -459,6 +459,8 @@ bool VAXDAGToDAGISel::SelectVAXAddrLong(SDValue Addr, SDValue &Base,
   MVT PtrTy = MVT::i32;
 
   // Try indexed addressing: ADD(base, SHL(idx, 2)) or ADD(SHL(idx, 2), base).
+  // Also matches VAXISD::ASHL($2, idx) which is what custom SHL lowering
+  // produces for i32 shifts.
   // VAX indexed mode computes EA = EA(base_specifier) + Rx * data_size.
   // For longword instructions (4 bytes), shift by 2 matches the implicit scale.
   if (Addr.getOpcode() == ISD::ADD) {
@@ -466,14 +468,22 @@ bool VAXDAGToDAGISel::SelectVAXAddrLong(SDValue Addr, SDValue &Base,
       SDValue MaybeShift = Addr.getOperand(Swap);
       SDValue MaybeBase = Addr.getOperand(1 - Swap);
 
-      if (MaybeShift.getOpcode() != ISD::SHL)
+      // Match ISD::SHL(idx, 2) or VAXISD::ASHL(2, idx).
+      SDValue IdxReg;
+      if (MaybeShift.getOpcode() == ISD::SHL) {
+        auto *ShAmt = dyn_cast<ConstantSDNode>(MaybeShift.getOperand(1));
+        if (!ShAmt || ShAmt->getZExtValue() != 2)
+          continue;
+        IdxReg = MaybeShift.getOperand(0);
+      } else if (MaybeShift.getOpcode() == VAXISD::ASHL) {
+        // ASHL operands: (count, src)
+        auto *ShAmt = dyn_cast<ConstantSDNode>(MaybeShift.getOperand(0));
+        if (!ShAmt || ShAmt->getZExtValue() != 2)
+          continue;
+        IdxReg = MaybeShift.getOperand(1);
+      } else {
         continue;
-      auto *ShAmt = dyn_cast<ConstantSDNode>(MaybeShift.getOperand(1));
-      if (!ShAmt || ShAmt->getZExtValue() != 2)
-        continue;
-
-      // Matched (add base, (shl idx, 2)).
-      SDValue IdxReg = MaybeShift.getOperand(0);
+      }
       Index = IdxReg;
       Flags = CurDAG->getTargetConstant(VAXAM::Disp, DL, MVT::i32);
 
