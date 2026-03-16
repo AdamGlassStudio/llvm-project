@@ -85,12 +85,18 @@ static unsigned fusedToCmpOpcode(unsigned Opc) {
   case VAX::CMPD_BRANCH:   return VAX::CMPD;
   case VAX::TSTF_BRANCH:   return VAX::TSTF;
   case VAX::TSTD_BRANCH:   return VAX::TSTD;
-  case VAX::CMPB_BRANCH:   return VAX::CMPB_rr;
+  case VAX::CMPB_BRANCH:    return VAX::CMPB_rr;
+  case VAX::CMPB_BRANCH_ri: return VAX::CMPB_ri;
   case VAX::CMPB_BRANCH_mi: return VAX::CMPB_mi;
+  case VAX::CMPB_BRANCH_rm: return VAX::CMPB_rm;
+  case VAX::CMPB_BRANCH_mm: return VAX::CMPB_mm;
   case VAX::TSTB_BRANCH:   return VAX::TSTB;
   case VAX::TSTB_BRANCH_m: return VAX::TSTB_m;
   case VAX::CMPW_BRANCH:   return VAX::CMPW_rr;
+  case VAX::CMPW_BRANCH_ri: return VAX::CMPW_ri;
+  case VAX::CMPW_BRANCH_mm: return VAX::CMPW_mm;
   case VAX::TSTW_BRANCH:   return VAX::TSTW;
+  case VAX::TSTW_BRANCH_m: return VAX::TSTW_m;
   default: return 0;
   }
 }
@@ -114,11 +120,17 @@ static bool isCompareOrTest(const MachineInstr &MI) {
   case VAX::TSTF:
   case VAX::TSTD:
   case VAX::CMPB_rr:
+  case VAX::CMPB_ri:
   case VAX::CMPB_mi:
+  case VAX::CMPB_rm:
+  case VAX::CMPB_mm:
   case VAX::TSTB:
   case VAX::TSTB_m:
   case VAX::CMPW_rr:
+  case VAX::CMPW_ri:
+  case VAX::CMPW_mm:
   case VAX::TSTW:
+  case VAX::TSTW_m:
     return true;
   default:
     return false;
@@ -140,11 +152,17 @@ static unsigned cmpToFusedOpcode(unsigned CmpOpc) {
   case VAX::TSTF:    return VAX::TSTF_BRANCH;
   case VAX::TSTD:    return VAX::TSTD_BRANCH;
   case VAX::CMPB_rr: return VAX::CMPB_BRANCH;
+  case VAX::CMPB_ri: return VAX::CMPB_BRANCH_ri;
   case VAX::CMPB_mi: return VAX::CMPB_BRANCH_mi;
+  case VAX::CMPB_rm: return VAX::CMPB_BRANCH_rm;
+  case VAX::CMPB_mm: return VAX::CMPB_BRANCH_mm;
   case VAX::TSTB:    return VAX::TSTB_BRANCH;
   case VAX::TSTB_m:  return VAX::TSTB_BRANCH_m;
   case VAX::CMPW_rr: return VAX::CMPW_BRANCH;
+  case VAX::CMPW_ri: return VAX::CMPW_BRANCH_ri;
+  case VAX::CMPW_mm: return VAX::CMPW_BRANCH_mm;
   case VAX::TSTW:    return VAX::TSTW_BRANCH;
+  case VAX::TSTW_m:  return VAX::TSTW_BRANCH_m;
   default: return 0;
   }
 }
@@ -249,13 +267,10 @@ public:
   VAXExpandCmpBranch() : MachineFunctionPass(ID) {}
 
   StringRef getPassName() const override {
-    return "VAX Expand Compare-Branch and Select";
+    return "VAX Expand Compare-Branch";
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
-
-private:
-  bool expandSelectCC(MachineInstr &MI, const TargetInstrInfo *TII);
 };
 
 char VAXExpandCmpBranch::ID = 0;
@@ -265,103 +280,7 @@ char VAXExpandCmpBranch::ID = 0;
 static bool cleanStaleSuccessors(MachineFunction &MF,
                                  const TargetInstrInfo *TII);
 
-static bool isSelectCCPseudo(unsigned Opc) {
-  switch (Opc) {
-  case VAX::SELECT_CC_Pseudo:
-  case VAX::SELECT_CC_B_Pseudo:
-  case VAX::SELECT_CC_W_Pseudo:
-  case VAX::SELECT_CC_F_Pseudo:
-  case VAX::SELECT_CC_D_Pseudo:
-    return true;
-  default:
-    return false;
-  }
-}
 
-// Map VAXCC condition code to branch opcode.
-static unsigned selectCCToBranchOpc(unsigned VAXCC) {
-  static const unsigned BrOpcodes[] = {
-    VAX::BEQL, VAX::BNEQ, VAX::BGTR, VAX::BGEQ,
-    VAX::BLSS, VAX::BLEQ, VAX::BGTRU, VAX::BGEQU,
-    VAX::BLSSU, VAX::BLEQU
-  };
-  assert(VAXCC < std::size(BrOpcodes) && "Invalid VAXCC");
-  return BrOpcodes[VAXCC];
-}
-
-/// Expand a SELECT_CC pseudo into a three-block diamond.
-///
-/// This runs post-RA to avoid PSW corruption.  On VAX, every register copy
-/// (MOVB/MOVW/MOVL) clobbers PSW.  Pre-RA expansion (usesCustomInserter +
-/// PHI nodes) causes PHI elimination to insert copies in the CMP block —
-/// between the compare and the branch — corrupting condition flags.
-///
-/// Expansion:
-///   BB:        CMP ...  ; implicit-def $psw
-///              Bcc TrueMBB, implicit $psw
-///   FalseMBB:  [MOVx $dst, $falseReg]  BRW SinkMBB
-///   TrueMBB:   [MOVx $dst, $trueReg]   (fall through)
-///   SinkMBB:   ... (original continuation)
-///
-/// Copies are omitted when $dst already equals the source register.
-bool VAXExpandCmpBranch::expandSelectCC(MachineInstr &MI,
-                                        const TargetInstrInfo *TII) {
-  MachineBasicBlock *BB = MI.getParent();
-  MachineFunction *MF = BB->getParent();
-  DebugLoc DL = MI.getDebugLoc();
-
-  Register DstReg = MI.getOperand(0).getReg();
-  Register TrueReg = MI.getOperand(1).getReg();
-  Register FalseReg = MI.getOperand(2).getReg();
-  unsigned VAXCC = MI.getOperand(3).getImm();
-  unsigned BrOpc = selectCCToBranchOpc(VAXCC);
-
-  // Pick the right copy opcode based on the pseudo variant.
-  unsigned CopyOpc;
-  switch (MI.getOpcode()) {
-  case VAX::SELECT_CC_B_Pseudo: CopyOpc = VAX::MOVBrr; break;
-  case VAX::SELECT_CC_W_Pseudo: CopyOpc = VAX::MOVWrr; break;
-  case VAX::SELECT_CC_F_Pseudo: CopyOpc = VAX::MOVF_rr; break;
-  case VAX::SELECT_CC_D_Pseudo: CopyOpc = VAX::MOVQ_rr; break;
-  default:                      CopyOpc = VAX::MOVL_rr; break;
-  }
-
-  const BasicBlock *LLVMBB = BB->getBasicBlock();
-  MachineFunction::iterator InsertPt = ++BB->getIterator();
-
-  MachineBasicBlock *FalseMBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MachineBasicBlock *TrueMBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MF->insert(InsertPt, FalseMBB);
-  MF->insert(InsertPt, TrueMBB);
-  MF->insert(InsertPt, SinkMBB);
-
-  // Move everything after the SELECT_CC pseudo into SinkMBB.
-  SinkMBB->splice(SinkMBB->begin(), BB,
-                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
-  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  // BB: conditional branch to TrueMBB, fall through to FalseMBB.
-  BB->addSuccessor(FalseMBB);
-  BB->addSuccessor(TrueMBB);
-  BuildMI(BB, DL, TII->get(BrOpc)).addMBB(TrueMBB);
-
-  // FalseMBB: copy false value into dst, jump to SinkMBB.
-  FalseMBB->addSuccessor(SinkMBB);
-  if (FalseReg != DstReg)
-    BuildMI(FalseMBB, DL, TII->get(CopyOpc), DstReg).addReg(FalseReg);
-  BuildMI(FalseMBB, DL, TII->get(VAX::BRW)).addMBB(SinkMBB);
-
-  // TrueMBB: copy true value into dst, fall through to SinkMBB.
-  TrueMBB->addSuccessor(SinkMBB);
-  if (TrueReg != DstReg)
-    BuildMI(TrueMBB, DL, TII->get(CopyOpc), DstReg).addReg(TrueReg);
-
-  SinkMBB->addLiveIn(DstReg);
-
-  MI.eraseFromParent();
-  return true;
-}
 
 bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
@@ -370,15 +289,6 @@ bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*advanced below*/) {
       MachineInstr &MI = *II;
-
-      // SELECT_CC expansion creates new blocks and splices instructions out
-      // of MBB, invalidating the inner iterator.  Break to the outer loop
-      // which will visit the new blocks.
-      if (isSelectCCPseudo(MI.getOpcode())) {
-        expandSelectCC(MI, TII);
-        Changed = true;
-        break; // MBB is now truncated; new blocks follow in function order.
-      }
 
       if (!isFusedCmpBranch(MI.getOpcode())) {
         ++II;
