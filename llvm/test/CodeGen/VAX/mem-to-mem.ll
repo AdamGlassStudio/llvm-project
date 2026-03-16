@@ -18,11 +18,10 @@ define void @copy_i32(ptr %src, ptr %dst) nounwind {
 
 ;; ---- i8 copy ----
 
-; Byte copy: *dst = *src (i8)
+; Byte copy: *dst = *src (i8) — should use mem-to-mem movb.
 define void @copy_i8(ptr %src, ptr %dst) nounwind {
 ; CHECK-LABEL: copy_i8:
-; CHECK:       movb (%r{{[0-9]+}}), %r{{[0-9]+}}
-; CHECK:       movb %r{{[0-9]+}}, (%r{{[0-9]+}})
+; CHECK:       movb (%r{{[0-9]+}}), (%r{{[0-9]+}})
 ; CHECK:       ret
   %v = load i8, ptr %src
   store i8 %v, ptr %dst
@@ -31,11 +30,10 @@ define void @copy_i8(ptr %src, ptr %dst) nounwind {
 
 ;; ---- i16 copy ----
 
-; Word copy: *dst = *src (i16)
+; Word copy: *dst = *src (i16) — should use mem-to-mem movw.
 define void @copy_i16(ptr %src, ptr %dst) nounwind {
 ; CHECK-LABEL: copy_i16:
-; CHECK:       movw (%r{{[0-9]+}}), %r{{[0-9]+}}
-; CHECK:       movw %r{{[0-9]+}}, (%r{{[0-9]+}})
+; CHECK:       movw (%r{{[0-9]+}}), (%r{{[0-9]+}})
 ; CHECK:       ret
   %v = load i16, ptr %src
   store i16 %v, ptr %dst
