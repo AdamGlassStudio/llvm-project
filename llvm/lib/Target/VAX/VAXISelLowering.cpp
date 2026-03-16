@@ -259,6 +259,14 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
 
+  // FP ↔ int conversions for i8/i16: promote to i32 first.
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::SINT_TO_FP, VT, Promote);
+    setOperationAction(ISD::UINT_TO_FP, VT, Promote);
+    setOperationAction(ISD::FP_TO_SINT, VT, Promote);
+    setOperationAction(ISD::FP_TO_UINT, VT, Promote);
+  }
+
   // 64-bit shift parts: ASHQ handles SHL and SRA directly (single instruction).
   // SRL_PARTS has no direct quadword equivalent — ASHQ is arithmetic only.
   setOperationAction(ISD::SHL_PARTS,  MVT::i32, Custom);
