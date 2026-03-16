@@ -1439,62 +1439,15 @@ SDValue VAXTargetLowering::PerformDAGCombine(SDNode *N,
 //     %dst = PHI(%truev, ThisMBB, %falsev, FalseMBB)
 MachineBasicBlock *
 VAXTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
-                                                MachineBasicBlock *BB) const {
-  const TargetInstrInfo &TII = *BB->getParent()->getSubtarget().getInstrInfo();
-  DebugLoc DL = MI.getDebugLoc();
-
-  if (MI.getOpcode() == VAX::SELECT_CC_I64_Pseudo)
-    return EmitSELECT_CC_I64(MI, BB);
-
-  assert((MI.getOpcode() == VAX::SELECT_CC_Pseudo ||
-          MI.getOpcode() == VAX::SELECT_CC_B_Pseudo ||
-          MI.getOpcode() == VAX::SELECT_CC_W_Pseudo ||
-          MI.getOpcode() == VAX::SELECT_CC_F_Pseudo ||
-          MI.getOpcode() == VAX::SELECT_CC_D_Pseudo) &&
+                                                 MachineBasicBlock *BB) const {
+  // Only the I64 select pseudo uses the custom inserter.  The regular
+  // SELECT_CC pseudos are expanded post-RA by VAXInstrInfo::expandPostRAPseudo
+  // to avoid PSW corruption from PHI-elimination copies.
+  assert(MI.getOpcode() == VAX::SELECT_CC_I64_Pseudo &&
          "Unexpected custom inserter opcode");
-
-  Register DstReg = MI.getOperand(0).getReg();
-  Register TrueReg = MI.getOperand(1).getReg();
-  Register FalseReg = MI.getOperand(2).getReg();
-  unsigned VAXCC = MI.getOperand(3).getImm();
-
-  // Map VAXCC integer to the branch opcode.
-  static const unsigned BrOpcodes[] = {
-    VAX::BEQL, VAX::BNEQ, VAX::BGTR, VAX::BGEQ,
-    VAX::BLSS, VAX::BLEQ, VAX::BGTRU, VAX::BGEQU,
-    VAX::BLSSU, VAX::BLEQU
-  };
-  assert(VAXCC < std::size(BrOpcodes) && "Invalid VAXCC");
-  unsigned BrOpc = BrOpcodes[VAXCC];
-
-  MachineFunction *MF = BB->getParent();
-  const BasicBlock *LLVMBB = BB->getBasicBlock();
-  MachineFunction::iterator I = ++BB->getIterator();
-
-  MachineBasicBlock *FalseMBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MachineBasicBlock *SinkMBB = MF->CreateMachineBasicBlock(LLVMBB);
-  MF->insert(I, FalseMBB);
-  MF->insert(I, SinkMBB);
-
-  SinkMBB->splice(SinkMBB->begin(), BB,
-                  std::next(MachineBasicBlock::iterator(MI)), BB->end());
-  SinkMBB->transferSuccessorsAndUpdatePHIs(BB);
-
-  BB->addSuccessor(FalseMBB);
-  BB->addSuccessor(SinkMBB);
-  BuildMI(BB, DL, TII.get(BrOpc)).addMBB(SinkMBB);
-
-  FalseMBB->addSuccessor(SinkMBB);
-
-  BuildMI(*SinkMBB, SinkMBB->begin(), DL, TII.get(TargetOpcode::PHI), DstReg)
-      .addReg(TrueReg)
-      .addMBB(BB)
-      .addReg(FalseReg)
-      .addMBB(FalseMBB);
-
-  MI.eraseFromParent();
-  return SinkMBB;
+  return EmitSELECT_CC_I64(MI, BB);
 }
+
 
 // Expand SELECT_CC_I64_Pseudo into an efficient multi-block branch sequence
 // for i64 ordered comparisons.  Avoids materializing intermediate booleans:
