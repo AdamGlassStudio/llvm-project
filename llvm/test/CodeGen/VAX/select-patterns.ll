@@ -32,11 +32,12 @@ define i32 @abs_val(i32 %a) {
 ; Signed minimum
 define i32 @min_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: min_i32:
-; CHECK: movq	4(%ap), %r0
-; CHECK-NEXT: cmpl	%r0, %r1
-; CHECK-NEXT: blss	{{.*}}
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: movl	4(%ap), %r1
+; CHECK-NEXT: cmpl	%r1, %r0
+; CHECK-NEXT: bgeq	.LBB2_2
 ; CHECK: movl	%r1, %r0
-; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: .LBB2_2:
 ; CHECK-NEXT: ret
   %c = icmp slt i32 %a, %b
   %r = select i1 %c, i32 %a, i32 %b
@@ -46,11 +47,12 @@ define i32 @min_i32(i32 %a, i32 %b) {
 ; Signed maximum
 define i32 @max_i32(i32 %a, i32 %b) {
 ; CHECK-LABEL: max_i32:
-; CHECK: movq	4(%ap), %r0
-; CHECK-NEXT: cmpl	%r0, %r1
-; CHECK-NEXT: bgtr	{{.*}}
+; CHECK: movl	8(%ap), %r0
+; CHECK-NEXT: movl	4(%ap), %r1
+; CHECK-NEXT: cmpl	%r1, %r0
+; CHECK-NEXT: bleq	.LBB3_2
 ; CHECK: movl	%r1, %r0
-; CHECK-NEXT: {{.*}}:
+; CHECK-NEXT: .LBB3_2:
 ; CHECK-NEXT: ret
   %c = icmp sgt i32 %a, %b
   %r = select i1 %c, i32 %a, i32 %b
@@ -62,12 +64,12 @@ define i32 @clamp(i32 %x, i32 %lo, i32 %hi) {
 ; CHECK-LABEL: clamp:
 ; CHECK: movq	4(%ap), %r0
 ; CHECK-NEXT: cmpl	%r0, %r1
-; CHECK-NEXT: blss	.LBB4_2
-; CHECK: movl	%r0, %r1
+; CHECK-NEXT: bgeq	.LBB4_2
+; CHECK: movl	%r1, %r0
 ; CHECK: .LBB4_2:
-; CHECK-NEXT: movl	12(%ap), %r0
-; CHECK-NEXT: cmpl	%r1, %r0
-; CHECK-NEXT: bgtr	.LBB4_4
+; CHECK-NEXT: movl	12(%ap), %r1
+; CHECK-NEXT: cmpl	%r0, %r1
+; CHECK-NEXT: bleq	.LBB4_4
 ; CHECK: movl	%r1, %r0
 ; CHECK: .LBB4_4:
 ; CHECK-NEXT: ret

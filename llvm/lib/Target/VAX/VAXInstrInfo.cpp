@@ -9,6 +9,7 @@
 #include "VAX.h"
 #include "VAXInstrInfo.h"
 #include "VAXSubtarget.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -513,6 +514,13 @@ bool VAXInstrInfo::reverseBranchCondition(
   assert(Cond.size() == 1 && "Expected single condition operand");
   unsigned Opc = Cond[0].getImm();
   Cond[0].setImm(getOppositeBranch(Opc));
+  return false;
+}
+
+bool VAXInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
+  // SELECT_CC pseudos are expanded by VAXExpandCmpBranch (post-RA pass),
+  // not here, because expanding them requires creating new basic blocks
+  // which isn't safe within the ExpandPostRAPseudos iteration loop.
   return false;
 }
 
