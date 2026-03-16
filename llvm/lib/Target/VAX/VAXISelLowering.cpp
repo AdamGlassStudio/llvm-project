@@ -213,7 +213,9 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
     setLoadExtAction(ISD::SEXTLOAD, VT, MVT::i1, Promote);
   }
 
-  // SIGN_EXTEND_INREG: i1 must expand; i8/i16 handled by CVTBL/CVTWL.
+  // SIGN_EXTEND_INREG: i1 must expand; i8 and i16 are legal via CVTxL/CVTBW
+  // patterns (sext_inreg i8 for i32 → CVTBL, sext_inreg i16 for i32 → CVTWL,
+  // sext_inreg i8 for i16 → CVTBW via extract+convert pattern).
   setOperationAction(ISD::SIGN_EXTEND_INREG, MVT::i1, Expand);
 
   // Truncating stores: MOVB (i8) and MOVW (i16).
@@ -258,6 +260,63 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Legal);
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
+
+  // Carry-chained add/sub: only i32 is supported (ADWC/SBWC).
+  // No byte/word carry instructions exist.
+  for (auto VT : {MVT::i8, MVT::i16}) {
+    setOperationAction(ISD::ADDC, VT, Promote);
+    setOperationAction(ISD::ADDE, VT, Promote);
+    setOperationAction(ISD::SUBC, VT, Promote);
+    setOperationAction(ISD::SUBE, VT, Promote);
+  }
+
+  // Integer ABS: no VAX instruction; expand for all types.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32})
+    setOperationAction(ISD::ABS, VT, Expand);
+
+  // Min/max: no VAX instructions; expand for all types.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::SMIN, VT, Expand);
+    setOperationAction(ISD::SMAX, VT, Expand);
+    setOperationAction(ISD::UMIN, VT, Expand);
+    setOperationAction(ISD::UMAX, VT, Expand);
+  }
+
+  // Bit reversal: no VAX instruction; promote i8/i16, expand i32.
+  for (auto VT : {MVT::i8, MVT::i16})
+    setOperationAction(ISD::BITREVERSE, VT, Promote);
+  setOperationAction(ISD::BITREVERSE, MVT::i32, Expand);
+
+  // Overflow-checking arithmetic: expand for all types.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::SADDO, VT, Expand);
+    setOperationAction(ISD::UADDO, VT, Expand);
+    setOperationAction(ISD::SSUBO, VT, Expand);
+    setOperationAction(ISD::USUBO, VT, Expand);
+    setOperationAction(ISD::SMULO, VT, Expand);
+    setOperationAction(ISD::UMULO, VT, Expand);
+  }
+
+  // Saturating arithmetic: no VAX instructions; expand.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::SADDSAT, VT, Expand);
+    setOperationAction(ISD::UADDSAT, VT, Expand);
+    setOperationAction(ISD::SSUBSAT, VT, Expand);
+    setOperationAction(ISD::USUBSAT, VT, Expand);
+    setOperationAction(ISD::SSHLSAT, VT, Expand);
+    setOperationAction(ISD::USHLSAT, VT, Expand);
+  }
+
+  // Funnel shifts: no VAX instruction; expand.
+  for (auto VT : {MVT::i8, MVT::i16, MVT::i32}) {
+    setOperationAction(ISD::FSHL, VT, Expand);
+    setOperationAction(ISD::FSHR, VT, Expand);
+  }
+
+  // Parity: promote i8/i16 to i32; i32 expands via CTPOP.
+  for (auto VT : {MVT::i8, MVT::i16})
+    setOperationAction(ISD::PARITY, VT, Promote);
+  setOperationAction(ISD::PARITY, MVT::i32, Expand);
 
   // FP ↔ int conversions for i8/i16: promote to i32 first.
   for (auto VT : {MVT::i8, MVT::i16}) {

@@ -900,6 +900,10 @@ def CVTBW_rm : InstVAX<0x99, (outs GPRW:$dst), (ins VAXMemOp:$src),
 // i8→i16 any-extend: use zero-extend (cheapest).
 def : Pat<(i16 (anyext GPRB:$src)), (MOVZBW_rr GPRB:$src)>;
 
+// sign_extend_inreg i8 within i16: extract low byte, sign-extend via CVTBW.
+def : Pat<(i16 (sext_inreg GPRW:$src, i8)),
+          (CVTBW_rr (EXTRACT_SUBREG GPRW:$src, sub_8lo))>;
+
 // Truncate patterns: extract sub-register (free — no instruction emitted).
 def : Pat<(i8  (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_8lo)>;
 def : Pat<(i16 (trunc GPRnoPC:$src)), (EXTRACT_SUBREG GPRnoPC:$src, sub_16lo)>;
