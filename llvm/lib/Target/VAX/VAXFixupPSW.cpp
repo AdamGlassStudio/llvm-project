@@ -85,12 +85,18 @@ static unsigned fusedToCmpOpcode(unsigned Opc) {
   case VAX::CMPD_BRANCH:   return VAX::CMPD;
   case VAX::TSTF_BRANCH:   return VAX::TSTF;
   case VAX::TSTD_BRANCH:   return VAX::TSTD;
-  case VAX::CMPB_BRANCH:   return VAX::CMPB_rr;
+  case VAX::CMPB_BRANCH:    return VAX::CMPB_rr;
+  case VAX::CMPB_BRANCH_ri: return VAX::CMPB_ri;
   case VAX::CMPB_BRANCH_mi: return VAX::CMPB_mi;
+  case VAX::CMPB_BRANCH_rm: return VAX::CMPB_rm;
+  case VAX::CMPB_BRANCH_mm: return VAX::CMPB_mm;
   case VAX::TSTB_BRANCH:   return VAX::TSTB;
   case VAX::TSTB_BRANCH_m: return VAX::TSTB_m;
   case VAX::CMPW_BRANCH:   return VAX::CMPW_rr;
+  case VAX::CMPW_BRANCH_ri: return VAX::CMPW_ri;
+  case VAX::CMPW_BRANCH_mm: return VAX::CMPW_mm;
   case VAX::TSTW_BRANCH:   return VAX::TSTW;
+  case VAX::TSTW_BRANCH_m: return VAX::TSTW_m;
   default: return 0;
   }
 }
@@ -114,11 +120,17 @@ static bool isCompareOrTest(const MachineInstr &MI) {
   case VAX::TSTF:
   case VAX::TSTD:
   case VAX::CMPB_rr:
+  case VAX::CMPB_ri:
   case VAX::CMPB_mi:
+  case VAX::CMPB_rm:
+  case VAX::CMPB_mm:
   case VAX::TSTB:
   case VAX::TSTB_m:
   case VAX::CMPW_rr:
+  case VAX::CMPW_ri:
+  case VAX::CMPW_mm:
   case VAX::TSTW:
+  case VAX::TSTW_m:
     return true;
   default:
     return false;
@@ -140,11 +152,17 @@ static unsigned cmpToFusedOpcode(unsigned CmpOpc) {
   case VAX::TSTF:    return VAX::TSTF_BRANCH;
   case VAX::TSTD:    return VAX::TSTD_BRANCH;
   case VAX::CMPB_rr: return VAX::CMPB_BRANCH;
+  case VAX::CMPB_ri: return VAX::CMPB_BRANCH_ri;
   case VAX::CMPB_mi: return VAX::CMPB_BRANCH_mi;
+  case VAX::CMPB_rm: return VAX::CMPB_BRANCH_rm;
+  case VAX::CMPB_mm: return VAX::CMPB_BRANCH_mm;
   case VAX::TSTB:    return VAX::TSTB_BRANCH;
   case VAX::TSTB_m:  return VAX::TSTB_BRANCH_m;
   case VAX::CMPW_rr: return VAX::CMPW_BRANCH;
+  case VAX::CMPW_ri: return VAX::CMPW_BRANCH_ri;
+  case VAX::CMPW_mm: return VAX::CMPW_BRANCH_mm;
   case VAX::TSTW:    return VAX::TSTW_BRANCH;
+  case VAX::TSTW_m:  return VAX::TSTW_BRANCH_m;
   default: return 0;
   }
 }
@@ -237,7 +255,8 @@ bool VAXFuseCmpBranch::runOnMachineFunction(MachineFunction &MF) {
 }
 
 //===----------------------------------------------------------------------===//
-// VAXExpandCmpBranch — Post-RA: expand CMP_BRANCH back into CMP + Bcc
+// VAXExpandCmpBranch — Post-RA: expand CMP_BRANCH back into CMP + Bcc,
+//                      and expand SELECT_CC pseudos into branch diamonds.
 //===----------------------------------------------------------------------===//
 
 namespace {
@@ -261,6 +280,8 @@ char VAXExpandCmpBranch::ID = 0;
 static bool cleanStaleSuccessors(MachineFunction &MF,
                                  const TargetInstrInfo *TII);
 
+
+
 bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -268,6 +289,7 @@ bool VAXExpandCmpBranch::runOnMachineFunction(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*advanced below*/) {
       MachineInstr &MI = *II;
+
       if (!isFusedCmpBranch(MI.getOpcode())) {
         ++II;
         continue;

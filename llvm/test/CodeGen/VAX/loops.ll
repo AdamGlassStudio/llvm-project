@@ -54,10 +54,10 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       decl	%r1
 ; CHECK:       beql	.LBB1_5
 ; CHECK:       .LBB1_3:
-; CHECK:       movl	$1, %r4
-; CHECK:       tstl	(%r2)
-; CHECK:       bneq	.LBB1_2
 ; CHECK:       movl	%r3, %r4
+; CHECK:       tstl	(%r2)
+; CHECK:       beql	.LBB1_2
+; CHECK:       movl	$1, %r4
 ; CHECK:       brb	.LBB1_2
 ; CHECK:       .LBB1_5:
 ; CHECK:       ret

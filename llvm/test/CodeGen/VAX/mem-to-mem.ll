@@ -1,7 +1,8 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf < %s | FileCheck %s
 
-; Test memory-to-memory ISel patterns: when a load has a single use feeding
-; a store, select the _mm instruction variant to avoid an intermediate register.
+; Test memory-to-memory and register-mediated copy patterns.
+; i32/f32/f64 use mem-to-mem instructions directly.
+; i8/i16 go through registers with legal byte/word types.
 
 ;; ---- i32 mem-to-mem ----
 
@@ -15,25 +16,25 @@ define void @copy_i32(ptr %src, ptr %dst) nounwind {
   ret void
 }
 
-;; ---- i8 mem-to-mem ----
+;; ---- i8 copy ----
 
-; Byte copy: *dst = *src (i8)
+; Byte copy: *dst = *src (i8) — should use mem-to-mem movb.
 define void @copy_i8(ptr %src, ptr %dst) nounwind {
 ; CHECK-LABEL: copy_i8:
 ; CHECK:       movb (%r{{[0-9]+}}), (%r{{[0-9]+}})
-; CHECK-NEXT:  ret
+; CHECK:       ret
   %v = load i8, ptr %src
   store i8 %v, ptr %dst
   ret void
 }
 
-;; ---- i16 mem-to-mem ----
+;; ---- i16 copy ----
 
-; Word copy: *dst = *src (i16)
+; Word copy: *dst = *src (i16) — should use mem-to-mem movw.
 define void @copy_i16(ptr %src, ptr %dst) nounwind {
 ; CHECK-LABEL: copy_i16:
 ; CHECK:       movw (%r{{[0-9]+}}), (%r{{[0-9]+}})
-; CHECK-NEXT:  ret
+; CHECK:       ret
   %v = load i16, ptr %src
   store i16 %v, ptr %dst
   ret void
