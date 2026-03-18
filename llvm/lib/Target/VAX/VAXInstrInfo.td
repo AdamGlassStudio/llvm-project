@@ -378,12 +378,15 @@ multiclass VAXTruncStore<bits<16> opc, string mn, PatFrag tstore> {
 }
 
 // Multiclass for FP data moves (load/store/copy variants).
+// MemWidth: MemOpWidth encoding for the memory operand.
+// 0 = longword (F_float), 3 = quadword (D_float).
 multiclass VAXFpMov<bits<16> opc, string mn, RegisterClass RC,
-                    ValueType VT, Operand MemOp> {
-  let HasMemOp = 1 in
+                    ValueType VT, Operand MemOp, int MemWidth = 0> {
+  let HasMemOp = 1, MemOpWidth0 = MemWidth in
   def _rm : InstVAX<opc, (outs RC:$dst), (ins MemOp:$src),
       mn # "\t$src, $dst",
       [(set RC:$dst, (VT (load VAXMem:$src)))]>, Sched<[WriteFPMOV]>;
+  let isCodeGenOnly = 1 in {
   def _rcp : InstVAX<opc, (outs RC:$dst), (ins i32imm:$sym),
       mn # "\t$sym, $dst",
       [(set RC:$dst, (VT (load (vax_pcrelwrapper tconstpool:$sym))))]>,
@@ -392,10 +395,12 @@ multiclass VAXFpMov<bits<16> opc, string mn, RegisterClass RC,
       mn # "\t$sym, $dst",
       [(set RC:$dst, (VT (load (vax_pcrelwrapper tglobaladdr:$sym))))]>,
     Sched<[WriteFPMOV]>;
-  let HasMemOp = 1 in
+  }
+  let HasMemOp = 1, MemOpWidth0 = MemWidth in
   def _mr : InstVAX<opc, (outs), (ins RC:$src, MemOp:$dst),
       mn # "\t$src, $dst",
       [(store (VT RC:$src), VAXMem:$dst)]>, Sched<[WriteFPMOV]>;
+  let isCodeGenOnly = 1 in
   def _mga : InstVAX<opc, (outs), (ins RC:$src, i32imm:$sym),
       mn # "\t$src, $sym",
       [(store (VT RC:$src), (vax_pcrelwrapper tglobaladdr:$sym))]>,
@@ -1644,7 +1649,8 @@ def VAXDMemOp : Operand<iPTR> {
 // All D_float data instructions set PSW condition codes.
 let Defs = [PSW] in {
 // MOVD (0x70) — D_float data moves (load/store/copy) using register pairs.
-defm MOVD : VAXFpMov<0x70, "movd", QPR, f64, VAXDMemOp>;
+// MemWidth = 3 → quadword (8-byte) operands for correct immediate encoding.
+defm MOVD : VAXFpMov<0x70, "movd", QPR, f64, VAXDMemOp, /*MemWidth=*/3>;
 
 // CLRD (0x7C) — Clear D_float: dst = 0.0.
 let isReMaterializable = 1, isAsCheapAsAMove = 1 in
@@ -1854,7 +1860,8 @@ def MOVAQ : InstVAX<0x7E, (outs),
 // MOVQ (0x7D): move quadword (64-bit integer, no float validation).
 // Unlike MOVD, MOVQ does NOT check for reserved floating-point operands.
 // Use MOVQ for i64 data and register spills; MOVD only for actual f64 values.
-let Defs = [PSW], HasMemOp = 1 in
+// MemOpWidth = 3 → quadword (8-byte) operands for correct immediate encoding.
+let Defs = [PSW], HasMemOp = 1, MemOpWidth0 = 3, MemOpWidth1 = 3 in
 def MOVQ : InstVAX<0x7D, (outs),
     (ins VAXMemOp:$src, VAXMemOp:$dst),
     "movq\t$src, $dst", []>;
@@ -1864,12 +1871,12 @@ def MOVQ_rr : InstVAX<0x7D, (outs QPR:$dst), (ins QPR:$src),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;
 // MOVQ register-from-memory (QPR reload from stack slot).
-let Defs = [PSW], HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1, MemOpWidth0 = 3 in
 def MOVQ_rm : InstVAX<0x7D, (outs QPR:$dst), (ins VAXDMemOp:$src),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;
 // MOVQ memory-from-register (QPR spill to stack slot).
-let Defs = [PSW], HasMemOp = 1 in
+let Defs = [PSW], HasMemOp = 1, MemOpWidth0 = 3 in
 def MOVQ_mr : InstVAX<0x7D, (outs), (ins QPR:$src, VAXDMemOp:$dst),
     "movq\t$src, $dst", []>,
     Sched<[WriteMOV]>;

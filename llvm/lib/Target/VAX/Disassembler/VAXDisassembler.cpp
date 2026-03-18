@@ -90,6 +90,8 @@ static unsigned getOperandDataSize(const MCInstrDesc &Desc, unsigned OpIdx) {
       return 1;
     if (OpType == VAXOp::OPERAND_WORD_IMM)
       return 2;
+    if (OpType == VAXOp::OPERAND_QUAD_IMM)
+      return 8;
   }
   return 4;
 }
