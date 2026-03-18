@@ -360,6 +360,8 @@ void VAXMCCodeEmitter::emitMemOperand(const MCOperand &Base,
         Kind = FK_Data_1;
       else if (DataSize == 2)
         Kind = FK_Data_2;
+      else if (DataSize == 8)
+        Kind = MCFixupKind(FK_Data_8);
       else
         Kind = MCFixupKind(FK_Data_4);
       Fixups.push_back(MCFixup::create(FixOff, Disp.getExpr(), Kind,
@@ -664,6 +666,8 @@ void VAXMCCodeEmitter::encodeInstruction(const MCInst &MI,
           DataSize = 1;
         else if (OpType == VAXOp::OPERAND_WORD_IMM)
           DataSize = 2;
+        else if (OpType == VAXOp::OPERAND_QUAD_IMM)
+          DataSize = 8;
       }
       emitImmOperand(Op.getImm(), DataSize, CB);
       return 1;
