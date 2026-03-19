@@ -30,6 +30,9 @@ class VAXMCAsmInfo : public MCAsmInfoELF {
 
 public:
   explicit VAXMCAsmInfo(const Triple &TT);
+
+  const MCExpr *getExprForFDESymbol(const MCSymbol *Sym, unsigned Encoding,
+                                    MCStreamer &Streamer) const override;
 };
 
 } // namespace llvm

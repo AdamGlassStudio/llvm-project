@@ -136,6 +136,7 @@ void TargetLoweringObjectFileELF::Initialize(MCContext &Ctx,
     [[fallthrough]];
   case Triple::ppc:
   case Triple::ppcle:
+  case Triple::vax:
   case Triple::x86:
     PersonalityEncoding = isPositionIndependent()
                               ? dwarf::DW_EH_PE_indirect |
