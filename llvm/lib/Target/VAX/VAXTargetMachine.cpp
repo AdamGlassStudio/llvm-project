@@ -11,11 +11,16 @@
 #include "TargetInfo/VAXTargetInfo.h"
 #include "VAX.h"
 #include "VAXMachineFunctionInfo.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CodeGen.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include <optional>
 
 using namespace llvm;
@@ -24,11 +29,55 @@ namespace {
 // VAX instructions are variable-length and byte-aligned — no .text alignment
 // requirement. Override the default alignment (4) to match GAS (1), preventing
 // unnecessary NOP padding between object files at link time.
+//
+// Also compensates for VAX R_VAX_PC32 semantics (S+A-P-4 vs standard S+A-P)
+// in TType entries used for C++ exception type matching in PIC code.
 class VAXELFTargetObjectFile : public TargetLoweringObjectFileELF {
 public:
   unsigned getTextSectionAlignment() const override { return 1; }
+
+  const MCExpr *getTTypeGlobalReference(const GlobalValue *GV,
+                                        unsigned Encoding,
+                                        const TargetMachine &TM,
+                                        MachineModuleInfo *MMI,
+                                        MCStreamer &Streamer) const override;
 };
 } // namespace
+
+// VAX R_VAX_PC32 computes S+A-P-4 (VAX displacement convention), but DWARF
+// pcrel encoding expects S+A-P. For TType entries in the LSDA (used by the
+// personality routine for catch type matching), we compensate by adding +4
+// to the pcrel expression, just as we do for FDE/personality in VAXMCAsmInfo.
+const MCExpr *VAXELFTargetObjectFile::getTTypeGlobalReference(
+    const GlobalValue *GV, unsigned Encoding, const TargetMachine &TM,
+    MachineModuleInfo *MMI, MCStreamer &Streamer) const {
+  // For non-pcrel encodings, use the default.
+  if (!(Encoding & dwarf::DW_EH_PE_pcrel))
+    return TargetLoweringObjectFileELF::getTTypeGlobalReference(GV, Encoding,
+                                                                TM, MMI,
+                                                                Streamer);
+
+  // For indirect pcrel, let the parent create the GOT stub, then adjust.
+  if (Encoding & dwarf::DW_EH_PE_indirect) {
+    // Parent creates .DW.stub GOT entry and returns Stub - PCSym.
+    const MCExpr *Expr =
+        TargetLoweringObjectFileELF::getTTypeGlobalReference(GV, Encoding, TM,
+                                                             MMI, Streamer);
+    // Add +4 to compensate for R_VAX_PC32 semantics.
+    return MCBinaryExpr::createAdd(
+        Expr, MCConstantExpr::create(4, getContext()), getContext());
+  }
+
+  // Direct pcrel (no indirect): emit Sym - PCSym + 4.
+  MCSymbol *Sym = TM.getSymbol(GV);
+  MCSymbol *PCSym = getContext().createTempSymbol();
+  Streamer.emitLabel(PCSym);
+  const MCExpr *SymRef = MCSymbolRefExpr::create(Sym, getContext());
+  const MCExpr *PCRef = MCSymbolRefExpr::create(PCSym, getContext());
+  const MCExpr *Diff = MCBinaryExpr::createSub(SymRef, PCRef, getContext());
+  return MCBinaryExpr::createAdd(Diff, MCConstantExpr::create(4, getContext()),
+                                 getContext());
+}
 
 // VAX data layout (little-endian, ELF, 32-bit pointers):
 //   e        - little-endian
