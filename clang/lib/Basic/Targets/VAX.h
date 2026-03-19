@@ -77,6 +77,15 @@ public:
 
   std::string_view getClobbers() const override { return ""; }
 
+  // EH data registers match GCC VAX: R2 and R3 (DWARF register numbers).
+  int getEHDataRegisterNumber(unsigned RegNo) const override {
+    if (RegNo == 0)
+      return 2; // R2 — exception pointer
+    if (RegNo == 1)
+      return 3; // R3 — exception selector
+    return -1;
+  }
+
   llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override {
     return {};
   }

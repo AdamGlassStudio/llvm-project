@@ -55,7 +55,9 @@ static MCAsmInfo *createVAXMCAsmInfo(const MCRegisterInfo &MRI,
                                       const MCTargetOptions &Options) {
   MCAsmInfo *MAI = new VAXMCAsmInfo(TT);
   // Initial frame state: CFA = SP+0.
-  MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(nullptr, VAX::SP, 0);
+  // Use getDwarfRegNum to convert LLVM register enum to DWARF register number.
+  unsigned DwarfSP = MRI.getDwarfRegNum(VAX::SP, true);
+  MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(nullptr, DwarfSP, 0);
   MAI->addInitialFrameState(Inst);
   return MAI;
 }

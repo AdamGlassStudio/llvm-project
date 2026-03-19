@@ -7,7 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXMCAsmInfo.h"
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
@@ -46,4 +49,24 @@ VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
   MaxInstLength = 10;
 
   initializeAtSpecifiers(atSpecifiers);
+}
+
+const MCExpr *
+VAXMCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym, unsigned Encoding,
+                                  MCStreamer &Streamer) const {
+  if (!(Encoding & dwarf::DW_EH_PE_pcrel))
+    return MCAsmInfo::getExprForFDESymbol(Sym, Encoding, Streamer);
+
+  // R_VAX_PC32 computes S + A - P - 4 (VAX displacement convention: the
+  // displacement is relative to the byte after the 4-byte field).  DWARF's
+  // pcrel encoding expects S + A - P.  Add +4 to the expression so the
+  // extra -4 from the linker cancels out.
+  MCContext &Ctx = Streamer.getContext();
+  const MCExpr *Res = MCSymbolRefExpr::create(Sym, Ctx);
+  MCSymbol *PCSym = Ctx.createTempSymbol();
+  Streamer.emitLabel(PCSym);
+  const MCExpr *PC = MCSymbolRefExpr::create(PCSym, Ctx);
+  const MCExpr *Four = MCConstantExpr::create(4, Ctx);
+  return MCBinaryExpr::createAdd(MCBinaryExpr::createSub(Res, PC, Ctx), Four,
+                                 Ctx);
 }
