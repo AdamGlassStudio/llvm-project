@@ -1,7 +1,7 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf < %s | FileCheck %s
 
-@a = global i32 10
-@b = global i32 3
+@a = dso_local global i32 10
+@b = dso_local global i32 3
 
 ; Signed greater-than: LLVM inverts condition for fall-through, so bleq or bgtr.
 ; CHECK-LABEL: test_bgtr:

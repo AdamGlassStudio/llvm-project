@@ -78,6 +78,13 @@ public:
 
   SanitizerMask getSupportedSanitizers() const override;
 
+  // VAX ELF requires PIC: the GNU BFD linker does not create COPY
+  // relocations for R_VAX_PC32 references to external symbols, so
+  // non-PIC code that accesses globals across shared-library boundaries
+  // gets unresolved references at runtime.  GCC forces -fPIC for all
+  // VAX ELF via VAX_CC1_AND_CC1PLUS_SPEC.
+  bool isPICDefault() const override;
+
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args,
                              Action::OffloadKind DeviceOffloadKind) const override;

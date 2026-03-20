@@ -560,6 +560,12 @@ SanitizerMask NetBSD::getSupportedSanitizers() const {
   return Res;
 }
 
+bool NetBSD::isPICDefault() const {
+  if (getArch() == llvm::Triple::vax)
+    return true;
+  return Generic_ELF::isPICDefault();
+}
+
 void NetBSD::addClangTargetOptions(const ArgList &DriverArgs,
                                    ArgStringList &CC1Args,
                                    Action::OffloadKind) const {

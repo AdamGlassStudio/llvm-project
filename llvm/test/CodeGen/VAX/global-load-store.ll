@@ -1,6 +1,6 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf < %s | FileCheck %s
 
-@g = global i32 0
+@g = dso_local global i32 0
 
 ; CHECK-LABEL: load_g:
 ; CHECK: movl g, %r0

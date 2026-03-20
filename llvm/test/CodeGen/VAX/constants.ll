@@ -45,7 +45,7 @@ define i32 @const_255() {
 }
 
 ; Address of global
-@gvar = external global i32
+@gvar = external dso_local global i32
 
 define ptr @addr_of_global() {
 ; CHECK-LABEL: addr_of_global:

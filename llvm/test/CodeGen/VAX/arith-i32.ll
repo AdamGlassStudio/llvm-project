@@ -1,7 +1,7 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf < %s | FileCheck %s
 
-@x = global i32 10
-@y = global i32 3
+@x = dso_local global i32 10
+@y = dso_local global i32 3
 
 ; CHECK-LABEL: test_add_rr:
 ; CHECK: addl2
