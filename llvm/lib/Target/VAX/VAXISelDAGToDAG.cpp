@@ -188,7 +188,8 @@ fallthrough_pushl:
     unsigned Opc = VAX::ASHQ;
     if (ConstantSDNode *CntC = dyn_cast<ConstantSDNode>(Cnt)) {
       Opc = VAX::ASHQ_i;
-      Cnt = CurDAG->getTargetConstant(CntC->getSExtValue(), DL, MVT::i32);
+      Cnt = CurDAG->getTargetConstant(
+          APInt(32, CntC->getSExtValue(), /*isSigned=*/true), DL, MVT::i32);
     }
 
     // Emit ASHQ: (QPR:$dst) = ashq cnt, QPR:$src.
@@ -218,7 +219,9 @@ fallthrough_pushl:
 
     // Addend must be an immediate (we always pass 0 from LowerSMUL_LOHI).
     SDValue Add = CurDAG->getTargetConstant(
-        cast<ConstantSDNode>(Addend)->getSExtValue(), DL, MVT::i32);
+        APInt(32, cast<ConstantSDNode>(Addend)->getSExtValue(),
+              /*isSigned=*/true),
+        DL, MVT::i32);
 
     // Emit EMUL: (QPR:$dst) = emul mulr, muld, add.
     SDNode *Emul = CurDAG->getMachineNode(
@@ -412,7 +415,8 @@ bool VAXDAGToDAGISel::SelectVAXAddr(SDValue Addr, SDValue &Base,
     if (FrameIndexSDNode *FIN = dyn_cast<FrameIndexSDNode>(Addr.getOperand(0)))
       if (ConstantSDNode *CN = dyn_cast<ConstantSDNode>(Addr.getOperand(1))) {
         Base = CurDAG->getTargetFrameIndex(FIN->getIndex(), PtrTy);
-        Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+        Offset = CurDAG->getTargetConstant(
+            APInt(32, CN->getSExtValue(), /*isSigned=*/true), DL, MVT::i32);
         return true;
       }
     // ADD(Reg, Constant) — register + displacement.
@@ -500,7 +504,8 @@ bool VAXDAGToDAGISel::SelectVAXAddrLong(SDValue Addr, SDValue &Base,
           } else {
             Base = MaybeBase.getOperand(0);
           }
-          Offset = CurDAG->getTargetConstant(CN->getSExtValue(), DL, MVT::i32);
+          Offset = CurDAG->getTargetConstant(
+              APInt(32, CN->getSExtValue(), /*isSigned=*/true), DL, MVT::i32);
           return true;
         }
       }
