@@ -15,6 +15,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/MC/MCDwarf.h"
+#include <algorithm>
 
 using namespace llvm;
 
@@ -67,6 +68,36 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
       MCCFIInstruction::createOffset(nullptr, DwarfAP, /*Offset=*/8));
   BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIdx);
+
+  // Emit CFI for callee-saved registers saved by the entry mask.
+  // VAX CALLS reads the entry mask and pushes registers in descending order
+  // (R11 first, then R10, ..., R0) below FP. Only registers with their bit
+  // set in the mask are saved. So the highest-numbered saved register is at
+  // FP-4, the next at FP-8, etc.
+  const MachineFrameInfo &CMFI = MF.getFrameInfo();
+  const std::vector<CalleeSavedInfo> &CSI = CMFI.getCalleeSavedInfo();
+  if (!CSI.empty()) {
+    // Collect the hardware register numbers for callee-saved registers and
+    // sort descending (matching the hardware push order).
+    SmallVector<std::pair<unsigned, MCRegister>, 6> SavedRegs;
+    for (const auto &Info : CSI) {
+      MCRegister Reg = Info.getReg();
+      unsigned HWNum = TRI.getEncodingValue(Reg);
+      SavedRegs.push_back({HWNum, Reg});
+    }
+    llvm::sort(SavedRegs,
+               [](const auto &A, const auto &B) { return A.first > B.first; });
+
+    int Offset = -4; // First saved reg at CFA-4 (FP-4)
+    for (const auto &[HWNum, Reg] : SavedRegs) {
+      unsigned DwarfReg = TRI.getDwarfRegNum(Reg, true);
+      CFIIdx = MF.addFrameInst(
+          MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
+      BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIdx);
+      Offset -= 4;
+    }
+  }
 
   if (StackSize == 0)
     return;
