@@ -50,7 +50,7 @@ define i32 @asm_memory_displacement_offset(i32 %x) {
 ; instead of the ADDRESS of lwp0 to PR_SSP.
 ; ---------------------------------------------------------------------------
 
-@myvar = external global i32
+@myvar = external dso_local global i32
 
 ; The inline asm constraint "r" forces the global address into a register,
 ; and the address materialization must use the symbol name correctly.

@@ -2,9 +2,9 @@
 
 ; Test various load and store patterns
 
-@g8 = external global i8
-@g16 = external global i16
-@g32 = external global i32
+@g8 = external dso_local global i8
+@g16 = external dso_local global i16
+@g32 = external dso_local global i32
 
 ; i8 load returns i32, so zero-extends
 define i8 @load_i8() {
