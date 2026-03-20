@@ -98,6 +98,13 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setStackPointerRegisterToSaveRestore(VAX::SP);
   setSchedulingPreference(Sched::RegPressure);
 
+  // VAX comparisons (CMPx, TSTx, BICx) produce 0 or 1 in condition-code
+  // branches.  Tell LLVM so that i1→i8/i32 promotion inserts a proper
+  // zero-extend (AND $1) instead of any-extend, which would leave stale
+  // upper bits and miscompile patterns like `trunc i8 to i1` feeding a
+  // `select`.
+  setBooleanContents(ZeroOrOneBooleanContent);
+
   //===------------------------------------------------------------------===//
   // Operation actions for i32 (longword)
   //===------------------------------------------------------------------===//
