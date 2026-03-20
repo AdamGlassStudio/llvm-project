@@ -19,7 +19,7 @@ rec:
 }
 
 ; Global variable read
-@counter = external global i32
+@counter = external dso_local global i32
 
 define i32 @read_global() {
 ; CHECK-LABEL: read_global:

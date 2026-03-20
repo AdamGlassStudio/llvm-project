@@ -1,4 +1,4 @@
-; RUN: llc -march=vax < %s | FileCheck %s
+; RUN: llc -march=vax -relocation-model=static < %s | FileCheck %s
 
 ; Test DWARF CFI exception handling infrastructure.
 

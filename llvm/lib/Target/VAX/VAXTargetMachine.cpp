@@ -94,10 +94,20 @@ static const char *VAXDataLayout =
     "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32-nif";
 
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
-  // VAX uses PC-relative addressing for all globals, which is inherently
-  // position-independent for local symbols.  PIC mode enables GOT/PLT
-  // relocations for external symbols in shared libraries.
-  return RM.value_or(Reloc::Static);
+  // VAX ELF always defaults to PIC, matching GCC's forced -fPIC for this
+  // target (gcc/config/vax/elf.h VAX_CC1_AND_CC1PLUS_SPEC).
+  //
+  // Without PIC, external symbol references use R_VAX_PC32 relocations.
+  // The VAX BFD linker does not create COPY relocations for PC-relative
+  // references to undefined symbols, so data from shared libraries (e.g.
+  // libc's __sF/stdout) resolves to its link-time address (~0) rather than
+  // being copied into the executable's BSS — causing SIGSEGV at runtime.
+  //
+  // PIC mode routes external symbols through the GOT (R_VAX_GOT32) and
+  // external calls through the PLT (R_VAX_PLT32), which the dynamic linker
+  // resolves correctly.  Local symbols continue to use efficient PC-relative
+  // addressing since VAX displacement modes are inherently position-independent.
+  return RM.value_or(Reloc::PIC_);
 }
 
 static CodeModel::Model
