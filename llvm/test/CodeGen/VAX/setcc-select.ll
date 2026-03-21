@@ -9,7 +9,6 @@ define i32 @setcc_eq(i32 %a, i32 %b) {
 ; CHECK:       bneq	.LBB0_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB0_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp eq i32 %a, %b
   %r = zext i1 %c to i32
@@ -23,7 +22,6 @@ define i32 @setcc_ne(i32 %a, i32 %b) {
 ; CHECK:       beql	.LBB1_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB1_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp ne i32 %a, %b
   %r = zext i1 %c to i32
@@ -37,7 +35,6 @@ define i32 @setcc_ult(i32 %a, i32 %b) {
 ; CHECK:       bgequ	.LBB2_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB2_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp ult i32 %a, %b
   %r = zext i1 %c to i32
@@ -51,7 +48,6 @@ define i32 @setcc_uge(i32 %a, i32 %b) {
 ; CHECK:       blssu	.LBB3_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB3_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp uge i32 %a, %b
   %r = zext i1 %c to i32
@@ -65,7 +61,6 @@ define i32 @setcc_sgt(i32 %a, i32 %b) {
 ; CHECK:       bleq	.LBB4_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB4_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp sgt i32 %a, %b
   %r = zext i1 %c to i32
@@ -79,7 +74,6 @@ define i32 @setcc_sle(i32 %a, i32 %b) {
 ; CHECK:       bgtr	.LBB5_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB5_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp sle i32 %a, %b
   %r = zext i1 %c to i32
@@ -94,7 +88,6 @@ define i32 @cmp_zero(i32 %a) {
 ; CHECK:       bneq	.LBB6_2
 ; CHECK:       movl	$1, %r0
 ; CHECK:       .LBB6_2:
-; CHECK:       bicl2	$-2, %r0
 ; CHECK:       ret
   %c = icmp eq i32 %a, 0
   %r = zext i1 %c to i32
