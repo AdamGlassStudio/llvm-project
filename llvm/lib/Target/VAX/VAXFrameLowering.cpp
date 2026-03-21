@@ -70,15 +70,18 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
       .addCFIIndex(CFIIdx);
 
   // Emit CFI for callee-saved registers saved by the entry mask.
-  // VAX CALLS reads the entry mask and pushes registers in descending order
-  // (R11 first, then R10, ..., R0) below FP. Only registers with their bit
-  // set in the mask are saved. So the highest-numbered saved register is at
-  // FP-4, the next at FP-8, etc.
+  // VAX CALLS pushes registers (R11 first, down to R0) BEFORE pushing the
+  // frame header (PC, FP, AP, mask/PSW, handler). Since the stack grows
+  // downward and FP is set to the handler address, saved registers end up
+  // ABOVE FP+16 (above the saved PC). The lowest-numbered saved register
+  // is closest to PC at FP+20, with higher-numbered registers at increasing
+  // offsets above that.
   const MachineFrameInfo &CMFI = MF.getFrameInfo();
   const std::vector<CalleeSavedInfo> &CSI = CMFI.getCalleeSavedInfo();
   if (!CSI.empty()) {
-    // Collect the hardware register numbers for callee-saved registers and
-    // sort descending (matching the hardware push order).
+    // Collect and sort ascending by hardware register number. CALLS pushes
+    // R11 first (highest address) down to R0 last (lowest address = FP+20),
+    // so ascending HW number order matches ascending memory address order.
     SmallVector<std::pair<unsigned, MCRegister>, 6> SavedRegs;
     for (const auto &Info : CSI) {
       MCRegister Reg = Info.getReg();
@@ -86,16 +89,16 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
       SavedRegs.push_back({HWNum, Reg});
     }
     llvm::sort(SavedRegs,
-               [](const auto &A, const auto &B) { return A.first > B.first; });
+               [](const auto &A, const auto &B) { return A.first < B.first; });
 
-    int Offset = -4; // First saved reg at CFA-4 (FP-4)
+    int Offset = 20; // First (lowest-numbered) saved reg at FP+20
     for (const auto &[HWNum, Reg] : SavedRegs) {
       unsigned DwarfReg = TRI.getDwarfRegNum(Reg, true);
       CFIIdx = MF.addFrameInst(
           MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
       BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIdx);
-      Offset -= 4;
+      Offset += 4;
     }
   }
 

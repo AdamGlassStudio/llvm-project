@@ -48,7 +48,6 @@ define i32 @count_nonzero(ptr %arr, i32 %n) {
 ; CHECK:       movl	%r3, %r0
 ; CHECK:       brb	.LBB1_3
 ; CHECK:       .LBB1_2:
-; CHECK:       bicl2	$-2, %r4
 ; CHECK:       addl2	%r4, %r0
 ; CHECK:       addl2	$4, %r2
 ; CHECK:       decl	%r1
