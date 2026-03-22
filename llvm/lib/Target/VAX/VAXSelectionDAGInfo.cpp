@@ -51,6 +51,11 @@ SDValue VAXSelectionDAGInfo::EmitTargetCodeForMemcpy(
   if (SizeVal > MovcMaxSize)
     return SDValue();
 
+  // Truncate size to i32 if needed (memcpy intrinsic may use i64 size).
+  // We've already verified the constant fits in 16 bits above.
+  if (Size.getValueType() != MVT::i32)
+    Size = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Size);
+
   // Emit VAXISD::MOVC3 (chain, dst, src, size) → chain.
   // ISel custom-selects this into the real MOVC3 instruction.
   return DAG.getNode(VAXISD::MOVC3, DL, MVT::Other,

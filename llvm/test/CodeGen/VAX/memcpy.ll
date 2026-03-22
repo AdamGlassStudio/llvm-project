@@ -4,6 +4,7 @@
 ; MaxStoresPerMemcpy=6, so aligned copies > 24 bytes use MOVC3.
 
 declare void @llvm.memcpy.p0.p0.i32(ptr nocapture writeonly, ptr nocapture readonly, i32, i1 immarg)
+declare void @llvm.memcpy.p0.p0.i64(ptr nocapture writeonly, ptr nocapture readonly, i64, i1 immarg)
 
 ; --- Constant-size copies that should use MOVC3 ---
 
@@ -90,4 +91,14 @@ define i32 @clobber_test(ptr %dst, ptr %src, i32 %val) {
   call void @llvm.memcpy.p0.p0.i32(ptr align 4 %dst, ptr align 4 %src, i32 48, i1 false)
   %result = call i32 @use(i32 %val)
   ret i32 %result
+}
+
+; --- i64 size intrinsic: should truncate to i32 and use MOVC3 ---
+
+define void @memcpy_i64_size(ptr %dst, ptr %src) {
+; CHECK-LABEL: memcpy_i64_size:
+; CHECK: movc3 $100,
+; CHECK-NOT: calls
+  call void @llvm.memcpy.p0.p0.i64(ptr %dst, ptr %src, i64 100, i1 false)
+  ret void
 }
