@@ -1784,7 +1784,8 @@ def REMQUE : InstVAX<0x0F, (outs), (ins VAXMemOp:$entry, VAXMemOp:$addr),
     "remque\t$entry, $addr", []>;
 
 // MOVC3 (0x28): move character 3-operand. len.rw, srcaddr.ab, dstaddr.ab
-let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2 in
+let Defs = [R0, R1, R2, R3, R4, R5, PSW], MemOpWidth0 = 2,
+    mayLoad = 1, mayStore = 1, hasSideEffects = 0 in
 def MOVC3 : InstVAX<0x28, (outs),
     (ins VAXMemOp:$len, VAXMemOp:$src, VAXMemOp:$dst),
     "movc3\t$len, $src, $dst", []>;

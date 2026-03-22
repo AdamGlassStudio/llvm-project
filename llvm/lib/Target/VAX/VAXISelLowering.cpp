@@ -98,6 +98,17 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
   setStackPointerRegisterToSaveRestore(VAX::SP);
   setSchedulingPreference(Sched::RegPressure);
 
+  // MOVC3/MOVC5 are more efficient than inline loads/stores for large copies.
+  // GCC uses MOVE_RATIO=6 (copies > 6 longwords = 24 bytes use MOVC3).
+  // Set MaxStoresPerMemcpy to 6 so LLVM defers to EmitTargetCodeForMemcpy
+  // for copies that need > 6 store operations.
+  MaxStoresPerMemcpy = 6;
+  MaxStoresPerMemcpyOptSize = 4;
+  MaxStoresPerMemset = 6;
+  MaxStoresPerMemsetOptSize = 4;
+  MaxStoresPerMemmove = 6;
+  MaxStoresPerMemmoveOptSize = 4;
+
   // VAX comparisons (CMPx, TSTx, BICx) produce 0 or 1 in condition-code
   // branches.  Tell LLVM so that i1→i8/i32 promotion inserts a proper
   // zero-extend (AND $1) instead of any-extend, which would leave stale
@@ -444,6 +455,7 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
     case VAXISD::EDIV:         return "VAXISD::EDIV";
   case VAXISD::EXTZV:        return "VAXISD::EXTZV";
   case VAXISD::SELECT_CC_I64: return "VAXISD::SELECT_CC_I64";
+  case VAXISD::MOVC3:         return "VAXISD::MOVC3";
   default:                   return nullptr;
   }
 }

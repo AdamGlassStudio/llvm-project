@@ -13,7 +13,7 @@
 #include "VAXISelLowering.h"
 #include "VAXInstrInfo.h"
 #include "VAXRegisterInfo.h"
-#include "llvm/CodeGen/SelectionDAGTargetInfo.h"
+#include "VAXSelectionDAGInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include <string>
@@ -29,7 +29,7 @@ class VAXSubtarget : public VAXGenSubtargetInfo {
   VAXInstrInfo InstrInfo;
   VAXFrameLowering FrameLowering;
   VAXTargetLowering TLInfo;
-  SelectionDAGTargetInfo TSInfo;
+  VAXSelectionDAGInfo TSInfo;
 
 public:
   VAXSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
@@ -47,7 +47,7 @@ public:
   const VAXRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo.getRegisterInfo();
   }
-  const SelectionDAGTargetInfo *getSelectionDAGInfo() const override {
+  const VAXSelectionDAGInfo *getSelectionDAGInfo() const override {
     return &TSInfo;
   }
 };
