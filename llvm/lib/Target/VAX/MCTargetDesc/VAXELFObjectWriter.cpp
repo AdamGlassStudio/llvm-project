@@ -52,18 +52,19 @@ public:
       case VAX::fixup_vax_pcrel_16:
         return ELF::R_VAX_PC16;
       case VAX::fixup_vax_pcrel_32: {
-        // PIC promotion: promote bare PC-relative references to undefined
-        // global symbols to GOT32, matching GAS -k behavior.  GOT32 lets
-        // the BFD linker set the deferred bit and route through the GOT,
-        // giving NULL for undefined weak symbols (so NULL-checks work).
-        // Explicit @PLT references already arrive as fixup_vax_plt_32.
+        // PIC promotion: in PIC mode, promote bare PC-relative references to
+        // non-local symbols to PLT32, matching GAS -k behavior. This covers
+        // both calls (e.g., inline asm `calls $1,_mcount`) and jumps (e.g.,
+        // `jmp __setjmp14+2` in sigsetjmp.S). The BFD linker resolves PLT32
+        // to direct references for symbols defined in the same shared object.
+        // Local symbols (STB_LOCAL) are excluded: the BFD linker requires a
+        // global symbol hash entry for PLT32 (asserts h != NULL).
         if (isPositionIndependent()) {
           const MCSymbol *Sym = Target.getAddSym();
           if (Sym && !Sym->isTemporary()) {
             auto &ElfSym = static_cast<const MCSymbolELF &>(*Sym);
-            if (ElfSym.isUndefined() &&
-                ElfSym.getBinding() != ELF::STB_LOCAL)
-              return ELF::R_VAX_GOT32;
+            if (ElfSym.getBinding() != ELF::STB_LOCAL)
+              return ELF::R_VAX_PLT32;
           }
         }
         return ELF::R_VAX_PC32;
