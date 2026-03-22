@@ -278,6 +278,51 @@ fallthrough_pushl:
       return;
   }
 
+  // VAXISD::MOVC3 → VAX::MOVC3 with proper VAXMemOp addressing modes.
+  // len: immediate for constants, register direct for dynamic values.
+  // src/dst: standard address decomposition (.ab access type).
+  if (N->getOpcode() == VAXISD::MOVC3) {
+    SDLoc DL(N);
+    SDValue Chain = N->getOperand(0);
+    SDValue Dst   = N->getOperand(1);
+    SDValue Src   = N->getOperand(2);
+    SDValue Size  = N->getOperand(3);
+
+    SDValue NoReg = CurDAG->getRegister(0, MVT::i32);
+
+    SmallVector<SDValue, 13> Ops;
+
+    // len: use immediate mode for constants, register direct for dynamic.
+    if (auto *SizeConst = dyn_cast<ConstantSDNode>(Size)) {
+      SDValue ImmVal = CurDAG->getTargetConstant(
+          SizeConst->getZExtValue(), DL, MVT::i32);
+      SDValue ImmFlags = CurDAG->getTargetConstant(VAXAM::Imm, DL, MVT::i32);
+      Ops.append({NoReg, ImmVal, NoReg, ImmFlags});
+    } else {
+      SDValue Zero = CurDAG->getTargetConstant(0, DL, MVT::i32);
+      SDValue DirectFlags = CurDAG->getTargetConstant(
+          VAXAM::RegDirect, DL, MVT::i32);
+      Ops.append({Size, Zero, NoReg, DirectFlags});
+    }
+
+    // src: decompose address for .ab access (address = effective address).
+    SDValue SrcBase, SrcDisp, SrcIdx, SrcFlags;
+    SelectVAXAddr(Src, SrcBase, SrcDisp, SrcIdx, SrcFlags);
+    Ops.append({SrcBase, SrcDisp, SrcIdx, SrcFlags});
+
+    // dst: decompose address for .ab access.
+    SDValue DstBase, DstDisp, DstIdx, DstFlags;
+    SelectVAXAddr(Dst, DstBase, DstDisp, DstIdx, DstFlags);
+    Ops.append({DstBase, DstDisp, DstIdx, DstFlags});
+
+    // Chain input (last operand).
+    Ops.push_back(Chain);
+
+    SDNode *Movc = CurDAG->getMachineNode(VAX::MOVC3, DL, MVT::Other, Ops);
+    ReplaceNode(N, Movc);
+    return;
+  }
+
   SelectCode(N);
 }
 
