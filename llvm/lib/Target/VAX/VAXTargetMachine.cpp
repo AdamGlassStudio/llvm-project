@@ -162,6 +162,7 @@ public:
   bool addILPOpts() override;
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
+  void addPreEmitPass2() override;
 };
 
 } // end anonymous namespace
@@ -199,6 +200,13 @@ void VAXPassConfig::addPreEmitPass() {
   addPass(&BranchRelaxationPassID);
 }
 
+void VAXPassConfig::addPreEmitPass2() {
+  // SOB/AOB loop combine runs after branch relaxation. Conditional branches
+  // that survived relaxation fit in byte displacement. SOB/AOB replace a
+  // larger sequence, so displacement can only get shorter.
+  addPass(createVAXSobAobCombinePass());
+}
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
   RegisterTargetMachine<VAXTargetMachine> X(getTheVAXTarget());
   PassRegistry &PR = *PassRegistry::getPassRegistry();
@@ -206,4 +214,5 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
   initializeVAXFuseCmpBranchPass(PR);
   initializeVAXExpandCmpBranchPass(PR);
   initializeVAXPeepholePass(PR);
+  initializeVAXSobAobCombinePass(PR);
 }
