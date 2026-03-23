@@ -1896,7 +1896,7 @@ def INSV : InstVAX<0xF0, (outs),
 
 // SOBGTR (0xF5): subtract one and branch if greater. index.ml, disp.bb
 // The index operand is modified (read-write). disp is a branch displacement.
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def SOBGTR : InstVAX<0xF5, (outs),
     (ins VAXMemOp:$index, brtarget:$disp),
     "sobgtr\t$index, $disp", []>;
@@ -2099,19 +2099,19 @@ def BITB : InstVAX<0x93, (outs),
 // --- Loop instructions ---
 
 // SOBGEQ (0xF4): subtract one and branch if >= 0. index.ml, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def SOBGEQ : InstVAX<0xF4, (outs),
     (ins VAXMemOp:$index, brtarget:$disp),
     "sobgeq\t$index, $disp", []>;
 
 // AOBLEQ (0xF3): add one and branch if <= limit. limit.rl, index.ml, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def AOBLEQ : InstVAX<0xF3, (outs),
     (ins VAXMemOp:$limit, VAXMemOp:$index, brtarget:$disp),
     "aobleq\t$limit, $index, $disp", []>;
 
 // AOBLSS (0xF2): add one and branch if < limit. limit.rl, index.ml, disp.bb
-let Defs = [PSW] in
+let Defs = [PSW], isBranch = 1, isTerminator = 1 in
 def AOBLSS : InstVAX<0xF2, (outs),
     (ins VAXMemOp:$limit, VAXMemOp:$index, brtarget:$disp),
     "aoblss\t$limit, $index, $disp", []>;

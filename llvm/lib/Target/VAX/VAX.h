@@ -40,11 +40,13 @@ FunctionPass *createVAXFixupPSWPass();
 FunctionPass *createVAXFuseCmpBranchPass();
 FunctionPass *createVAXExpandCmpBranchPass();
 FunctionPass *createVAXPeepholePass();
+FunctionPass *createVAXSobAobCombinePass();
 void initializeVAXDAGToDAGISelLegacyPass(PassRegistry &);
 void initializeVAXFixupPSWPass(PassRegistry &);
 void initializeVAXFuseCmpBranchPass(PassRegistry &);
 void initializeVAXExpandCmpBranchPass(PassRegistry &);
 void initializeVAXPeepholePass(PassRegistry &);
+void initializeVAXSobAobCombinePass(PassRegistry &);
 
 } // namespace llvm
 
