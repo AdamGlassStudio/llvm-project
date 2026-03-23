@@ -1311,6 +1311,145 @@ bool VAXPeephole::tryShortenImmediate(MachineBasicBlock &MBB,
   return true;
 }
 
+/// Combine DECL+Bcc → SOBxxx or INCL+CMPL+Bcc → AOBxxx.
+///
+/// Pattern 1 (SOB): DECL $reg + BGTR $target → SOBGTR $reg, $target
+///                   DECL $reg + BGEQ $target → SOBGEQ $reg, $target
+///
+/// Pattern 2 (AOB): INCL $reg + CMPL $reg, $limit + BLSS $target
+///                                            → AOBLSS $limit, $reg, $target
+///                   INCL $reg + CMPL $reg, $limit + BLEQ $target
+///                                            → AOBLEQ $limit, $reg, $target
+///
+/// These patterns appear at loop backedges after register allocation.
+/// The SOB/AOB instructions atomically modify the index and branch,
+/// saving 1–2 instructions per loop iteration.
+///
+/// This runs AFTER branch relaxation. At this point, any Bcc that survived
+/// relaxation (wasn't converted to inverted+BRW) fits in a byte displacement.
+/// SOB/AOB also use byte displacement (.bb) but replace a LARGER instruction
+/// sequence, so the backward displacement can only get shorter.
+static bool trySobAobCombine(MachineBasicBlock &MBB,
+                             MachineBasicBlock::iterator &II,
+                             const TargetInstrInfo *TII) {
+  MachineInstr &BranchMI = *II;
+  unsigned BrOpc = BranchMI.getOpcode();
+
+  // Only handle conditional branches that SOB/AOB can replace.
+  bool IsSOBCandidate = (BrOpc == VAX::BGTR || BrOpc == VAX::BGEQ);
+  bool IsAOBCandidate = (BrOpc == VAX::BLSS || BrOpc == VAX::BLEQ);
+  if (!IsSOBCandidate && !IsAOBCandidate)
+    return false;
+
+  // The branch must target a MBB operand.
+  if (BranchMI.getNumOperands() < 1 || !BranchMI.getOperand(0).isMBB())
+    return false;
+  MachineBasicBlock *Target = BranchMI.getOperand(0).getMBB();
+
+  // Walk backward past debug values to find the preceding instruction.
+  auto PrevIt = II;
+  if (PrevIt == MBB.begin())
+    return false;
+  --PrevIt;
+  while (PrevIt != MBB.begin() && PrevIt->isDebugValue())
+    --PrevIt;
+  if (PrevIt->isDebugValue())
+    return false;
+
+  // --- SOB patterns: DECL $reg + BGTR/BGEQ → SOBGTR/SOBGEQ ---
+  if (IsSOBCandidate) {
+    MachineInstr &PrevMI = *PrevIt;
+    if (PrevMI.getOpcode() != VAX::DECL)
+      return false;
+
+    // DECL sets PSW based on the result. BGTR/BGEQ tests PSW.
+    // The branch must not have any intervening PSW-setting instruction.
+    Register IndexReg = PrevMI.getOperand(0).getReg();
+
+    unsigned NewOpc = (BrOpc == VAX::BGTR) ? VAX::SOBGTR : VAX::SOBGEQ;
+
+    // Build: SOBGTR/SOBGEQ (index as VAXMemOp reg-direct), target
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, BranchMI.getDebugLoc(), TII->get(NewOpc));
+    // index operand: VAXMemOp in register-direct mode
+    MIB.addReg(IndexReg).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+    MIB.addMBB(Target);
+
+    LLVM_DEBUG(dbgs() << "VAXPeephole: DECL+B"
+                      << ((BrOpc == VAX::BGTR) ? "GTR" : "GEQ")
+                      << "→SOB " << PrevMI << "  " << BranchMI);
+
+    // Erase both DECL and branch. Advance II past the branch first.
+    auto BrErase = II++;
+    BrErase->eraseFromParent();
+    PrevIt->eraseFromParent();
+    return true;
+  }
+
+  // --- AOB patterns: INCL $reg + CMPL $reg, $limit + BLSS/BLEQ ---
+  // Need two preceding instructions: CMPL then INCL.
+  MachineInstr &CmpMI = *PrevIt;
+
+  // The CMPL can be _rr (reg, reg) or _ri (reg, imm).
+  unsigned CmpOpc = CmpMI.getOpcode();
+  if (CmpOpc != VAX::CMPL_rr && CmpOpc != VAX::CMPL_ri)
+    return false;
+
+  // Walk backward past the CMP to find INCL.
+  auto IncIt = PrevIt;
+  if (IncIt == MBB.begin())
+    return false;
+  --IncIt;
+  while (IncIt != MBB.begin() && IncIt->isDebugValue())
+    --IncIt;
+  if (IncIt->isDebugValue())
+    return false;
+
+  MachineInstr &IncMI = *IncIt;
+  if (IncMI.getOpcode() != VAX::INCL)
+    return false;
+
+  Register IndexReg = IncMI.getOperand(0).getReg();
+
+  // CMPL first operand must be the same register as INCL's result.
+  if (!CmpMI.getOperand(0).isReg() || CmpMI.getOperand(0).getReg() != IndexReg)
+    return false;
+
+  // The limit is the second operand of CMPL.
+  MachineOperand &LimitOp = CmpMI.getOperand(1);
+
+  unsigned NewOpc = (BrOpc == VAX::BLSS) ? VAX::AOBLSS : VAX::AOBLEQ;
+
+  // Build: AOBLSS/AOBLEQ (limit as VAXMemOp), (index as VAXMemOp), target
+  MachineInstrBuilder MIB =
+      BuildMI(MBB, II, BranchMI.getDebugLoc(), TII->get(NewOpc));
+
+  // limit operand: VAXMemOp encoding
+  if (LimitOp.isReg()) {
+    MIB.addReg(LimitOp.getReg()).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+  } else if (LimitOp.isImm()) {
+    MIB.addReg(0).addImm(LimitOp.getImm()).addReg(0).addImm(VAXAM::Imm);
+  } else {
+    return false; // Unexpected operand type
+  }
+
+  // index operand: VAXMemOp in register-direct mode
+  MIB.addReg(IndexReg).addImm(0).addReg(0).addImm(VAXAM::RegDirect);
+  MIB.addMBB(Target);
+
+  LLVM_DEBUG(dbgs() << "VAXPeephole: INCL+CMPL+B"
+                    << ((BrOpc == VAX::BLSS) ? "LSS" : "LEQ")
+                    << "→AOB " << IncMI << "  " << CmpMI
+                    << "  " << BranchMI);
+
+  // Erase all three instructions.
+  auto BrErase = II++;
+  BrErase->eraseFromParent();
+  PrevIt->eraseFromParent();
+  IncIt->eraseFromParent();
+  return true;
+}
+
 bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
   const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
   bool Changed = false;
@@ -1469,3 +1608,51 @@ bool VAXPeephole::runOnMachineFunction(MachineFunction &MF) {
 INITIALIZE_PASS(VAXPeephole, DEBUG_TYPE, "VAX Peephole", false, false)
 
 FunctionPass *llvm::createVAXPeepholePass() { return new VAXPeephole(); }
+
+//===----------------------------------------------------------------------===//
+// VAXSobAobCombine — post-branch-relaxation SOB/AOB loop combine
+//
+// Runs AFTER branch relaxation so that:
+// 1. Conditional branches that survived relaxation are known to fit in .bb
+// 2. SOB/AOB (which also use .bb) replace a larger instruction sequence,
+//    so the displacement can only get shorter — no risk of overflow
+// 3. Branch relaxation doesn't need to know about SOB/AOB instructions
+//===----------------------------------------------------------------------===//
+
+#define SOB_AOB_DEBUG_TYPE "vax-sob-aob"
+
+namespace {
+
+class VAXSobAobCombine : public MachineFunctionPass {
+public:
+  static char ID;
+  VAXSobAobCombine() : MachineFunctionPass(ID) {}
+  StringRef getPassName() const override { return "VAX SOB/AOB Loop Combine"; }
+  bool runOnMachineFunction(MachineFunction &MF) override;
+};
+
+char VAXSobAobCombine::ID = 0;
+
+bool VAXSobAobCombine::runOnMachineFunction(MachineFunction &MF) {
+  const TargetInstrInfo *TII = MF.getSubtarget().getInstrInfo();
+  bool Changed = false;
+
+  for (MachineBasicBlock &MBB : MF) {
+    for (auto II = MBB.begin(), IE = MBB.end(); II != IE; /*below*/) {
+      if (trySobAobCombine(MBB, II, TII))
+        Changed = true;
+      else
+        ++II;
+    }
+  }
+  return Changed;
+}
+
+} // end anonymous namespace
+
+INITIALIZE_PASS(VAXSobAobCombine, SOB_AOB_DEBUG_TYPE,
+                "VAX SOB/AOB Loop Combine", false, false)
+
+FunctionPass *llvm::createVAXSobAobCombinePass() {
+  return new VAXSobAobCombine();
+}

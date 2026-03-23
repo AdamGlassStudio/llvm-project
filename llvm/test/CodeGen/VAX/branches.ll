@@ -127,7 +127,7 @@ dest:
 ; CHECK-LABEL: test_loop:
 ; CHECK:       cmpl
 ; CHECK:       b{{[a-z]+}}
-; CHECK:       incl
+; CHECK:       aoblss
 ; CHECK:       ret
 define i32 @test_loop() {
   %n = load i32, ptr @a

@@ -537,6 +537,11 @@ bool VAXInstrInfo::isBranchOffsetInRange(unsigned BranchOpc,
   case VAX::BGTR: case VAX::BGEQ: case VAX::BLSS: case VAX::BLEQ:
   case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
     return BrOffset >= -117 && BrOffset <= 117;
+  // SOB/AOB loop branches have 8-bit signed displacement (.bb).
+  // Created after branch relaxation — use same conservative margin.
+  case VAX::SOBGTR: case VAX::SOBGEQ:
+  case VAX::AOBLSS: case VAX::AOBLEQ:
+    return BrOffset >= -117 && BrOffset <= 117;
   // BRB has 8-bit signed displacement.
   case VAX::BRB:
     return isInt<8>(BrOffset);
@@ -556,6 +561,12 @@ VAXInstrInfo::getBranchDestBlock(const MachineInstr &MI) const {
   case VAX::BGTRU: case VAX::BGEQU: case VAX::BLSSU: case VAX::BLEQU:
   case VAX::BRB: case VAX::BRW:
     return MI.getOperand(0).getMBB();
+  // SOB: VAXMemOp(4 slots) + brtarget → last operand
+  case VAX::SOBGTR: case VAX::SOBGEQ:
+    return MI.getOperand(4).getMBB();
+  // AOB: VAXMemOp(4) + VAXMemOp(4) + brtarget → last operand
+  case VAX::AOBLSS: case VAX::AOBLEQ:
+    return MI.getOperand(8).getMBB();
   default:
     llvm_unreachable("Unexpected branch opcode");
   }
@@ -672,6 +683,14 @@ unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // 3-byte branch: opcode + 16-bit displacement.
   case VAX::BRW:
     return 3;
+  // SOB: opcode(1) + index.ml(1 byte for reg-direct) + disp.bb(1) = 3.
+  case VAX::SOBGTR: case VAX::SOBGEQ:
+    return 3;
+  // AOB: opcode(1) + limit.rl(varies) + index.ml(1) + disp.bb(1).
+  case VAX::AOBLSS: case VAX::AOBLEQ: {
+    unsigned LimitSize = estimateMemOpSize(MI, 0);
+    return 1 + LimitSize + 1 + 1;
+  }
   // CASEL pseudo expands to: casel instr (4B) + (limit+1)*2B table + brw (3B).
   case VAX::CASEL: {
     unsigned Limit = MI.getOperand(1).getImm();
