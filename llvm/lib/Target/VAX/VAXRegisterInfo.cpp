@@ -29,12 +29,16 @@ VAXRegisterInfo::VAXRegisterInfo() : VAXGenRegisterInfo(VAX::PC) {}
 
 const MCPhysReg *
 VAXRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
+  if (MF && MF->getFunction().getCallingConv() == CallingConv::Fast)
+    return CSR_VAX_Fast_SaveList;
   return CSR_VAX_SaveList;
 }
 
 const uint32_t *
 VAXRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                       CallingConv::ID CC) const {
+  if (CC == CallingConv::Fast)
+    return CSR_VAX_Fast_RegMask;
   return CSR_VAX_RegMask;
 }
 
@@ -66,11 +70,13 @@ bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   int64_t Offset = MFI.getObjectOffset(FI) +
                    MI.getOperand(FIOperandNum + 1).getImm();
 
-  // Fixed objects at positive offsets are in the AP-relative arg area
-  // (created by LowerFormalArguments). Use AP as the base register so
-  // the RA can rematerialize arg loads instead of spilling to new slots.
+  // Fixed objects at positive offsets are in the argument area.
+  // Standard CC: AP-relative (CALLS establishes AP).
+  // FastCC: FP-relative (no AP; args above FP).
   Register BaseReg = VAX::FP;
-  if (MFI.isFixedObjectIndex(FI) && MFI.getObjectOffset(FI) > 0)
+  CallingConv::ID CC = MF.getFunction().getCallingConv();
+  if (CC != CallingConv::Fast &&
+      MFI.isFixedObjectIndex(FI) && MFI.getObjectOffset(FI) > 0)
     BaseReg = VAX::AP;
 
   MI.getOperand(FIOperandNum).ChangeToRegister(BaseReg, false);

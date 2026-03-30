@@ -14,13 +14,15 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/IR/CallingConv.h"
 #include "llvm/MC/MCDwarf.h"
 #include <algorithm>
 
 using namespace llvm;
 
 bool VAXFrameLowering::hasFPImpl(const MachineFunction &MF) const {
-  // VAX CALLS always establishes a frame pointer.
+  // CALLS always establishes a frame pointer.
+  // FastCC also uses FP for arg access (FP-relative).
   return true;
 }
 
@@ -31,6 +33,104 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
   const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
   MachineBasicBlock::iterator MBBI = MBB.begin();
   DebugLoc DL = MBBI != MBB.end() ? MBBI->getDebugLoc() : DebugLoc();
+  CallingConv::ID CC = MF.getFunction().getCallingConv();
+
+  if (CC == CallingConv::Fast) {
+    // FastCC prologue: explicit frame setup (no CALLS hardware frame).
+    //
+    // Stack layout after prologue:
+    //   FP+8+4*(N-1): argN-1
+    //   ...
+    //   FP+8:         arg0
+    //   FP+4:         return address (pushed by JSB)
+    //   FP+0:         saved old FP         <-- FP points here
+    //   FP-4:         first saved CSR (lowest-numbered, via PUSHR)
+    //   ...
+    //   FP-4*K:       last saved CSR
+    //   SP:           bottom of locals
+
+    // pushl %fp — save caller's frame pointer.
+    BuildMI(MBB, MBBI, DL, TII.get(VAX::PUSHL_r))
+        .addReg(VAX::FP);
+
+    // movl %sp, %fp — establish our frame pointer.
+    BuildMI(MBB, MBBI, DL, TII.get(VAX::MOVL_rr), VAX::FP)
+        .addReg(VAX::SP);
+
+    // PUSHR $mask — save callee-saved registers.
+    const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
+    if (!CSI.empty()) {
+      const auto &TRI = *MF.getSubtarget().getRegisterInfo();
+      uint16_t Mask = 0;
+      for (const auto &Info : CSI) {
+        unsigned Enc = TRI.getEncodingValue(Info.getReg());
+        if (Enc <= 11)
+          Mask |= 1u << Enc;
+      }
+      if (Mask) {
+        BuildMI(MBB, MBBI, DL, TII.get(VAX::PUSHR_imm))
+            .addImm(Mask);
+      }
+    }
+
+    // subl2 $stacksize, %sp — allocate locals.
+    if (StackSize != 0) {
+      BuildMI(MBB, MBBI, DL, TII.get(VAX::SUBL2_ri), VAX::SP)
+          .addImm(StackSize)
+          .addReg(VAX::SP);
+    }
+
+    // CFI: CFA = FP + 0.
+    const auto &TRI = *MF.getSubtarget().getRegisterInfo();
+    unsigned DwarfFP = TRI.getDwarfRegNum(VAX::FP, true);
+    unsigned DwarfPC = TRI.getDwarfRegNum(VAX::PC, true);
+    unsigned CFIIdx;
+
+    CFIIdx = MF.addFrameInst(
+        MCCFIInstruction::cfiDefCfa(nullptr, DwarfFP, /*Offset=*/0));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIdx);
+
+    // Return address at FP+4 (pushed by JSB).
+    CFIIdx = MF.addFrameInst(
+        MCCFIInstruction::createOffset(nullptr, DwarfPC, /*Offset=*/4));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIdx);
+
+    // Saved FP at FP+0 (pushed by pushl %fp).
+    CFIIdx = MF.addFrameInst(
+        MCCFIInstruction::createOffset(nullptr, DwarfFP, /*Offset=*/0));
+    BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+        .addCFIIndex(CFIIdx);
+
+    // CFI for callee-saved registers (below FP, pushed by PUSHR).
+    if (!CSI.empty()) {
+      SmallVector<std::pair<unsigned, MCRegister>, 6> SavedRegs;
+      for (const auto &Info : CSI) {
+        MCRegister Reg = Info.getReg();
+        unsigned HWNum = TRI.getEncodingValue(Reg);
+        SavedRegs.push_back({HWNum, Reg});
+      }
+      llvm::sort(SavedRegs,
+                 [](const auto &A, const auto &B) { return A.first < B.first; });
+
+      // PUSHR pushes highest-numbered first. In memory (ascending address):
+      // lowest-numbered is closest to FP (at FP-4*K), highest at FP-4.
+      int NumCSR = SavedRegs.size();
+      for (int i = 0; i < NumCSR; ++i) {
+        unsigned DwarfReg = TRI.getDwarfRegNum(SavedRegs[i].second, true);
+        int Offset = -4 * (NumCSR - i); // lowest-numbered at most negative offset
+        CFIIdx = MF.addFrameInst(
+            MCCFIInstruction::createOffset(nullptr, DwarfReg, Offset));
+        BuildMI(MBB, MBBI, DL, TII.get(TargetOpcode::CFI_INSTRUCTION))
+            .addCFIIndex(CFIIdx);
+      }
+    }
+
+    return;
+  }
+
+  // Standard CALLS prologue below.
 
   // Emit CFI for the CALLS frame. After CALLS/entry, FP points to the
   // condition handler longword. The fixed layout is:
@@ -113,7 +213,66 @@ void VAXFrameLowering::emitPrologue(MachineFunction &MF,
 
 void VAXFrameLowering::emitEpilogue(MachineFunction &MF,
                                     MachineBasicBlock &MBB) const {
-  // RET restores SP from the call frame — no explicit epilogue needed.
+  CallingConv::ID CC = MF.getFunction().getCallingConv();
+  if (CC != CallingConv::Fast)
+    return; // Standard CC: RET restores everything, no explicit epilogue.
+
+  // FastCC epilogue (inserted before the RSB_RET terminator):
+  //   movl  %fp, %sp       ; deallocate locals + CSRs in one shot
+  //   movl  (%fp), %fp     ; restore old FP from saved location
+  //   addl2 $4, %sp        ; advance SP past saved_old_FP
+  //   ; RSB pops return address and jumps
+  //
+  // Note: POPR is not needed — movl %fp, %sp skips over saved CSRs,
+  // and the RA has already ensured CSR values are in their registers
+  // at this point (they were saved by PUSHR in prologue, the RA knows
+  // they're callee-saved). Wait — that's wrong. The RA expects the
+  // prologue/epilogue to actually save/restore CSRs. We must POPR.
+
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  uint64_t StackSize = MFI.getStackSize();
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+
+  // Insert before the terminator (RSB_RET).
+  MachineBasicBlock::iterator MBBI = MBB.getLastNonDebugInstr();
+  DebugLoc DL = MBBI->getDebugLoc();
+
+  // Deallocate locals: addl2 $stacksize, %sp
+  if (StackSize != 0) {
+    BuildMI(MBB, MBBI, DL, TII.get(VAX::ADDL2_ri), VAX::SP)
+        .addImm(StackSize)
+        .addReg(VAX::SP);
+  }
+
+  // POPR $mask — restore callee-saved registers.
+  const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
+  if (!CSI.empty()) {
+    const auto &TRI = *MF.getSubtarget().getRegisterInfo();
+    uint16_t Mask = 0;
+    for (const auto &Info : CSI) {
+      unsigned Enc = TRI.getEncodingValue(Info.getReg());
+      if (Enc <= 11)
+        Mask |= 1u << Enc;
+    }
+    if (Mask) {
+      BuildMI(MBB, MBBI, DL, TII.get(VAX::POPR_imm))
+          .addImm(Mask);
+    }
+  }
+
+  // SP now points at saved_old_FP. FP still points there too.
+  // Restore old FP: movl (%fp), %fp
+  BuildMI(MBB, MBBI, DL, TII.get(VAX::MOVL_rm), VAX::FP)
+      .addReg(VAX::FP)   // base
+      .addImm(0)          // disp
+      .addReg(0)          // index (none)
+      .addImm(0);         // flags
+
+  // Advance SP past saved_old_FP: addl2 $4, %sp
+  BuildMI(MBB, MBBI, DL, TII.get(VAX::ADDL2_ri), VAX::SP)
+      .addImm(4)
+      .addReg(VAX::SP);
+  // RSB_RET follows: pops return address from SP and jumps.
 }
 
 bool VAXFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
@@ -123,15 +282,17 @@ bool VAXFrameLowering::hasReservedCallFrame(const MachineFunction &MF) const {
 bool VAXFrameLowering::spillCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
-  // VAX CALLS reads the entry mask and saves registers in hardware.
-  // No explicit spill instructions needed — return true to suppress default.
+  // Standard CC: CALLS reads the entry mask and saves registers in hardware.
+  // FastCC: PUSHR in emitPrologue handles CSR saves.
+  // Either way, suppress the default individual spill instructions.
   return true;
 }
 
 bool VAXFrameLowering::restoreCalleeSavedRegisters(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
     MutableArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
-  // VAX RET restores registers from the call frame in hardware.
+  // Standard CC: RET restores registers from the call frame in hardware.
+  // FastCC: POPR in emitEpilogue handles CSR restores.
   return true;
 }
 

@@ -60,6 +60,11 @@ enum NodeType : unsigned {
   // MOVC3: move character 3-operand. (chain, dst, src, size) → chain.
   // Lowered to the VAX MOVC3 instruction for memcpy.
   MOVC3,
+  // JSB_CALL: fast call via JSB instruction (no entry mask, no CALLS frame).
+  // (chain, callee, regmask, [args...]) → (chain, glue)
+  JSB_CALL,
+  // RSB_RET: return from a JSB-called function via RSB.
+  RSB_RET,
 };
 } // namespace VAXISD
 

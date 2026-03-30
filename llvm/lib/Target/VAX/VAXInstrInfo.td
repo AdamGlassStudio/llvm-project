@@ -26,6 +26,10 @@ def SDT_VAXRet : SDTypeProfile<0, -1, []>;
 def VAXISD_ret_flag : SDNode<"VAXISD::RET_FLAG", SDT_VAXRet,
     [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 
+// Return from a JSB-called function via RSB.  Variadic: [chain, (reg...), glue?]
+def VAXISD_rsb_ret : SDNode<"VAXISD::RSB_RET", SDT_VAXRet,
+    [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
+
 // PC-relative wrapper for global/extern symbols (produces the symbol address).
 def SDT_VAXPCRel : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisInt<0>]>;
 def vax_pcrelwrapper : SDNode<"VAXISD::PCRelWrapper", SDT_VAXPCRel>;
@@ -121,6 +125,34 @@ def NOP : InstVAX<0x01, (outs), (ins), "nop", []>, Sched<[WriteNOP]>;
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in
 def RET : InstVAX<0x04, (outs), (ins), "ret", [(VAXISD_ret_flag)]>,
     Sched<[WriteRET]>;
+
+// RSB_RET — return from JSB-called function (fastcc)
+let isReturn = 1, isTerminator = 1, isBarrier = 1 in
+def RSB_RET : InstVAX<0x05, (outs), (ins), "rsb", [(VAXISD_rsb_ret)]>;
+
+// JSB_direct — fast call via JSB (no entry mask, no CALLS frame).
+// JSB pushes the return address (PC) onto the stack and jumps.
+// Clobbers R0-R5 (volatiles) just like CALLS; callee saves R6-R11 via PUSHR.
+let isCall = 1, Uses = [SP], Defs = [SP, R0, R1, R2, R3, R4, R5, PSW] in {
+def JSB_direct : InstVAX<0x16, (outs),
+    (ins i32imm:$callee),
+    "jsb\t$callee", []>,
+    Sched<[WriteCALL]>;
+let isCodeGenOnly = 1 in
+def JSB_indir : InstVAX<0x16, (outs),
+    (ins GPRnoPC:$callee),
+    "jsb\t(${callee})", []>,
+    Sched<[WriteCALL]>;
+}
+
+// PUSHR_imm / POPR_imm — codegen-only variants with immediate mask for fastcc
+// prologue/epilogue. The mask is a 16-bit bitmask of registers to save/restore.
+let isCodeGenOnly = 1, Uses = [SP], Defs = [SP] in {
+def PUSHR_imm : InstVAX<0xBB, (outs), (ins i32imm:$mask),
+    "pushr\t$$${mask}", []>;
+def POPR_imm : InstVAX<0xBA, (outs), (ins i32imm:$mask),
+    "popr\t$$${mask}", []>;
+}
 
 // CLRL — zero a longword register; cheapest way to load the constant 0
 // Nearly all VAX data-manipulation instructions set condition codes (N/Z/V/C

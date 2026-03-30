@@ -29,6 +29,10 @@ using namespace llvm;
 
 #define DEBUG_TYPE "vax-lower"
 
+static bool isFastCC(CallingConv::ID CC) {
+  return CC == CallingConv::Fast;
+}
+
 // IEEE 754 single → VAX F_float conversion (same as in VAXAsmPrinter.cpp).
 static uint32_t convertIEEEToVAXF(uint32_t IEEE) {
   uint32_t Sign = (IEEE >> 31) & 1;
@@ -456,6 +460,8 @@ const char *VAXTargetLowering::getTargetNodeName(unsigned Opcode) const {
   case VAXISD::EXTZV:        return "VAXISD::EXTZV";
   case VAXISD::SELECT_CC_I64: return "VAXISD::SELECT_CC_I64";
   case VAXISD::MOVC3:         return "VAXISD::MOVC3";
+  case VAXISD::JSB_CALL:      return "VAXISD::JSB_CALL";
+  case VAXISD::RSB_RET:       return "VAXISD::RSB_RET";
   default:                   return nullptr;
   }
 }
@@ -1055,7 +1061,7 @@ SDValue VAXTargetLowering::LowerReturn(
   MachineFunction &MF = DAG.getMachineFunction();
   SmallVector<CCValAssign, 4> RVLocs;
   CCState CCInfo(CallConv, isVarArg, MF, RVLocs, *DAG.getContext());
-  CCInfo.AnalyzeReturn(Outs, RetCC_VAX);
+  CCInfo.AnalyzeReturn(Outs, isFastCC(CallConv) ? RetCC_VAX_Fast : RetCC_VAX);
 
   SDValue Flag;
   SmallVector<SDValue, 4> RetOps;
@@ -1101,7 +1107,9 @@ SDValue VAXTargetLowering::LowerReturn(
   RetOps[0] = Chain;
   if (Flag.getNode())
     RetOps.push_back(Flag);
-  return DAG.getNode(VAXISD::RET_FLAG, DL, MVT::Other, RetOps);
+
+  unsigned RetOpc = isFastCC(CallConv) ? VAXISD::RSB_RET : VAXISD::RET_FLAG;
+  return DAG.getNode(RetOpc, DL, MVT::Other, RetOps);
 }
 
 SDValue VAXTargetLowering::LowerFormalArguments(
@@ -1109,27 +1117,32 @@ SDValue VAXTargetLowering::LowerFormalArguments(
     const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &DL,
     SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const {
   MachineFunction &MF = DAG.getMachineFunction();
+  bool FastCC = isFastCC(CallConv);
 
-  // Mark AP as live-in: CALLS establishes AP pointing to the argument area.
-  MF.getRegInfo().addLiveIn(VAX::AP);
-  MF.front().addLiveIn(VAX::AP);
+  // For standard CC, CALLS establishes AP pointing to the argument area.
+  // For fastcc, there is no AP — args are FP-relative.
+  if (!FastCC) {
+    MF.getRegInfo().addLiveIn(VAX::AP);
+    MF.front().addLiveIn(VAX::AP);
+  }
 
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeFormalArguments(Ins, CC_VAX);
+  CCInfo.AnalyzeFormalArguments(Ins, FastCC ? CC_VAX_Fast : CC_VAX);
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
   for (auto &VA : ArgLocs) {
-    // AP+0 is the argument count word written by CALLS.
-    // AP+4 is the first argument, AP+8 the second, etc.
-    // Create a fixed stack object for each arg so the RA knows it can
-    // rematerialize loads from the arg area instead of spilling to a new
-    // stack slot. We use positive offsets to distinguish arg-area objects
-    // (AP-relative) from locals (FP-relative, negative offsets).
-    // eliminateFrameIndex resolves these to AP+offset.
-    int APOffset = VA.getLocMemOffset() + 4;
+    // Standard CC: AP+0 = arg count, AP+4 = first arg. Fixed objects at
+    // positive offsets are AP-relative (eliminateFrameIndex uses AP).
+    // FastCC: FP+0 = saved FP, FP+4 = return addr, FP+8 = first arg.
+    // Fixed objects at positive offsets use FP (eliminateFrameIndex checks CC).
+    int ArgOffset;
+    if (FastCC)
+      ArgOffset = VA.getLocMemOffset() + 8; // +8: saved FP + return addr
+    else
+      ArgOffset = VA.getLocMemOffset() + 4; // +4: skip arg count word
     int FI = MFI.CreateFixedObject(VA.getLocVT().getSizeInBits() / 8,
-                                   APOffset, /*IsImmutable=*/true);
+                                   ArgOffset, /*IsImmutable=*/true);
     SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
     SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
                                MachinePointerInfo::getFixedStack(MF, FI));
@@ -1179,13 +1192,15 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   MachineFunction &MF = DAG.getMachineFunction();
   bool isVarArg        = CLI.IsVarArg;
 
+  bool FastCC = isFastCC(CLI.CallConv);
+
   // VAX CALLS/RET builds a frame linkage that prevents tail call optimization.
   CLI.IsTailCall = false;
 
-  // Assign outgoing args: all go to stack via CC_VAX.
+  // Assign outgoing args: all go to stack.
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CLI.CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
-  CCInfo.AnalyzeCallOperands(CLI.Outs, CC_VAX);
+  CCInfo.AnalyzeCallOperands(CLI.Outs, FastCC ? CC_VAX_Fast : CC_VAX);
   unsigned NumArgs   = CLI.OutVals.size();
   unsigned StackBytes = CCInfo.getStackSize();
 
@@ -1274,27 +1289,45 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     Callee = DAG.getTargetExternalSymbol(E->getSymbol(), MVT::i32, TF);
   }
 
-  // Build VAXISD::CALL node.
+  // Build call node.
   const uint32_t *Mask =
       MF.getSubtarget().getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv);
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
-  SmallVector<SDValue, 6> Ops = {
-      Chain,
-      DAG.getConstant(StackBytes / 4, DL, MVT::i32),
-      Callee,
-      DAG.getRegisterMask(Mask),
-  };
-  Chain = DAG.getNode(VAXISD::CALL, DL, NodeTys, Ops);
-  SDValue InFlag = Chain.getValue(1);
 
-  // VAX RET pops the arg area (CALLS S-bit), so callee pops all bytes.
-  Chain = DAG.getCALLSEQ_END(Chain, StackBytes, StackBytes, InFlag, DL);
-  InFlag = Chain.getValue(1);
+  SDValue InFlag;
+  if (FastCC) {
+    // JSB call: no arg count operand — just (chain, callee, regmask).
+    SmallVector<SDValue, 4> Ops = {
+        Chain,
+        Callee,
+        DAG.getRegisterMask(Mask),
+    };
+    Chain = DAG.getNode(VAXISD::JSB_CALL, DL, NodeTys, Ops);
+    InFlag = Chain.getValue(1);
+
+    // JSB/RSB doesn't pop args — caller must clean up.
+    Chain = DAG.getCALLSEQ_END(Chain, StackBytes, /*CalleePop=*/0, InFlag, DL);
+    InFlag = Chain.getValue(1);
+  } else {
+    // CALLS: (chain, argcount, callee, regmask).
+    SmallVector<SDValue, 6> Ops = {
+        Chain,
+        DAG.getConstant(StackBytes / 4, DL, MVT::i32),
+        Callee,
+        DAG.getRegisterMask(Mask),
+    };
+    Chain = DAG.getNode(VAXISD::CALL, DL, NodeTys, Ops);
+    InFlag = Chain.getValue(1);
+
+    // VAX RET pops the arg area (CALLS S-bit), so callee pops all bytes.
+    Chain = DAG.getCALLSEQ_END(Chain, StackBytes, StackBytes, InFlag, DL);
+    InFlag = Chain.getValue(1);
+  }
 
   // Copy return value(s) from registers.
   SmallVector<CCValAssign, 4> RVLocs;
   CCState RetInfo(CLI.CallConv, isVarArg, MF, RVLocs, *DAG.getContext());
-  RetInfo.AnalyzeCallResult(CLI.Ins, RetCC_VAX);
+  RetInfo.AnalyzeCallResult(CLI.Ins, FastCC ? RetCC_VAX_Fast : RetCC_VAX);
   for (unsigned i = 0, e = RVLocs.size(); i != e; ++i) {
     CCValAssign &VA = RVLocs[i];
 

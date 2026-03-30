@@ -125,6 +125,10 @@ private:
 } // end anonymous namespace
 
 void VAXAsmPrinter::emitFunctionBodyStart() {
+  // FastCC functions don't use the CALLS entry mask mechanism.
+  if (MF->getFunction().getCallingConv() == CallingConv::Fast)
+    return;
+
   // Emit the 2-byte entry mask immediately after the function label.
   // The CALLS/CALLG instruction reads this word on every call to decide
   // which of R0–R11 to save; only callee-saved regs (R6–R11) should appear.

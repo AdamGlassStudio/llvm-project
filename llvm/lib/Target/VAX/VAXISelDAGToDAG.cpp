@@ -166,6 +166,22 @@ fallthrough_pushl:
     return;
   }
 
+  // JSB_CALL — fast call via JSB (no arg count, no entry mask).
+  if (N->getOpcode() == VAXISD::JSB_CALL) {
+    SDValue Chain   = N->getOperand(0);
+    SDValue Callee  = N->getOperand(1);
+    SDValue RegMask = N->getOperand(2);
+
+    bool isDirect = (Callee.getOpcode() == ISD::TargetGlobalAddress ||
+                     Callee.getOpcode() == ISD::TargetExternalSymbol);
+    unsigned Opc = isDirect ? VAX::JSB_direct : VAX::JSB_indir;
+    SmallVector<SDValue, 3> Ops = { Callee, RegMask, Chain };
+
+    SDNode *Call = CurDAG->getMachineNode(Opc, SDLoc(N), N->getVTList(), Ops);
+    ReplaceNode(N, Call);
+    return;
+  }
+
   // ASHQ — quadword shift. The VAXISD::ASHQ node has i32 operands (cnt, lo,
   // hi) and i32 results (lo, hi), but the hardware ASHQ reads/writes
   // consecutive register pairs. Build REG_SEQUENCE to form QPR, emit ASHQ,
