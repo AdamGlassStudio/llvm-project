@@ -11,7 +11,6 @@
 #include "TargetInfo/VAXTargetInfo.h"
 #include "VAX.h"
 #include "VAXMachineFunctionInfo.h"
-#include "VAXTargetTransformInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -20,7 +19,6 @@
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/TargetRegistry.h"
-#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include <optional>
@@ -146,61 +144,6 @@ MachineFunctionInfo *VAXTargetMachine::createMachineFunctionInfo(
     const TargetSubtargetInfo *STI) const {
   return VAXMachineFunctionInfo::create<VAXMachineFunctionInfo>(Allocator, F,
                                                                 STI);
-}
-
-TargetTransformInfo
-VAXTargetMachine::getTargetTransformInfo(const Function &F) const {
-  return TargetTransformInfo(std::make_unique<VAXTTIImpl>(this, F));
-}
-
-//===----------------------------------------------------------------------===//
-// VAX Inline Threshold
-//
-// Approximate GCC's inlining behavior on VAX by default. LLVM's default
-// threshold (225) is ~3x more aggressive than GCC's effective threshold,
-// causing +6.2% kernel .text bloat that is entirely due to inlining
-// policy — at threshold=0, Clang codegen is actually 2% smaller than GCC.
-//
-// The "function-inline-threshold" function attribute overrides the default
-// threshold per-function. We stamp it on every function that doesn't
-// already have one, giving an effective default of 75 — the empirical
-// crossover point where Clang's kernel .text matches GCC's.
-//
-// LLVM's TTI hooks (adjustInliningThreshold, getInliningThresholdMultiplier)
-// can only increase the threshold, not decrease it, so this attribute-based
-// approach is necessary.
-//===----------------------------------------------------------------------===//
-
-namespace {
-
-// Empirically determined: threshold=75 produces kernel .text within 0.1%
-// of GCC. The user can still override globally via -mllvm -inline-threshold=N.
-static constexpr int VAXInlineThreshold = 75;
-
-struct VAXSetInlineThresholdPass
-    : public PassInfoMixin<VAXSetInlineThresholdPass> {
-  PreservedAnalyses run(Module &M, ModuleAnalysisManager &) {
-    for (Function &F : M) {
-      if (F.isDeclaration())
-        continue;
-      if (F.hasFnAttribute("function-inline-threshold"))
-        continue;
-      F.addFnAttr("function-inline-threshold",
-                   std::to_string(VAXInlineThreshold));
-    }
-    return PreservedAnalyses::all();
-  }
-};
-
-} // end anonymous namespace
-
-void VAXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
-  PB.registerPipelineStartEPCallback(
-      [](ModulePassManager &MPM, OptimizationLevel Level) {
-        if (Level == OptimizationLevel::O0)
-          return;
-        MPM.addPass(VAXSetInlineThresholdPass());
-      });
 }
 
 namespace {
