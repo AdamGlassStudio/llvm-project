@@ -1132,39 +1132,67 @@ SDValue VAXTargetLowering::LowerFormalArguments(
 
   MachineFrameInfo &MFI = MF.getFrameInfo();
   for (auto &VA : ArgLocs) {
-    // Standard CC: AP+0 = arg count, AP+4 = first arg. Fixed objects at
-    // positive offsets are AP-relative (eliminateFrameIndex uses AP).
-    // FastCC: FP+0 = saved FP, FP+4 = return addr, FP+8 = first arg.
-    // Fixed objects at positive offsets use FP (eliminateFrameIndex checks CC).
-    int ArgOffset;
-    if (FastCC)
-      ArgOffset = VA.getLocMemOffset() + 8; // +8: saved FP + return addr
-    else
-      ArgOffset = VA.getLocMemOffset() + 4; // +4: skip arg count word
-    int FI = MFI.CreateFixedObject(VA.getLocVT().getSizeInBits() / 8,
-                                   ArgOffset, /*IsImmutable=*/true);
-    SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
-    SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
-                               MachinePointerInfo::getFixedStack(MF, FI));
+    SDValue Val;
 
-    // Handle CC promotion: if the arg was promoted (e.g., i8→i32),
-    // truncate back to the expected value type.
-    SDValue Val = Load;
-    if (VA.getValVT() != VA.getLocVT()) {
-      switch (VA.getLocInfo()) {
-      case CCValAssign::SExt:
-        Val = DAG.getNode(ISD::AssertSext, DL, VA.getLocVT(), Val,
-                          DAG.getValueType(VA.getValVT()));
-        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
-        break;
-      case CCValAssign::ZExt:
-        Val = DAG.getNode(ISD::AssertZext, DL, VA.getLocVT(), Val,
-                          DAG.getValueType(VA.getValVT()));
-        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
-        break;
-      default:
-        Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
-        break;
+    if (VA.isRegLoc()) {
+      // Fastcc register argument — copy from physical register.
+      unsigned Reg = MF.addLiveIn(VA.getLocReg(),
+                                  &VAX::GPRIRegClass);
+      Val = DAG.getCopyFromReg(Chain, DL, Reg, VA.getLocVT());
+
+      // Handle CC promotion: truncate promoted args back.
+      if (VA.getValVT() != VA.getLocVT()) {
+        switch (VA.getLocInfo()) {
+        case CCValAssign::SExt:
+          Val = DAG.getNode(ISD::AssertSext, DL, VA.getLocVT(), Val,
+                            DAG.getValueType(VA.getValVT()));
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        case CCValAssign::ZExt:
+          Val = DAG.getNode(ISD::AssertZext, DL, VA.getLocVT(), Val,
+                            DAG.getValueType(VA.getValVT()));
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        default:
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        }
+      }
+    } else {
+      // Stack argument.
+      // Standard CC: AP+0 = arg count, AP+4 = first arg. Fixed objects at
+      // positive offsets are AP-relative (eliminateFrameIndex uses AP).
+      // FastCC: FP+0 = saved FP, FP+4 = return addr, FP+8 = first arg.
+      // Fixed objects at positive offsets use FP (eliminateFrameIndex checks CC).
+      int ArgOffset;
+      if (FastCC)
+        ArgOffset = VA.getLocMemOffset() + 8; // +8: saved FP + return addr
+      else
+        ArgOffset = VA.getLocMemOffset() + 4; // +4: skip arg count word
+      int FI = MFI.CreateFixedObject(VA.getLocVT().getSizeInBits() / 8,
+                                     ArgOffset, /*IsImmutable=*/true);
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i32);
+      SDValue Load = DAG.getLoad(VA.getLocVT(), DL, Chain, FIN,
+                                 MachinePointerInfo::getFixedStack(MF, FI));
+
+      // Handle CC promotion: truncate promoted args back.
+      Val = Load;
+      if (VA.getValVT() != VA.getLocVT()) {
+        switch (VA.getLocInfo()) {
+        case CCValAssign::SExt:
+          Val = DAG.getNode(ISD::AssertSext, DL, VA.getLocVT(), Val,
+                            DAG.getValueType(VA.getValVT()));
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        case CCValAssign::ZExt:
+          Val = DAG.getNode(ISD::AssertZext, DL, VA.getLocVT(), Val,
+                            DAG.getValueType(VA.getValVT()));
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        default:
+          Val = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), Val);
+          break;
+        }
       }
     }
     InVals.push_back(Val);
@@ -1197,7 +1225,7 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // VAX CALLS/RET builds a frame linkage that prevents tail call optimization.
   CLI.IsTailCall = false;
 
-  // Assign outgoing args: all go to stack.
+  // Assign outgoing args: fastcc uses R0-R3 then stack; standard uses stack.
   SmallVector<CCValAssign, 8> ArgLocs;
   CCState CCInfo(CLI.CallConv, isVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeCallOperands(CLI.Outs, FastCC ? CC_VAX_Fast : CC_VAX);
@@ -1207,15 +1235,17 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   // CALLSEQ_START with 0: PUSHLs will adjust SP incrementally.
   Chain = DAG.getCALLSEQ_START(Chain, 0, 0, DL);
 
-  // Push args in reverse order (right-to-left) using PUSHL.
-  // Each PUSHL decrements SP by 4 and stores the value.
-  // f64 args need two PUSHLs (store to stack temp, load as two i32 halves).
+  // Collect register args to add as implicit operands on the call node.
+  SmallVector<SDValue, 4> RegArgOps;
+  SDValue InFlag;
+
+  // Push STACK args in reverse order (right-to-left) using PUSHL.
+  // Register args are handled separately via CopyToReg.
   for (int i = NumArgs - 1; i >= 0; --i) {
-    SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
+    CCValAssign &VA = ArgLocs[i];
     SDValue Arg = CLI.OutVals[i];
 
-    // Apply CC promotion: extend i8/i16 args to i32 before pushing.
-    CCValAssign &VA = ArgLocs[i];
+    // Apply CC promotion: extend i8/i16 args to i32.
     if (VA.getLocInfo() == CCValAssign::SExt)
       Arg = DAG.getNode(ISD::SIGN_EXTEND, DL, VA.getLocVT(), Arg);
     else if (VA.getLocInfo() == CCValAssign::ZExt)
@@ -1223,7 +1253,15 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     else if (VA.getLocInfo() == CCValAssign::AExt)
       Arg = DAG.getNode(ISD::ANY_EXTEND, DL, VA.getLocVT(), Arg);
 
-    if (Arg.getValueType() == MVT::f64) {
+    if (VA.isRegLoc()) {
+      // Register arg — copy to physical register.
+      Chain = DAG.getCopyToReg(Chain, DL, VA.getLocReg(), Arg, InFlag);
+      InFlag = Chain.getValue(1);
+      RegArgOps.push_back(DAG.getRegister(VA.getLocReg(), VA.getLocVT()));
+    } else {
+      // Stack arg — push via PUSHL.
+      SDVTList VTs = DAG.getVTList(MVT::Other, MVT::Glue);
+      if (Arg.getValueType() == MVT::f64) {
       // f64 (D_float): convert to VAX format and push as two i32 words.
       // For constants, convert IEEE→VAX D_float at compile time to avoid
       // the DAG optimizer folding store-load into IEEE integer immediates.
@@ -1271,6 +1309,7 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     } else {
       Chain = DAG.getNode(VAXISD::PUSHL, DL, VTs, Chain, Arg);
     }
+    } // end stack arg
   }
 
   // Wrap callee for direct calls.
@@ -1294,14 +1333,18 @@ SDValue VAXTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
       MF.getSubtarget().getRegisterInfo()->getCallPreservedMask(MF, CLI.CallConv);
   SDVTList NodeTys = DAG.getVTList(MVT::Other, MVT::Glue);
 
-  SDValue InFlag;
   if (FastCC) {
-    // JSB call: no arg count operand — just (chain, callee, regmask).
-    SmallVector<SDValue, 4> Ops = {
+    // JSB call: (chain, callee, regmask, [reg arg operands], [inflag]).
+    SmallVector<SDValue, 8> Ops = {
         Chain,
         Callee,
         DAG.getRegisterMask(Mask),
     };
+    // Add register arg operands so the scheduler sees the data dependency.
+    for (auto &RegOp : RegArgOps)
+      Ops.push_back(RegOp);
+    if (InFlag.getNode())
+      Ops.push_back(InFlag);
     Chain = DAG.getNode(VAXISD::JSB_CALL, DL, NodeTys, Ops);
     InFlag = Chain.getValue(1);
 

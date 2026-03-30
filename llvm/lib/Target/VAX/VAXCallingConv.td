@@ -44,7 +44,8 @@ def CSR_VAX : CalleeSavedRegs<(add R6, R7, R8, R9, R10, R11)>;
 //===----------------------------------------------------------------------===//
 // Fast calling convention (JSB/RSB):
 //   - Used for internal/static functions promoted to fastcc.
-//   - Arguments still on stack (Level 1 — register args in future).
+//   - First 4 integer/pointer args in R0-R3; remainder on stack.
+//   - f32/f64 always on stack (VAX float format needs special handling).
 //   - Return value: same as standard (i32 in R0; i64 in R0+R1).
 //   - Callee-saved: R6-R11 (saved/restored via explicit PUSHR/POPR).
 //   - AP is allocatable (not used by JSB).
@@ -53,8 +54,12 @@ def CSR_VAX : CalleeSavedRegs<(add R6, R7, R8, R9, R10, R11)>;
 
 def CC_VAX_Fast : CallingConv<[
   CCIfType<[i8, i16], CCPromoteToType<i32>>,
+  // Float/double always on stack (VAX format needs special push handling).
   CCIfType<[f64], CCAssignToStack<8, 4>>,
   CCIfType<[f32], CCAssignToStack<4, 4>>,
+  // First 4 i32/ptr args in registers.
+  CCIfType<[i32], CCAssignToReg<[R0, R1, R2, R3]>>,
+  // Remaining args on stack.
   CCAssignToStack<4, 4>
 ]>;
 
