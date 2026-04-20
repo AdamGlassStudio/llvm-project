@@ -11,6 +11,11 @@
 #include "TargetInfo/VAXTargetInfo.h"
 #include "VAX.h"
 #include "VAXMachineFunctionInfo.h"
+#include "llvm/CodeGen/GlobalISel/CSEInfo.h"
+#include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
+#include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
@@ -149,6 +154,14 @@ public:
   void addPostRegAlloc() override;
   void addPreEmitPass() override;
   void addPreEmitPass2() override;
+
+  // GlobalISel passes.
+  bool addIRTranslator() override;
+  void addPreLegalizeMachineIR() override;
+  bool addLegalizeMachineIR() override;
+  bool addRegBankSelect() override;
+  bool addGlobalInstructionSelect() override;
+  std::unique_ptr<CSEConfigBase> getCSEConfig() const override;
 };
 
 } // end anonymous namespace
@@ -193,9 +206,39 @@ void VAXPassConfig::addPreEmitPass2() {
   addPass(createVAXSobAobCombinePass());
 }
 
+// GlobalISel pass config.
+std::unique_ptr<CSEConfigBase> VAXPassConfig::getCSEConfig() const {
+  return getStandardCSEConfigForOpt(TM->getOptLevel());
+}
+
+bool VAXPassConfig::addIRTranslator() {
+  addPass(new IRTranslator(getOptLevel()));
+  return false;
+}
+
+void VAXPassConfig::addPreLegalizeMachineIR() {
+  // No pre-legalize combiners yet.
+}
+
+bool VAXPassConfig::addLegalizeMachineIR() {
+  addPass(new Legalizer());
+  return false;
+}
+
+bool VAXPassConfig::addRegBankSelect() {
+  addPass(new RegBankSelect());
+  return false;
+}
+
+bool VAXPassConfig::addGlobalInstructionSelect() {
+  addPass(new InstructionSelect(getOptLevel()));
+  return false;
+}
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVAXTarget() {
   RegisterTargetMachine<VAXTargetMachine> X(getTheVAXTarget());
   PassRegistry &PR = *PassRegistry::getPassRegistry();
+  initializeGlobalISel(PR);
   initializeVAXDAGToDAGISelLegacyPass(PR);
   initializeVAXFuseCmpBranchPass(PR);
   initializeVAXExpandCmpBranchPass(PR);

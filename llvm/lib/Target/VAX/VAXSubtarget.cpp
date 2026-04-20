@@ -7,7 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "VAXSubtarget.h"
+#include "GISel/VAXCallLowering.h"
+#include "GISel/VAXLegalizerInfo.h"
+#include "GISel/VAXRegisterBankInfo.h"
+#include "VAX.h"
 #include "VAXTargetMachine.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/MC/TargetRegistry.h"
 
 using namespace llvm;
@@ -23,4 +28,34 @@ VAXSubtarget::VAXSubtarget(const Triple &TT, StringRef CPU, StringRef FS,
     : VAXGenSubtargetInfo(TT, CPU, /*TuneCPU=*/CPU, FS), InstrInfo(*this),
       FrameLowering(), TLInfo(TM, *this) {
   ParseSubtargetFeatures(CPU, /*TuneCPU=*/CPU, FS);
+}
+
+// Out-of-line destructor so unique_ptr members see complete types.
+VAXSubtarget::~VAXSubtarget() = default;
+
+const CallLowering *VAXSubtarget::getCallLowering() const {
+  if (!CallLoweringInfo)
+    CallLoweringInfo.reset(new VAXCallLowering(*getTargetLowering()));
+  return CallLoweringInfo.get();
+}
+
+InstructionSelector *VAXSubtarget::getInstructionSelector() const {
+  if (!InstSelector) {
+    InstSelector.reset(createVAXInstructionSelector(
+        *static_cast<const VAXTargetMachine *>(&TLInfo.getTargetMachine()),
+        *this, *static_cast<const VAXRegisterBankInfo *>(getRegBankInfo())));
+  }
+  return InstSelector.get();
+}
+
+const LegalizerInfo *VAXSubtarget::getLegalizerInfo() const {
+  if (!Legalizer)
+    Legalizer.reset(new VAXLegalizerInfo(*this));
+  return Legalizer.get();
+}
+
+const RegisterBankInfo *VAXSubtarget::getRegBankInfo() const {
+  if (!RegBankInfo)
+    RegBankInfo.reset(new VAXRegisterBankInfo(*getRegisterInfo()));
+  return RegBankInfo.get();
 }

@@ -12,6 +12,7 @@ include "VAXRegisterInfo.td"
 include "VAXCallingConv.td"
 include "VAXSchedule.td"
 include "VAXInstrInfo.td"
+include "GISel/VAXRegisterBanks.td"
 
 defm : RemapAllTargetPseudoPointerOperands<GPR>;
 
