@@ -14,6 +14,7 @@
 #ifndef LLVM_LIB_TARGET_VAX_VAXCALLLOWERING_H
 #define LLVM_LIB_TARGET_VAX_VAXCALLLOWERING_H
 
+#include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 
 namespace llvm {
