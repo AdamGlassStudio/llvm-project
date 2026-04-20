@@ -15,7 +15,10 @@
 
 namespace llvm {
 class FunctionPass;
+class InstructionSelector;
 class PassRegistry;
+class VAXRegisterBankInfo;
+class VAXSubtarget;
 class VAXTargetMachine;
 
 /// VAX addressing mode flags for memory operands.
@@ -47,6 +50,11 @@ void initializeVAXFuseCmpBranchPass(PassRegistry &);
 void initializeVAXExpandCmpBranchPass(PassRegistry &);
 void initializeVAXPeepholePass(PassRegistry &);
 void initializeVAXSobAobCombinePass(PassRegistry &);
+
+InstructionSelector *
+createVAXInstructionSelector(const VAXTargetMachine &TM,
+                             const VAXSubtarget &Subtarget,
+                             const VAXRegisterBankInfo &RBI);
 
 } // namespace llvm
 
