@@ -21,8 +21,10 @@
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
+#include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "vax-call-lowering"
@@ -95,6 +97,41 @@ struct VAXIncomingArgHandler : public CallLowering::IncomingValueHandler {
   }
 };
 
+/// Handler for outgoing call arguments: pushes each via PUSHL_r.
+/// CC_VAX assigns MemOffsets in natural (left-to-right) order, but VAX
+/// pushes args right-to-left. We record the ordered vregs here and the
+/// caller emits PUSHL in reverse after assignments are determined.
+struct VAXOutgoingArgHandler : public CallLowering::OutgoingValueHandler {
+  VAXOutgoingArgHandler(MachineIRBuilder &MIRBuilder,
+                        MachineRegisterInfo &MRI)
+      : OutgoingValueHandler(MIRBuilder, MRI) {}
+
+  // Collected (offset, vreg) pairs from CC_VAX assignments.
+  SmallVector<std::pair<int64_t, Register>, 8> StackArgs;
+
+  Register getStackAddress(uint64_t MemSize, int64_t Offset,
+                           MachinePointerInfo &MPO,
+                           ISD::ArgFlagsTy Flags) override {
+    // Return an undef pointer; we don't actually emit stores here, we just
+    // record the vreg so the caller can emit PUSHL_r in reverse.
+    MPO = MachinePointerInfo();
+    return MIRBuilder.buildUndef(LLT::pointer(0, 32)).getReg(0);
+  }
+
+  void assignValueToAddress(Register ValVReg, Register Addr, LLT MemTy,
+                            const MachinePointerInfo &MPO,
+                            const CCValAssign &VA) override {
+    StackArgs.push_back({VA.getLocMemOffset(), ValVReg});
+  }
+
+  void assignValueToReg(Register ValVReg, Register PhysReg,
+                        const CCValAssign &VA,
+                        ISD::ArgFlagsTy Flags) override {
+    // VAX has no register arguments — this shouldn't be called for calls.
+    llvm_unreachable("VAX calls don't use register arguments");
+  }
+};
+
 /// Handler for outgoing return values (copied to physical registers).
 struct VAXOutgoingRetHandler : public CallLowering::OutgoingValueHandler {
   MachineInstrBuilder &MIB;
@@ -121,6 +158,36 @@ struct VAXOutgoingRetHandler : public CallLowering::OutgoingValueHandler {
     Register ExtReg = extendRegister(ValVReg, VA);
     MIRBuilder.buildCopy(PhysReg, ExtReg);
     MIB.addUse(PhysReg, RegState::Implicit);
+  }
+};
+
+/// Handler for incoming call return values (copied from R0/R1 to a vreg).
+struct VAXCallReturnHandler : public CallLowering::IncomingValueHandler {
+  MachineInstrBuilder &MIB;
+
+  VAXCallReturnHandler(MachineIRBuilder &MIRBuilder,
+                       MachineRegisterInfo &MRI, MachineInstrBuilder &MIB)
+      : IncomingValueHandler(MIRBuilder, MRI), MIB(MIB) {}
+
+  Register getStackAddress(uint64_t MemSize, int64_t Offset,
+                           MachinePointerInfo &MPO,
+                           ISD::ArgFlagsTy Flags) override {
+    llvm_unreachable("VAX return values are always in registers");
+  }
+
+  void assignValueToAddress(Register ValVReg, Register Addr, LLT MemTy,
+                            const MachinePointerInfo &MPO,
+                            const CCValAssign &VA) override {
+    llvm_unreachable("VAX return values are always in registers");
+  }
+
+  void assignValueToReg(Register ValVReg, Register PhysReg,
+                        const CCValAssign &VA,
+                        ISD::ArgFlagsTy Flags) override {
+    // Mark the physreg as an implicit def of the CALLS instruction so RA
+    // knows it's live.
+    MIB.addDef(PhysReg, RegState::Implicit);
+    IncomingValueHandler::assignValueToReg(ValVReg, PhysReg, VA, Flags);
   }
 };
 
@@ -238,6 +305,147 @@ bool VAXCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
 
 bool VAXCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
                                 CallLoweringInfo &Info) const {
-  // TODO: Implement CALLS instruction emission.
-  return false; // Fall back to SDAG for all calls.
+  LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: entry\n");
+  MachineFunction &MF = MIRBuilder.getMF();
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  const Function &F = MF.getFunction();
+  const DataLayout &DL = MF.getDataLayout();
+  const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
+
+  // VAX CALLS/RET prevents tail calls.
+  if (Info.IsTailCall)
+    return false;
+
+  // Reject varargs calls for now.
+  if (Info.IsVarArg) {
+    LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: varargs not supported\n");
+    return false;
+  }
+
+  // Reject i64/f64 return (needs custom split handled like formal args).
+  if (!Info.OrigRet.Ty->isVoidTy()) {
+    if (Info.OrigRet.Ty->isIntegerTy(64) || Info.OrigRet.Ty->isDoubleTy()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: i64/f64 return not supported\n");
+      return false;
+    }
+  }
+
+  // Reject i64/f64 arguments for now (same reason).
+  for (const ArgInfo &A : Info.OrigArgs) {
+    if (A.Ty->isIntegerTy(64) || A.Ty->isDoubleTy()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: i64/f64 arg not supported\n");
+      return false;
+    }
+    if (A.Flags[0].isByVal() || A.Flags[0].isSRet()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: byval/sret not supported\n");
+      return false;
+    }
+  }
+
+  // Split original arg infos into legal-typed pieces.
+  SmallVector<ArgInfo, 32> SplitArgInfos;
+  for (const ArgInfo &A : Info.OrigArgs) {
+    splitToValueTypes(A, SplitArgInfos, DL, Info.CallConv);
+  }
+
+  // Assign outgoing args via CC_VAX (all go to stack).
+  SmallVector<CCValAssign, 16> ArgLocs;
+  CCState CCInfo(Info.CallConv, Info.IsVarArg, MF, ArgLocs, F.getContext());
+  OutgoingValueAssigner ArgAssigner(CC_VAX);
+  VAXOutgoingArgHandler ArgHandler(MIRBuilder, MRI);
+  if (!determineAssignments(ArgAssigner, SplitArgInfos, CCInfo)) {
+    LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: arg determineAssignments failed\n");
+    return false;
+  }
+  if (!handleAssignments(ArgHandler, SplitArgInfos, CCInfo, ArgLocs,
+                         MIRBuilder)) {
+    LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: arg handleAssignments failed\n");
+    return false;
+  }
+
+  unsigned StackBytes = CCInfo.getStackSize();
+
+  // Bracket with CALLSEQ_START/END.  We pass 0 to START because PUSHLs
+  // adjust SP themselves; we pass StackBytes to END because CALLS/RET
+  // pops the arg area (tell frame lowering SP moves back).
+  MIRBuilder.buildInstr(VAX::ADJCALLSTACKDOWN)
+      .addImm(0)
+      .addImm(0);
+
+  // Emit PUSHL_r for each stack arg, in reverse order (right-to-left).
+  // ArgHandler collected (offset, vreg) pairs; sort by offset descending
+  // so arg N pushes first and arg 0 last (arg 0 ends up at lowest SP).
+  llvm::sort(ArgHandler.StackArgs,
+             [](const std::pair<int64_t, Register> &A,
+                const std::pair<int64_t, Register> &B) {
+               return A.first > B.first;
+             });
+  const TargetInstrInfo &TII = *MF.getSubtarget().getInstrInfo();
+  const RegisterBankInfo &RBI = *MF.getSubtarget().getRegBankInfo();
+  for (auto &P : ArgHandler.StackArgs) {
+    auto PushMI = MIRBuilder.buildInstr(VAX::PUSHL_r).addUse(P.second);
+    // Constrain the use operand to PUSHL_r's expected class (GPRnoPC).
+    constrainOperandRegClass(MF, *TRI, MRI, TII, RBI, *PushMI,
+                             PushMI->getDesc(), PushMI->getOperand(0), 0);
+  }
+
+  // Emit the CALLS instruction.
+  // CALLS_direct takes (i32imm count, i32imm callee) where callee is a
+  // TargetGlobalAddress or TargetExternalSymbol.
+  // CALLS_indir takes (i32imm count, GPRnoPC callee) for register callees.
+  MachineInstrBuilder CallMI;
+  if (Info.Callee.isReg()) {
+    CallMI = MIRBuilder.buildInstr(VAX::CALLS_indir)
+                 .addImm(StackBytes / 4)
+                 .addUse(Info.Callee.getReg());
+  } else if (Info.Callee.isGlobal()) {
+    CallMI = MIRBuilder.buildInstr(VAX::CALLS_direct)
+                 .addImm(StackBytes / 4)
+                 .addGlobalAddress(Info.Callee.getGlobal(),
+                                   Info.Callee.getOffset(),
+                                   Info.Callee.getTargetFlags());
+  } else if (Info.Callee.isSymbol()) {
+    CallMI = MIRBuilder.buildInstr(VAX::CALLS_direct)
+                 .addImm(StackBytes / 4)
+                 .addExternalSymbol(Info.Callee.getSymbolName(),
+                                    Info.Callee.getTargetFlags());
+  } else {
+    LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: unsupported callee kind\n");
+    return false;
+  }
+  CallMI.addRegMask(TRI->getCallPreservedMask(MF, Info.CallConv));
+
+  // Constrain indirect-call register callee to its expected class.
+  if (Info.Callee.isReg()) {
+    constrainOperandRegClass(MF, *TRI, MRI, TII, RBI, *CallMI,
+                             CallMI->getDesc(), CallMI->getOperand(1), 1);
+  }
+
+  // Copy return value(s) from R0 (and R1 if i64 — not yet supported).
+  if (!Info.OrigRet.Ty->isVoidTy()) {
+    SmallVector<ArgInfo, 4> SplitRetInfos;
+    splitToValueTypes(Info.OrigRet, SplitRetInfos, DL, Info.CallConv);
+
+    SmallVector<CCValAssign, 4> RetLocs;
+    CCState RetCCInfo(Info.CallConv, Info.IsVarArg, MF, RetLocs,
+                      F.getContext());
+    OutgoingValueAssigner RetAssigner(RetCC_VAX);
+    VAXCallReturnHandler RetHandler(MIRBuilder, MRI, CallMI);
+    if (!determineAssignments(RetAssigner, SplitRetInfos, RetCCInfo)) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: ret determineAssignments failed\n");
+      return false;
+    }
+    if (!handleAssignments(RetHandler, SplitRetInfos, RetCCInfo, RetLocs,
+                           MIRBuilder)) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: ret handleAssignments failed\n");
+      return false;
+    }
+  }
+
+  // Close the call sequence: RET will pop StackBytes for us.
+  MIRBuilder.buildInstr(VAX::ADJCALLSTACKUP)
+      .addImm(StackBytes)
+      .addImm(StackBytes);
+
+  return true;
 }

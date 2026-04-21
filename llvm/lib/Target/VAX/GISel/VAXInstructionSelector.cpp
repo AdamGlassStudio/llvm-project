@@ -62,6 +62,9 @@ private:
   bool selectStore(MachineInstr &MI) const;
   bool selectConstant(MachineInstr &MI) const;
   bool selectFrameIndex(MachineInstr &MI) const;
+  bool selectBr(MachineInstr &MI) const;
+  bool selectBrCond(MachineInstr &MI) const;
+  bool selectICmp(MachineInstr &MI) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
   const VAXSubtarget &STI;
@@ -128,6 +131,12 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectConstant(MI);
   case TargetOpcode::G_FRAME_INDEX:
     return selectFrameIndex(MI);
+  case TargetOpcode::G_BR:
+    return selectBr(MI);
+  case TargetOpcode::G_BRCOND:
+    return selectBrCond(MI);
+  case TargetOpcode::G_ICMP:
+    return selectICmp(MI);
   default:
     break;
   }
@@ -318,6 +327,101 @@ bool VAXInstructionSelector::selectFrameIndex(MachineInstr &MI) const {
   // TODO: Standalone frame-index materialization for address-taken locals.
   LLVM_DEBUG(dbgs() << "VAX GISel: standalone G_FRAME_INDEX not supported: "
                     << MI);
+  return false;
+}
+
+// Map an LLVM ICmp predicate to the VAX conditional branch opcode to take
+// when the branch condition evaluates to "true".
+static unsigned getVAXBranchOpcodeForICmp(CmpInst::Predicate Pred) {
+  switch (Pred) {
+  case CmpInst::ICMP_EQ:  return VAX::BEQL;
+  case CmpInst::ICMP_NE:  return VAX::BNEQ;
+  case CmpInst::ICMP_SGT: return VAX::BGTR;
+  case CmpInst::ICMP_SGE: return VAX::BGEQ;
+  case CmpInst::ICMP_SLT: return VAX::BLSS;
+  case CmpInst::ICMP_SLE: return VAX::BLEQ;
+  case CmpInst::ICMP_UGT: return VAX::BGTRU;
+  case CmpInst::ICMP_UGE: return VAX::BGEQU;
+  case CmpInst::ICMP_ULT: return VAX::BLSSU;
+  case CmpInst::ICMP_ULE: return VAX::BLEQU;
+  default: return 0;
+  }
+}
+
+bool VAXInstructionSelector::selectBr(MachineInstr &MI) const {
+  // G_BR $bb → BRW $bb (16-bit PC-relative branch; far branches use JMP).
+  MachineBasicBlock *Target = MI.getOperand(0).getMBB();
+  MachineIRBuilder B(MI);
+  B.buildInstr(VAX::BRW).addMBB(Target);
+  MI.eraseFromParent();
+  return true;
+}
+
+bool VAXInstructionSelector::selectBrCond(MachineInstr &MI) const {
+  // G_BRCOND %cond, $bb
+  // Fold with feeding G_ICMP if single-use: emit CMPL + Bxx.
+  // Otherwise: emit TSTL %cond + BNEQ $bb (cond is the bool {0,1}).
+  Register CondReg = MI.getOperand(0).getReg();
+  MachineBasicBlock *Target = MI.getOperand(1).getMBB();
+
+  MachineInstr *CondDef = MRI->getVRegDef(CondReg);
+  MachineIRBuilder B(MI);
+
+  if (CondDef && CondDef->getOpcode() == TargetOpcode::G_ICMP &&
+      MRI->hasOneNonDBGUse(CondReg)) {
+    CmpInst::Predicate Pred =
+        static_cast<CmpInst::Predicate>(CondDef->getOperand(1).getPredicate());
+    unsigned BrOpc = getVAXBranchOpcodeForICmp(Pred);
+    if (!BrOpc)
+      return false;
+
+    Register LHS = CondDef->getOperand(2).getReg();
+    Register RHS = CondDef->getOperand(3).getReg();
+
+    // Determine compare opcode from LHS type width.
+    LLT LHSTy = MRI->getType(LHS);
+    unsigned CmpOpc;
+    const TargetRegisterClass *OpRC;
+    if (LHSTy.getSizeInBits() == 8) {
+      CmpOpc = VAX::CMPB_rr;
+      OpRC = &VAX::GPRBRegClass;
+    } else if (LHSTy.getSizeInBits() == 16) {
+      CmpOpc = VAX::CMPW_rr;
+      OpRC = &VAX::GPRWRegClass;
+    } else if (LHSTy.getSizeInBits() == 32) {
+      CmpOpc = VAX::CMPL_rr;
+      OpRC = &VAX::GPRIRegClass;
+    } else {
+      return false;
+    }
+
+    auto CmpMI = B.buildInstr(CmpOpc).addUse(LHS).addUse(RHS);
+    RBI.constrainGenericRegister(LHS, *OpRC, *MRI);
+    RBI.constrainGenericRegister(RHS, *OpRC, *MRI);
+    (void)CmpMI;
+
+    B.buildInstr(BrOpc).addMBB(Target);
+
+    // Erase the G_ICMP (now dead) and the G_BRCOND.
+    CondDef->eraseFromParent();
+    MI.eraseFromParent();
+    return true;
+  }
+
+  // Fallback: test the bool reg and BNEQ if non-zero.
+  B.buildInstr(VAX::TSTL).addUse(CondReg);
+  RBI.constrainGenericRegister(CondReg, VAX::GPRIRegClass, *MRI);
+  B.buildInstr(VAX::BNEQ).addMBB(Target);
+  MI.eraseFromParent();
+  return true;
+}
+
+bool VAXInstructionSelector::selectICmp(MachineInstr &MI) const {
+  // Standalone G_ICMP (not folded into a branch).
+  // Emit: CMPx %a, %b ; MOVL $0, %dst ; Bxx 1f ; MOVL $1, %dst ; 1:
+  // For a first cut, we only support the fused case via selectBrCond; reject
+  // here so the verifier flags any remaining standalone G_ICMP.
+  LLVM_DEBUG(dbgs() << "VAX GISel: standalone G_ICMP not supported: " << MI);
   return false;
 }
 

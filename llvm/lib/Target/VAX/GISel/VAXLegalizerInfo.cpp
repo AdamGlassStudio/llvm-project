@@ -106,7 +106,10 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .clampScalar(0, s32, s32);
 
   // Branches.
-  getActionDefinitionsBuilder(G_BRCOND).legalFor({s32});
+  getActionDefinitionsBuilder(G_BRCOND)
+      .legalFor({s32})
+      .widenScalarToNextPow2(0, 8)
+      .clampScalar(0, s32, s32);
   getActionDefinitionsBuilder(G_BR).legalIf([](const LegalityQuery &) {
     return true;
   });
