@@ -159,8 +159,24 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
   }
 
   // Try TableGen-generated patterns first.
-  if (selectImpl(MI, *CoverageInfo))
+  // Snapshot def vregs so we can ensure they end up with a RegClass even when
+  // the tablegen pattern emits `origDef = COPY newvreg` and leaves origDef
+  // with only a RegBank.  The main InstructionSelect loop does not revisit
+  // instructions inserted during selectImpl, so we have to clean up here.
+  SmallVector<Register, 2> DefVRegs;
+  for (const MachineOperand &MO : MI.defs())
+    if (MO.isReg() && MO.getReg().isVirtual())
+      DefVRegs.push_back(MO.getReg());
+  if (selectImpl(MI, *CoverageInfo)) {
+    for (Register R : DefVRegs) {
+      if (!MRI->getRegClassOrNull(R)) {
+        if (const TargetRegisterClass *RC =
+                getRegClassForType(MRI->getType(R)))
+          RBI.constrainGenericRegister(R, *RC, *MRI);
+      }
+    }
     return true;
+  }
 
   // Manual selection for common operations.
   switch (Opc) {

@@ -17,6 +17,7 @@
 #include "VAXCallLowering.h"
 #include "VAXISelLowering.h"
 #include "VAXMachineFunctionInfo.h"
+#include "VAXRegisterInfo.h"
 #include "VAXSubtarget.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
 #include "llvm/CodeGen/CallingConvLower.h"
@@ -188,6 +189,12 @@ struct VAXCallReturnHandler : public CallLowering::IncomingValueHandler {
     // knows it's live.
     MIB.addDef(PhysReg, RegState::Implicit);
     IncomingValueHandler::assignValueToReg(ValVReg, PhysReg, VA, Flags);
+    // The base handler inserted `ValVReg = COPY PhysReg`.  ValVReg currently
+    // has only a RegBank — constrain it to a RegClass so post-isel verification
+    // succeeds even when ValVReg's only uses are other not-yet-selected MIs.
+    MachineRegisterInfo &MRI = MIRBuilder.getMF().getRegInfo();
+    if (MRI.getRegClassOrRegBank(ValVReg).is<const RegisterBank *>())
+      MRI.setRegClass(ValVReg, &VAX::GPRIRegClass);
   }
 };
 
@@ -312,9 +319,9 @@ bool VAXCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
   const DataLayout &DL = MF.getDataLayout();
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
 
-  // VAX CALLS/RET prevents tail calls.
-  if (Info.IsTailCall)
-    return false;
+  // VAX CALLS/RET prevents tail calls — clear the hint and fall through to
+  // a normal call.  Returning false here would make IRTranslator abort.
+  Info.IsTailCall = false;
 
   // Reject varargs calls for now.
   if (Info.IsVarArg) {
