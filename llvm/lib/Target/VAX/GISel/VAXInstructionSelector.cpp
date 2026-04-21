@@ -60,6 +60,7 @@ private:
   bool selectCopy(MachineInstr &MI) const;
   bool selectALU(MachineInstr &MI, unsigned ByteOpc, unsigned WordOpc,
                  unsigned LongOpc) const;
+  bool selectAnd(MachineInstr &MI) const;
   bool selectLoad(MachineInstr &MI) const;
   bool selectStore(MachineInstr &MI) const;
   bool selectConstant(MachineInstr &MI) const;
@@ -184,6 +185,8 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectALU(MI, VAX::ADDB3_rr, VAX::ADDW3_rr, VAX::ADDL3_rr_cc);
   case TargetOpcode::G_SUB:
     return selectALU(MI, VAX::SUBB3_rr, VAX::SUBW3_rr, VAX::SUBL3_rr_cc);
+  case TargetOpcode::G_AND:
+    return selectAnd(MI);
   case TargetOpcode::G_LOAD:
     return selectLoad(MI);
   case TargetOpcode::G_STORE:
@@ -298,6 +301,57 @@ bool VAXInstructionSelector::selectALU(MachineInstr &MI, unsigned ByteOpc,
                             .addReg(Src1Reg)
                             .addReg(Src2Reg);
   (void)NewMI;
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_AND → MCOM + BICL3. VAX has no direct AND; we use BIC (bit clear)
+/// after complementing one operand: a & b = BICL(~b, a).
+bool VAXInstructionSelector::selectAnd(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register Src1Reg = MI.getOperand(1).getReg();
+  Register Src2Reg = MI.getOperand(2).getReg();
+
+  LLT DstTy = MRI->getType(DstReg);
+  unsigned McomOpc, BicRR, BicRI;
+  const TargetRegisterClass *RC;
+  switch (DstTy.getSizeInBits()) {
+  case 8:  McomOpc = VAX::MCOMB;  BicRR = VAX::BICB3_rr; BicRI = VAX::BICB3_ri; RC = &VAX::GPRBRegClass; break;
+  case 16: McomOpc = VAX::MCOMW;  BicRR = VAX::BICW3_rr; BicRI = VAX::BICW3_ri; RC = &VAX::GPRWRegClass; break;
+  case 32: McomOpc = VAX::MCOML;  BicRR = VAX::BICL3_rr; BicRI = VAX::BICL3_ri; RC = &VAX::GPRIRegClass; break;
+  default: return false;
+  }
+
+  RBI.constrainGenericRegister(DstReg, *RC, *MRI);
+
+  // If either source is a constant, fold `a & K` to `BICL3 ~K, a, dst` in one
+  // instruction. Check Src2 first (LLVM's commutative canonicalization puts
+  // constants on the RHS), then Src1.
+  auto TryFoldConst = [&](Register RegC, Register RegA) -> bool {
+    auto Cst = getIConstantVRegValWithLookThrough(RegC, *MRI);
+    if (!Cst)
+      return false;
+    RBI.constrainGenericRegister(RegA, *RC, *MRI);
+    int64_t Mask = ~Cst->Value.getSExtValue();
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(BicRI), DstReg)
+        .addImm(Mask)
+        .addReg(RegA);
+    MI.eraseFromParent();
+    return true;
+  };
+  if (TryFoldConst(Src2Reg, Src1Reg) || TryFoldConst(Src1Reg, Src2Reg))
+    return true;
+
+  RBI.constrainGenericRegister(Src1Reg, *RC, *MRI);
+  RBI.constrainGenericRegister(Src2Reg, *RC, *MRI);
+
+  // General case: `tmp = ~Src2; Dst = BIC(tmp, Src1)`  (= Src1 & ~~Src2).
+  Register TmpReg = MRI->createVirtualRegister(RC);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(McomOpc), TmpReg)
+      .addReg(Src2Reg);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(BicRR), DstReg)
+      .addReg(TmpReg)
+      .addReg(Src1Reg);
   MI.eraseFromParent();
   return true;
 }
