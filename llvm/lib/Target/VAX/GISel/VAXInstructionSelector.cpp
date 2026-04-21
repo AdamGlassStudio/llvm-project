@@ -106,9 +106,27 @@ VAXInstructionSelector::VAXInstructionSelector(const VAXTargetMachine &TM,
 bool VAXInstructionSelector::select(MachineInstr &MI) {
   unsigned Opc = MI.getOpcode();
 
-  if (!isPreISelGenericOpcode(Opc)) {
+  if (!isPreISelGenericOpcode(Opc) || Opc == TargetOpcode::G_PHI) {
+    if (Opc == TargetOpcode::PHI || Opc == TargetOpcode::G_PHI) {
+      Register DefReg = MI.getOperand(0).getReg();
+      LLT DefTy = MRI->getType(DefReg);
+      const TargetRegisterClass *DefRC = getRegClassForType(DefTy);
+      if (!DefRC)
+        return false;
+      MI.setDesc(TII.get(TargetOpcode::PHI));
+      if (!RBI.constrainGenericRegister(DefReg, *DefRC, *MRI))
+        return false;
+      // Constrain each incoming value register too so the PHI joins a single
+      // class. Operands are (def, val0, bb0, val1, bb1, ...).
+      for (unsigned I = 1, E = MI.getNumOperands(); I < E; I += 2) {
+        Register InReg = MI.getOperand(I).getReg();
+        if (!MRI->getRegClassOrNull(InReg))
+          RBI.constrainGenericRegister(InReg, *DefRC, *MRI);
+      }
+      return true;
+    }
     // Target-specific opcode — already selected, just constrain registers.
-    if (Opc == TargetOpcode::PHI || Opc == TargetOpcode::COPY)
+    if (Opc == TargetOpcode::COPY)
       return selectCopy(MI);
     return true;
   }
