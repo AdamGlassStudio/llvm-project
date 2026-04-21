@@ -110,6 +110,13 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .legalFor({s32})
       .widenScalarToNextPow2(0, 8)
       .clampScalar(0, s32, s32);
+
+  // PHIs: VAX has no native vector; scalar s32 / pointer are the only legal
+  // types. Narrower scalars get widened to s32.
+  getActionDefinitionsBuilder(G_PHI)
+      .legalFor({p0, s32})
+      .widenScalarToNextPow2(0, 8)
+      .clampScalar(0, s32, s32);
   getActionDefinitionsBuilder(G_BR).legalIf([](const LegalityQuery &) {
     return true;
   });
