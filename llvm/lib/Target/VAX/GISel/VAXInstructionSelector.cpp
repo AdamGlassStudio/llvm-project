@@ -434,13 +434,76 @@ bool VAXInstructionSelector::selectBrCond(MachineInstr &MI) const {
   return true;
 }
 
+static unsigned getVAXCCForICmp(CmpInst::Predicate Pred) {
+  switch (Pred) {
+  case CmpInst::ICMP_EQ:  return 0;  // EQL
+  case CmpInst::ICMP_NE:  return 1;  // NEQ
+  case CmpInst::ICMP_SGT: return 2;  // GTR
+  case CmpInst::ICMP_SGE: return 3;  // GEQ
+  case CmpInst::ICMP_SLT: return 4;  // LSS
+  case CmpInst::ICMP_SLE: return 5;  // LEQ
+  case CmpInst::ICMP_UGT: return 6;  // GTRU
+  case CmpInst::ICMP_UGE: return 7;  // GEQU
+  case CmpInst::ICMP_ULT: return 8;  // LSSU
+  case CmpInst::ICMP_ULE: return 9;  // LEQU
+  default: return ~0U;
+  }
+}
+
 bool VAXInstructionSelector::selectICmp(MachineInstr &MI) const {
   // Standalone G_ICMP (not folded into a branch).
-  // Emit: CMPx %a, %b ; MOVL $0, %dst ; Bxx 1f ; MOVL $1, %dst ; 1:
-  // For a first cut, we only support the fused case via selectBrCond; reject
-  // here so the verifier flags any remaining standalone G_ICMP.
-  LLVM_DEBUG(dbgs() << "VAX GISel: standalone G_ICMP not supported: " << MI);
-  return false;
+  //
+  // Emit:
+  //   MOVL $1, TrueReg
+  //   CLRL FalseReg
+  //   CMPx LHS, RHS            ; sets PSW
+  //   SELECT_CC_Pseudo dst, TrueReg, FalseReg, cc
+  //
+  // FinalizeISel expands SELECT_CC_Pseudo into a diamond via the target
+  // lowering's EmitInstrWithCustomInserter, adding the conditional Bxx
+  // and PHI. We reuse the SDAG path entirely.
+  Register DstReg = MI.getOperand(0).getReg();
+  CmpInst::Predicate Pred =
+      static_cast<CmpInst::Predicate>(MI.getOperand(1).getPredicate());
+  Register LHS = MI.getOperand(2).getReg();
+  Register RHS = MI.getOperand(3).getReg();
+
+  unsigned CC = getVAXCCForICmp(Pred);
+  if (CC == ~0U)
+    return false;
+
+  LLT LHSTy = MRI->getType(LHS);
+  unsigned CmpOpc;
+  const TargetRegisterClass *OpRC;
+  if (LHSTy.getSizeInBits() == 8) {
+    CmpOpc = VAX::CMPB_rr;
+    OpRC = &VAX::GPRBRegClass;
+  } else if (LHSTy.getSizeInBits() == 16) {
+    CmpOpc = VAX::CMPW_rr;
+    OpRC = &VAX::GPRWRegClass;
+  } else if (LHSTy.getSizeInBits() == 32) {
+    CmpOpc = VAX::CMPL_rr;
+    OpRC = &VAX::GPRIRegClass;
+  } else {
+    return false;
+  }
+
+  MachineIRBuilder B(MI);
+  Register TrueReg = MRI->createVirtualRegister(&VAX::GPRIRegClass);
+  Register FalseReg = MRI->createVirtualRegister(&VAX::GPRIRegClass);
+
+  B.buildInstr(VAX::MOVL_ri, {TrueReg}, {}).addImm(1);
+  B.buildInstr(VAX::CLRL, {FalseReg}, {});
+  B.buildInstr(CmpOpc).addUse(LHS).addUse(RHS);
+  RBI.constrainGenericRegister(LHS, *OpRC, *MRI);
+  RBI.constrainGenericRegister(RHS, *OpRC, *MRI);
+
+  B.buildInstr(VAX::SELECT_CC_Pseudo, {DstReg}, {TrueReg, FalseReg})
+      .addImm(CC);
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+
+  MI.eraseFromParent();
+  return true;
 }
 
 namespace llvm {
