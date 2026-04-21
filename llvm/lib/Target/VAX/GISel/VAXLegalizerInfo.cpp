@@ -70,6 +70,8 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   // Pointer operations.
   getActionDefinitionsBuilder(G_PTR_ADD).legalFor({{p0, s32}});
 
+  getActionDefinitionsBuilder(G_GLOBAL_VALUE).legalFor({p0});
+
   getActionDefinitionsBuilder(G_INTTOPTR).legalFor({{p0, s32}});
   getActionDefinitionsBuilder(G_PTRTOINT).legalFor({{s32, p0}});
 
