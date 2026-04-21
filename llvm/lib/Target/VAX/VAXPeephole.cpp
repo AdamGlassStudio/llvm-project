@@ -662,6 +662,9 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
   static const Alu3Fold Alu3Folds[] = {
     {VAX::ADDL3_rr, VAX::ADDL3_rm, true},
     {VAX::SUBL3_rr, VAX::SUBL3_rm, false},
+    {VAX::MULL3_rr, VAX::MULL3_rm, true},
+    {VAX::BISL3_rr, VAX::BISL3_rm, true},
+    {VAX::XORL3_rr, VAX::XORL3_rm, true},
   };
   for (const auto &F : Alu3Folds) {
     if (UseOpc != F.FromOpc)
