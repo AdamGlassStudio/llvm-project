@@ -21,6 +21,7 @@
 #include "VAXSubtarget.h"
 #include "VAXTargetMachine.h"
 #include "MCTargetDesc/VAXMCTargetDesc.h"
+#include "MCTargetDesc/VAXBaseInfo.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
@@ -92,6 +93,7 @@ private:
   bool selectTruncOrAnyExt(MachineInstr &MI) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
+  const VAXTargetMachine &TM;
   const VAXSubtarget &STI;
   const VAXInstrInfo &TII;
   const VAXRegisterInfo &TRI;
@@ -117,7 +119,7 @@ private:
 VAXInstructionSelector::VAXInstructionSelector(const VAXTargetMachine &TM,
                                                const VAXSubtarget &STI,
                                                const VAXRegisterBankInfo &RBI)
-    : STI(STI), TII(*STI.getInstrInfo()), TRI(*STI.getRegisterInfo()),
+    : TM(TM), STI(STI), TII(*STI.getInstrInfo()), TRI(*STI.getRegisterInfo()),
       RBI(RBI),
 #define GET_GLOBALISEL_PREDICATES_INIT
 #include "VAXGenGlobalISel.inc"
@@ -460,9 +462,12 @@ void VAXInstructionSelector::addMemOperands(MachineInstrBuilder &MIB,
     MIB.addReg(A.BaseReg);
 
   // Displacement operand (either an integer immediate or a global address).
-  if (A.BaseGV)
-    MIB.addGlobalAddress(A.BaseGV, A.BaseGVOffset);
-  else
+  if (A.BaseGV) {
+    unsigned TF = VAXII::MO_NO_FLAG;
+    if (TM.isPositionIndependent() && !A.BaseGV->isDSOLocal())
+      TF = VAXII::MO_GOT;
+    MIB.addGlobalAddress(A.BaseGV, A.BaseGVOffset, TF);
+  } else
     MIB.addImm(A.Disp);
 
   // Index + flags.
@@ -595,20 +600,26 @@ bool VAXInstructionSelector::selectTruncOrAnyExt(MachineInstr &MI) const {
 }
 
 /// Select G_FRAME_INDEX — usually folded into load/store.
-/// If standalone (e.g., address taken), materialize via MOVAB $disp(fp), dst
-/// or via ADDL3 of FP + offset. For now we only support the folded case.
+/// If standalone (address-taken), materialize via the LEA_FI pseudo which
+/// the AsmPrinter expands into "moval disp(%fp), $dst".
 bool VAXInstructionSelector::selectFrameIndex(MachineInstr &MI) const {
   Register DstReg = MI.getOperand(0).getReg();
 
-  // If the frame index was folded into a load/store, it has no remaining uses.
   if (MRI->use_nodbg_empty(DstReg)) {
     MI.eraseFromParent();
     return true;
   }
 
-  LLVM_DEBUG(dbgs() << "VAX GISel: standalone G_FRAME_INDEX not supported: "
-                    << MI);
-  return false;
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  int FI = MI.getOperand(1).getIndex();
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII.get(VAX::LEA_FI), DstReg)
+      .addFrameIndex(FI)
+      .addImm(0)
+      .addReg(0)
+      .addImm(VAXAM::Disp);
+  MI.eraseFromParent();
+  return true;
 }
 
 /// Select G_GLOBAL_VALUE — usually folded into load/store.
@@ -624,8 +635,11 @@ bool VAXInstructionSelector::selectGlobalValue(MachineInstr &MI) const {
   RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
   const GlobalValue *GV = MI.getOperand(1).getGlobal();
   int64_t Offset = MI.getOperand(1).getOffset();
+  unsigned TF = VAXII::MO_NO_FLAG;
+  if (TM.isPositionIndependent() && !GV->isDSOLocal())
+    TF = VAXII::MO_GOT;
   BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(VAX::MOVAL_ga), DstReg)
-      .addGlobalAddress(GV, Offset);
+      .addGlobalAddress(GV, Offset, TF);
   MI.eraseFromParent();
   return true;
 }
