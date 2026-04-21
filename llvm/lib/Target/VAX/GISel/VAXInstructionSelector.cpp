@@ -57,7 +57,8 @@ public:
 private:
   bool selectImpl(MachineInstr &MI, CodeGenCoverage &CoverageInfo) const;
   bool selectCopy(MachineInstr &MI) const;
-  bool selectALU(MachineInstr &MI, unsigned MachOpc) const;
+  bool selectALU(MachineInstr &MI, unsigned ByteOpc, unsigned WordOpc,
+                 unsigned LongOpc) const;
   bool selectLoad(MachineInstr &MI) const;
   bool selectStore(MachineInstr &MI) const;
   bool selectConstant(MachineInstr &MI) const;
@@ -65,6 +66,7 @@ private:
   bool selectBr(MachineInstr &MI) const;
   bool selectBrCond(MachineInstr &MI) const;
   bool selectICmp(MachineInstr &MI) const;
+  bool selectTruncOrAnyExt(MachineInstr &MI) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
   const VAXSubtarget &STI;
@@ -138,9 +140,9 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
   // Manual selection for common operations.
   switch (Opc) {
   case TargetOpcode::G_ADD:
-    return selectALU(MI, VAX::ADDL3_rr_cc);
+    return selectALU(MI, VAX::ADDB3_rr, VAX::ADDW3_rr, VAX::ADDL3_rr_cc);
   case TargetOpcode::G_SUB:
-    return selectALU(MI, VAX::SUBL3_rr_cc);
+    return selectALU(MI, VAX::SUBB3_rr, VAX::SUBW3_rr, VAX::SUBL3_rr_cc);
   case TargetOpcode::G_LOAD:
     return selectLoad(MI);
   case TargetOpcode::G_STORE:
@@ -155,6 +157,9 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectBrCond(MI);
   case TargetOpcode::G_ICMP:
     return selectICmp(MI);
+  case TargetOpcode::G_TRUNC:
+  case TargetOpcode::G_ANYEXT:
+    return selectTruncOrAnyExt(MI);
   default:
     break;
   }
@@ -222,13 +227,23 @@ VAXInstructionSelector::getRegClassForType(LLT Ty) const {
 }
 
 /// Select G_ADD/G_SUB → three-operand ALU instruction (e.g., ADDL3_rr_cc).
-bool VAXInstructionSelector::selectALU(MachineInstr &MI,
-                                       unsigned MachOpc) const {
+bool VAXInstructionSelector::selectALU(MachineInstr &MI, unsigned ByteOpc,
+                                       unsigned WordOpc,
+                                       unsigned LongOpc) const {
   Register DstReg = MI.getOperand(0).getReg();
   Register Src1Reg = MI.getOperand(1).getReg();
   Register Src2Reg = MI.getOperand(2).getReg();
 
-  const TargetRegisterClass *RC = &VAX::GPRIRegClass;
+  LLT DstTy = MRI->getType(DstReg);
+  unsigned MachOpc;
+  const TargetRegisterClass *RC;
+  switch (DstTy.getSizeInBits()) {
+  case 8:  MachOpc = ByteOpc; RC = &VAX::GPRBRegClass; break;
+  case 16: MachOpc = WordOpc; RC = &VAX::GPRWRegClass; break;
+  case 32: MachOpc = LongOpc; RC = &VAX::GPRIRegClass; break;
+  default: return false;
+  }
+
   RBI.constrainGenericRegister(DstReg, *RC, *MRI);
   RBI.constrainGenericRegister(Src1Reg, *RC, *MRI);
   RBI.constrainGenericRegister(Src2Reg, *RC, *MRI);
@@ -242,8 +257,7 @@ bool VAXInstructionSelector::selectALU(MachineInstr &MI,
   return true;
 }
 
-/// Select G_LOAD → MOVL_rm.
-/// If the pointer is a G_FRAME_INDEX, fold it into a displacement load.
+/// Select G_LOAD → MOVB/MOVW/MOVL load with reg-deferred or disp addressing.
 bool VAXInstructionSelector::selectLoad(MachineInstr &MI) const {
   Register DstReg = MI.getOperand(0).getReg();
   Register PtrReg = MI.getOperand(1).getReg();
@@ -251,14 +265,17 @@ bool VAXInstructionSelector::selectLoad(MachineInstr &MI) const {
 
   LLT DstTy = MRI->getType(DstReg);
   unsigned MovOpc;
-  if (DstTy.getSizeInBits() == 32 || DstTy.isPointer())
-    MovOpc = VAX::MOVL_rm;
-  else {
+  const TargetRegisterClass *DstRC;
+  unsigned Size = DstTy.isPointer() ? 32 : DstTy.getSizeInBits();
+  switch (Size) {
+  case 8:  MovOpc = VAX::MOVBload; DstRC = &VAX::GPRBRegClass; break;
+  case 16: MovOpc = VAX::MOVWload; DstRC = &VAX::GPRWRegClass; break;
+  case 32: MovOpc = VAX::MOVL_rm;  DstRC = &VAX::GPRIRegClass; break;
+  default:
     LLVM_DEBUG(dbgs() << "VAX GISel: unsupported load type " << DstTy << "\n");
     return false;
   }
-
-  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(DstReg, *DstRC, *MRI);
 
   // Check if pointer comes from G_FRAME_INDEX — fold into displacement mode.
   MachineInstr *PtrDef = MRI->getVRegDef(PtrReg);
@@ -285,7 +302,7 @@ bool VAXInstructionSelector::selectLoad(MachineInstr &MI) const {
   return true;
 }
 
-/// Select G_STORE → MOVL_mr with register-deferred addressing.
+/// Select G_STORE → MOVB/MOVW/MOVL store.
 bool VAXInstructionSelector::selectStore(MachineInstr &MI) const {
   Register ValReg = MI.getOperand(0).getReg();
   Register PtrReg = MI.getOperand(1).getReg();
@@ -293,18 +310,22 @@ bool VAXInstructionSelector::selectStore(MachineInstr &MI) const {
 
   LLT ValTy = MRI->getType(ValReg);
   unsigned MovOpc;
-  if (ValTy.getSizeInBits() == 32 || ValTy.isPointer())
-    MovOpc = VAX::MOVL_mr;
-  else {
+  const TargetRegisterClass *ValRC;
+  unsigned Size = ValTy.isPointer() ? 32 : ValTy.getSizeInBits();
+  switch (Size) {
+  case 8:  MovOpc = VAX::MOVBstore; ValRC = &VAX::GPRBRegClass; break;
+  case 16: MovOpc = VAX::MOVWstore; ValRC = &VAX::GPRWRegClass; break;
+  case 32: MovOpc = VAX::MOVL_mr;   ValRC = &VAX::GPRIRegClass; break;
+  default:
     LLVM_DEBUG(dbgs() << "VAX GISel: unsupported store type " << ValTy << "\n");
     return false;
   }
 
   // Constrain registers.
-  RBI.constrainGenericRegister(ValReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(ValReg, *ValRC, *MRI);
   RBI.constrainGenericRegister(PtrReg, VAX::GPRIRegClass, *MRI);
 
-  // Build: MOVL_mr $val, $ptr, 0, $noreg, RegDeferred
+  // Build: MOV[B|W|L] $val, $ptr, 0, $noreg, RegDeferred
   BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
           TII.get(MovOpc))
       .addReg(ValReg)           // source
@@ -317,15 +338,51 @@ bool VAXInstructionSelector::selectStore(MachineInstr &MI) const {
   return true;
 }
 
-/// Select G_CONSTANT → MOVL_ri (immediate to register).
+/// Select G_CONSTANT → MOVB/MOVW/MOVL immediate (sized).
 bool VAXInstructionSelector::selectConstant(MachineInstr &MI) const {
   Register DstReg = MI.getOperand(0).getReg();
   int64_t Val = MI.getOperand(1).getCImm()->getSExtValue();
 
-  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  LLT DstTy = MRI->getType(DstReg);
+  unsigned MovOpc;
+  const TargetRegisterClass *RC;
+  switch (DstTy.getSizeInBits()) {
+  case 8:  MovOpc = VAX::MOVBri; RC = &VAX::GPRBRegClass; break;
+  case 16: MovOpc = VAX::MOVWri; RC = &VAX::GPRWRegClass; break;
+  case 32: MovOpc = VAX::MOVL_ri; RC = &VAX::GPRIRegClass; break;
+  default: return false;
+  }
+  RBI.constrainGenericRegister(DstReg, *RC, *MRI);
   BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-          TII.get(VAX::MOVL_ri), DstReg)
+          TII.get(MovOpc), DstReg)
       .addImm(Val);
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_TRUNC and G_ANYEXT.
+///
+/// On VAX, GPRB/GPRW/GPRI share the same physical registers — narrowing or
+/// any-extending is a pure register-class change with no runtime cost. We
+/// lower both to COPYs; the final-pass copy coalescer in InstructionSelect
+/// collapses them away.
+bool VAXInstructionSelector::selectTruncOrAnyExt(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcReg = MI.getOperand(1).getReg();
+  LLT DstTy = MRI->getType(DstReg);
+  LLT SrcTy = MRI->getType(SrcReg);
+
+  const TargetRegisterClass *DstRC = getRegClassForType(DstTy);
+  const TargetRegisterClass *SrcRC = getRegClassForType(SrcTy);
+  if (!DstRC || !SrcRC)
+    return false;
+
+  RBI.constrainGenericRegister(DstReg, *DstRC, *MRI);
+  RBI.constrainGenericRegister(SrcReg, *SrcRC, *MRI);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),
+          DstReg)
+      .addReg(SrcReg);
   MI.eraseFromParent();
   return true;
 }
