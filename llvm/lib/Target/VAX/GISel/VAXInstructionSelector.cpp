@@ -63,6 +63,29 @@ private:
   bool selectStore(MachineInstr &MI) const;
   bool selectConstant(MachineInstr &MI) const;
   bool selectFrameIndex(MachineInstr &MI) const;
+  bool selectGlobalValue(MachineInstr &MI) const;
+  bool selectPtrAdd(MachineInstr &MI) const;
+
+  /// Decompose a pointer vreg into VAX memory-operand fields
+  /// (Base, Disp, Index, Flags). Mirrors VAXDAGToDAGISel::SelectVAXAddr.
+  /// If AllowIndexScale != 0, also matches G_PTR_ADD(base, G_SHL(idx, log2scale))
+  /// for indexed addressing of size-matched loads/stores.
+  struct MemAddr {
+    // Exactly one of BaseReg / BaseFI / BaseGlobal is set. BaseReg==0 + no
+    // FI/Global means "no base register" (used with an absolute symbol).
+    Register BaseReg;       // 0 = NoReg
+    bool HasBaseFI = false;
+    int BaseFI = 0;
+    const GlobalValue *BaseGV = nullptr;
+    int64_t BaseGVOffset = 0;
+    int64_t Disp = 0;
+    Register IndexReg;      // 0 = NoReg
+    unsigned Flags = VAXAM::Disp;
+  };
+  bool selectAddr(Register Ptr, MemAddr &Out,
+                  unsigned IndexScaleLog2 = 0) const;
+  // Append the 4 memory-operand fields to MIB.
+  void addMemOperands(MachineInstrBuilder &MIB, const MemAddr &A) const;
   bool selectBr(MachineInstr &MI) const;
   bool selectBrCond(MachineInstr &MI) const;
   bool selectICmp(MachineInstr &MI) const;
@@ -151,6 +174,10 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectConstant(MI);
   case TargetOpcode::G_FRAME_INDEX:
     return selectFrameIndex(MI);
+  case TargetOpcode::G_GLOBAL_VALUE:
+    return selectGlobalValue(MI);
+  case TargetOpcode::G_PTR_ADD:
+    return selectPtrAdd(MI);
   case TargetOpcode::G_BR:
     return selectBr(MI);
   case TargetOpcode::G_BRCOND:
@@ -257,7 +284,193 @@ bool VAXInstructionSelector::selectALU(MachineInstr &MI, unsigned ByteOpc,
   return true;
 }
 
-/// Select G_LOAD → MOVB/MOVW/MOVL load with reg-deferred or disp addressing.
+/// Decompose a pointer vreg into (Base, Disp, Index, Flags) VAX memory-operand
+/// fields. Mirrors the SDAG-side SelectVAXAddr closely.
+bool VAXInstructionSelector::selectAddr(Register Ptr, MemAddr &Out,
+                                        unsigned IndexScaleLog2) const {
+  Out = MemAddr{};
+
+  // Walk through no-op COPYs inserted by IRTranslator/legalizer.
+  auto skipCopies = [&](Register R) -> Register {
+    while (R.isVirtual()) {
+      MachineInstr *D = MRI->getVRegDef(R);
+      if (!D || D->getOpcode() != TargetOpcode::COPY) break;
+      Register Src = D->getOperand(1).getReg();
+      if (!Src.isVirtual()) break;
+      R = Src;
+    }
+    return R;
+  };
+  auto defOf = [&](Register R) -> MachineInstr * {
+    return MRI->getVRegDef(skipCopies(R));
+  };
+
+  Ptr = skipCopies(Ptr);
+  MachineInstr *Def = MRI->getVRegDef(Ptr);
+
+  // G_FRAME_INDEX: stack slot, zero displacement.
+  if (Def && Def->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+    Out.HasBaseFI = true;
+    Out.BaseFI = Def->getOperand(1).getIndex();
+    Out.Flags = VAXAM::Disp;
+    return true;
+  }
+
+  // G_GLOBAL_VALUE: base=NoReg, disp=symbol. PC-rel encoding in MC layer.
+  if (Def && Def->getOpcode() == TargetOpcode::G_GLOBAL_VALUE) {
+    Out.BaseGV = Def->getOperand(1).getGlobal();
+    Out.BaseGVOffset = Def->getOperand(1).getOffset();
+    Out.Flags = VAXAM::Disp;
+    return true;
+  }
+
+  // Helper: match "scaled index" producer — either G_SHL(idx, log2scale) or
+  // G_MUL(idx, scale). Returns the index vreg on success.
+  auto matchScaledIndex = [&](Register R) -> Register {
+    if (IndexScaleLog2 == 0) return Register();
+    MachineInstr *SD = defOf(R);
+    if (!SD) return Register();
+    if (SD->getOpcode() == TargetOpcode::G_SHL) {
+      MachineInstr *A = defOf(SD->getOperand(2).getReg());
+      if (A && A->getOpcode() == TargetOpcode::G_CONSTANT &&
+          A->getOperand(1).getCImm()->getZExtValue() == IndexScaleLog2)
+        return SD->getOperand(1).getReg();
+    } else if (SD->getOpcode() == TargetOpcode::G_MUL) {
+      MachineInstr *A = defOf(SD->getOperand(2).getReg());
+      if (A && A->getOpcode() == TargetOpcode::G_CONSTANT &&
+          A->getOperand(1).getCImm()->getZExtValue() ==
+              (1ull << IndexScaleLog2))
+        return SD->getOperand(1).getReg();
+    }
+    return Register();
+  };
+
+  // G_PTR_ADD — try indexed mode first (when a scale is supplied),
+  // then fall back to base+disp.
+  if (Def && Def->getOpcode() == TargetOpcode::G_PTR_ADD) {
+    Register LHS = Def->getOperand(1).getReg();
+    Register RHS = Def->getOperand(2).getReg();
+
+    // Indexed: G_PTR_ADD(base, G_SHL(idx,k)) or G_PTR_ADD(base, G_MUL(idx,s)).
+    for (int Swap = 0; Swap < 2 && IndexScaleLog2 != 0; ++Swap) {
+      Register MaybeIdxChain = Swap ? LHS : RHS;
+      Register MaybeBaseReg  = Swap ? RHS : LHS;
+      Register IdxReg = matchScaledIndex(MaybeIdxChain);
+      if (!IdxReg) continue;
+      Out.IndexReg = IdxReg;
+      // Decompose base: FI, G_GLOBAL_VALUE, G_PTR_ADD(..., const), bare reg.
+      MachineInstr *BaseDef = defOf(MaybeBaseReg);
+      if (BaseDef && BaseDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+        Out.HasBaseFI = true;
+        Out.BaseFI = BaseDef->getOperand(1).getIndex();
+      } else if (BaseDef &&
+                 BaseDef->getOpcode() == TargetOpcode::G_GLOBAL_VALUE) {
+        Out.BaseGV = BaseDef->getOperand(1).getGlobal();
+        Out.BaseGVOffset = BaseDef->getOperand(1).getOffset();
+      } else if (BaseDef &&
+                 BaseDef->getOpcode() == TargetOpcode::G_PTR_ADD) {
+        Register BLHS = BaseDef->getOperand(1).getReg();
+        Register BRHS = BaseDef->getOperand(2).getReg();
+        MachineInstr *CDef = defOf(BRHS);
+        MachineInstr *FIDef = defOf(BLHS);
+        if (CDef && CDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+          Out.Disp = CDef->getOperand(1).getCImm()->getSExtValue();
+          if (FIDef && FIDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+            Out.HasBaseFI = true;
+            Out.BaseFI = FIDef->getOperand(1).getIndex();
+          } else {
+            Out.BaseReg = BLHS;
+          }
+        } else {
+          Out.BaseReg = MaybeBaseReg;
+        }
+      } else {
+        Out.BaseReg = MaybeBaseReg;
+      }
+      Out.Flags = VAXAM::Disp;
+      return true;
+    }
+
+    // Base + constant displacement.
+    MachineInstr *RHSDef = defOf(RHS);
+    if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+      int64_t C = RHSDef->getOperand(1).getCImm()->getSExtValue();
+      MachineInstr *LHSDef = defOf(LHS);
+      if (LHSDef && LHSDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+        Out.HasBaseFI = true;
+        Out.BaseFI = LHSDef->getOperand(1).getIndex();
+        Out.Disp = C;
+        Out.Flags = VAXAM::Disp;
+        return true;
+      }
+      if (LHSDef && LHSDef->getOpcode() == TargetOpcode::G_GLOBAL_VALUE) {
+        Out.BaseGV = LHSDef->getOperand(1).getGlobal();
+        Out.BaseGVOffset = LHSDef->getOperand(1).getOffset() + C;
+        Out.Flags = VAXAM::Disp;
+        return true;
+      }
+      // Nested: G_PTR_ADD(G_PTR_ADD(base, scaled_idx), const) — fold the
+      // outer const onto an indexed addressing mode.
+      if (LHSDef && LHSDef->getOpcode() == TargetOpcode::G_PTR_ADD &&
+          IndexScaleLog2 != 0) {
+        Register ILHS = LHSDef->getOperand(1).getReg();
+        Register IRHS = LHSDef->getOperand(2).getReg();
+        for (int Swap = 0; Swap < 2; ++Swap) {
+          Register MaybeIdx  = Swap ? ILHS : IRHS;
+          Register MaybeBase = Swap ? IRHS : ILHS;
+          Register IdxReg = matchScaledIndex(MaybeIdx);
+          if (!IdxReg) continue;
+          Out.IndexReg = IdxReg;
+          Out.Disp = C;
+          MachineInstr *BD = defOf(MaybeBase);
+          if (BD && BD->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
+            Out.HasBaseFI = true;
+            Out.BaseFI = BD->getOperand(1).getIndex();
+          } else if (BD && BD->getOpcode() == TargetOpcode::G_GLOBAL_VALUE) {
+            Out.BaseGV = BD->getOperand(1).getGlobal();
+            Out.BaseGVOffset = BD->getOperand(1).getOffset();
+          } else {
+            Out.BaseReg = MaybeBase;
+          }
+          Out.Flags = VAXAM::Disp;
+          return true;
+        }
+      }
+      Out.BaseReg = LHS;
+      Out.Disp = C;
+      Out.Flags = VAXAM::Disp;
+      return true;
+    }
+  }
+
+  // Bare register: register-deferred mode.
+  Out.BaseReg = Ptr;
+  Out.Flags = VAXAM::RegDeferred;
+  return true;
+}
+
+void VAXInstructionSelector::addMemOperands(MachineInstrBuilder &MIB,
+                                            const MemAddr &A) const {
+  // Base operand.
+  if (A.HasBaseFI)
+    MIB.addFrameIndex(A.BaseFI);
+  else if (A.BaseGV)
+    MIB.addReg(0); // base=NoReg when using a global as the displacement
+  else
+    MIB.addReg(A.BaseReg);
+
+  // Displacement operand (either an integer immediate or a global address).
+  if (A.BaseGV)
+    MIB.addGlobalAddress(A.BaseGV, A.BaseGVOffset);
+  else
+    MIB.addImm(A.Disp);
+
+  // Index + flags.
+  MIB.addReg(A.IndexReg);
+  MIB.addImm(A.Flags);
+}
+
+/// Select G_LOAD → MOVB/MOVW/MOVL load with full addressing-mode folding.
 bool VAXInstructionSelector::selectLoad(MachineInstr &MI) const {
   Register DstReg = MI.getOperand(0).getReg();
   Register PtrReg = MI.getOperand(1).getReg();
@@ -266,43 +479,35 @@ bool VAXInstructionSelector::selectLoad(MachineInstr &MI) const {
   LLT DstTy = MRI->getType(DstReg);
   unsigned MovOpc;
   const TargetRegisterClass *DstRC;
+  unsigned IndexScaleLog2;
   unsigned Size = DstTy.isPointer() ? 32 : DstTy.getSizeInBits();
   switch (Size) {
-  case 8:  MovOpc = VAX::MOVBload; DstRC = &VAX::GPRBRegClass; break;
-  case 16: MovOpc = VAX::MOVWload; DstRC = &VAX::GPRWRegClass; break;
-  case 32: MovOpc = VAX::MOVL_rm;  DstRC = &VAX::GPRIRegClass; break;
+  case 8:  MovOpc = VAX::MOVBload; DstRC = &VAX::GPRBRegClass; IndexScaleLog2 = 0; break;
+  case 16: MovOpc = VAX::MOVWload; DstRC = &VAX::GPRWRegClass; IndexScaleLog2 = 1; break;
+  case 32: MovOpc = VAX::MOVL_rm;  DstRC = &VAX::GPRIRegClass; IndexScaleLog2 = 2; break;
   default:
     LLVM_DEBUG(dbgs() << "VAX GISel: unsupported load type " << DstTy << "\n");
     return false;
   }
   RBI.constrainGenericRegister(DstReg, *DstRC, *MRI);
 
-  // Check if pointer comes from G_FRAME_INDEX — fold into displacement mode.
-  MachineInstr *PtrDef = MRI->getVRegDef(PtrReg);
-  if (PtrDef && PtrDef->getOpcode() == TargetOpcode::G_FRAME_INDEX) {
-    int FI = PtrDef->getOperand(1).getIndex();
-    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-            TII.get(MovOpc), DstReg)
-        .addFrameIndex(FI)        // base (frame index, resolved by PEI)
-        .addImm(0)                // displacement (PEI adds FP offset)
-        .addReg(0)                // index (noreg)
-        .addImm(VAXAM::Disp)
-        .addMemOperand(MMO);
-  } else {
-    RBI.constrainGenericRegister(PtrReg, VAX::GPRIRegClass, *MRI);
-    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-            TII.get(MovOpc), DstReg)
-        .addReg(PtrReg)           // base
-        .addImm(0)                // displacement
-        .addReg(0)                // index (noreg)
-        .addImm(VAXAM::RegDeferred)
-        .addMemOperand(MMO);
-  }
+  MemAddr A;
+  if (!selectAddr(PtrReg, A, IndexScaleLog2))
+    return false;
+  if (A.BaseReg)
+    RBI.constrainGenericRegister(A.BaseReg, VAX::GPRIRegClass, *MRI);
+  if (A.IndexReg)
+    RBI.constrainGenericRegister(A.IndexReg, VAX::GPRIRegClass, *MRI);
+
+  auto MIB = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                     TII.get(MovOpc), DstReg);
+  addMemOperands(MIB, A);
+  MIB.addMemOperand(MMO);
   MI.eraseFromParent();
   return true;
 }
 
-/// Select G_STORE → MOVB/MOVW/MOVL store.
+/// Select G_STORE → MOVB/MOVW/MOVL store with full addressing-mode folding.
 bool VAXInstructionSelector::selectStore(MachineInstr &MI) const {
   Register ValReg = MI.getOperand(0).getReg();
   Register PtrReg = MI.getOperand(1).getReg();
@@ -311,29 +516,31 @@ bool VAXInstructionSelector::selectStore(MachineInstr &MI) const {
   LLT ValTy = MRI->getType(ValReg);
   unsigned MovOpc;
   const TargetRegisterClass *ValRC;
+  unsigned IndexScaleLog2;
   unsigned Size = ValTy.isPointer() ? 32 : ValTy.getSizeInBits();
   switch (Size) {
-  case 8:  MovOpc = VAX::MOVBstore; ValRC = &VAX::GPRBRegClass; break;
-  case 16: MovOpc = VAX::MOVWstore; ValRC = &VAX::GPRWRegClass; break;
-  case 32: MovOpc = VAX::MOVL_mr;   ValRC = &VAX::GPRIRegClass; break;
+  case 8:  MovOpc = VAX::MOVBstore; ValRC = &VAX::GPRBRegClass; IndexScaleLog2 = 0; break;
+  case 16: MovOpc = VAX::MOVWstore; ValRC = &VAX::GPRWRegClass; IndexScaleLog2 = 1; break;
+  case 32: MovOpc = VAX::MOVL_mr;   ValRC = &VAX::GPRIRegClass; IndexScaleLog2 = 2; break;
   default:
     LLVM_DEBUG(dbgs() << "VAX GISel: unsupported store type " << ValTy << "\n");
     return false;
   }
-
-  // Constrain registers.
   RBI.constrainGenericRegister(ValReg, *ValRC, *MRI);
-  RBI.constrainGenericRegister(PtrReg, VAX::GPRIRegClass, *MRI);
 
-  // Build: MOV[B|W|L] $val, $ptr, 0, $noreg, RegDeferred
-  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
-          TII.get(MovOpc))
-      .addReg(ValReg)           // source
-      .addReg(PtrReg)           // base
-      .addImm(0)                // displacement
-      .addReg(0)                // index (noreg)
-      .addImm(VAXAM::RegDeferred)
-      .addMemOperand(MMO);
+  MemAddr A;
+  if (!selectAddr(PtrReg, A, IndexScaleLog2))
+    return false;
+  if (A.BaseReg)
+    RBI.constrainGenericRegister(A.BaseReg, VAX::GPRIRegClass, *MRI);
+  if (A.IndexReg)
+    RBI.constrainGenericRegister(A.IndexReg, VAX::GPRIRegClass, *MRI);
+
+  // MOVx_mr operand order: value, base, disp, index, flags.
+  auto MIB = BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(MovOpc))
+                 .addReg(ValReg);
+  addMemOperands(MIB, A);
+  MIB.addMemOperand(MMO);
   MI.eraseFromParent();
   return true;
 }
@@ -388,8 +595,8 @@ bool VAXInstructionSelector::selectTruncOrAnyExt(MachineInstr &MI) const {
 }
 
 /// Select G_FRAME_INDEX — usually folded into load/store.
-/// If standalone (e.g., address taken), materialize via ADDL3 of base + offset.
-/// If dead (folded into load/store), just erase.
+/// If standalone (e.g., address taken), materialize via MOVAB $disp(fp), dst
+/// or via ADDL3 of FP + offset. For now we only support the folded case.
 bool VAXInstructionSelector::selectFrameIndex(MachineInstr &MI) const {
   Register DstReg = MI.getOperand(0).getReg();
 
@@ -399,10 +606,63 @@ bool VAXInstructionSelector::selectFrameIndex(MachineInstr &MI) const {
     return true;
   }
 
-  // TODO: Standalone frame-index materialization for address-taken locals.
   LLVM_DEBUG(dbgs() << "VAX GISel: standalone G_FRAME_INDEX not supported: "
                     << MI);
   return false;
+}
+
+/// Select G_GLOBAL_VALUE — usually folded into load/store.
+/// If standalone (address-of), materialize via MOVAL_ga.
+bool VAXInstructionSelector::selectGlobalValue(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+
+  if (MRI->use_nodbg_empty(DstReg)) {
+    MI.eraseFromParent();
+    return true;
+  }
+
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  const GlobalValue *GV = MI.getOperand(1).getGlobal();
+  int64_t Offset = MI.getOperand(1).getOffset();
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(VAX::MOVAL_ga), DstReg)
+      .addGlobalAddress(GV, Offset);
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_PTR_ADD — usually folded into a load/store.
+/// If standalone, emit ADDL3 (reg+imm or reg+reg).
+bool VAXInstructionSelector::selectPtrAdd(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+
+  if (MRI->use_nodbg_empty(DstReg)) {
+    MI.eraseFromParent();
+    return true;
+  }
+
+  Register LHS = MI.getOperand(1).getReg();
+  Register RHS = MI.getOperand(2).getReg();
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(LHS, VAX::GPRIRegClass, *MRI);
+
+  MachineInstr *RHSDef = MRI->getVRegDef(RHS);
+  if (RHSDef && RHSDef->getOpcode() == TargetOpcode::G_CONSTANT) {
+    int64_t C = RHSDef->getOperand(1).getCImm()->getSExtValue();
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+            TII.get(VAX::ADDL3_ri_cc), DstReg)
+        .addImm(C)
+        .addReg(LHS);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  RBI.constrainGenericRegister(RHS, VAX::GPRIRegClass, *MRI);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII.get(VAX::ADDL3_rr_cc), DstReg)
+      .addReg(LHS)
+      .addReg(RHS);
+  MI.eraseFromParent();
+  return true;
 }
 
 // Map an LLVM ICmp predicate to the VAX conditional branch opcode to take
