@@ -95,6 +95,11 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   getActionDefinitionsBuilder(G_ZEXT)
       .legalFor({{s16, s8}, {s32, s8}, {s32, s16}})
       .clampScalar(0, s16, s32);
+  // ANYEXT behaves like ZEXT on VAX (upper bits don't matter; MOVZxL is fine
+  // and often what the IR translator produces around narrow returns/args).
+  getActionDefinitionsBuilder(G_ANYEXT)
+      .legalFor({{s16, s8}, {s32, s8}, {s32, s16}})
+      .clampScalar(0, s16, s32);
 
   // Truncate.
   getActionDefinitionsBuilder(G_TRUNC)
