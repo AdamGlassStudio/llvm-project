@@ -61,6 +61,7 @@ private:
   bool selectALU(MachineInstr &MI, unsigned ByteOpc, unsigned WordOpc,
                  unsigned LongOpc) const;
   bool selectAnd(MachineInstr &MI) const;
+  bool selectShr(MachineInstr &MI, bool IsArithmetic) const;
   bool selectLoad(MachineInstr &MI) const;
   bool selectStore(MachineInstr &MI) const;
   bool selectConstant(MachineInstr &MI) const;
@@ -187,6 +188,10 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectALU(MI, VAX::SUBB3_rr, VAX::SUBW3_rr, VAX::SUBL3_rr_cc);
   case TargetOpcode::G_AND:
     return selectAnd(MI);
+  case TargetOpcode::G_ASHR:
+    return selectShr(MI, /*IsArithmetic=*/true);
+  case TargetOpcode::G_LSHR:
+    return selectShr(MI, /*IsArithmetic=*/false);
   case TargetOpcode::G_LOAD:
     return selectLoad(MI);
   case TargetOpcode::G_STORE:
@@ -332,6 +337,27 @@ bool VAXInstructionSelector::selectAnd(MachineInstr &MI) const {
     if (!Cst)
       return false;
     RBI.constrainGenericRegister(RegA, *RC, *MRI);
+    // For s32 AND with 0xFF or 0xFFFF, emit MOVZBL/MOVZWL via a subreg
+    // extract — one instruction instead of BICL3 $-256 (two, because the
+    // sign-extended long immediate can't share a 2-op form).
+    if (DstTy.getSizeInBits() == 32) {
+      uint64_t K = Cst->Value.getZExtValue();
+      if (K == 0xFFu || K == 0xFFFFu) {
+        unsigned SubIdx = (K == 0xFFu) ? VAX::sub_8lo : VAX::sub_16lo;
+        const TargetRegisterClass *SubRC =
+            (K == 0xFFu) ? &VAX::GPRBRegClass : &VAX::GPRWRegClass;
+        unsigned MovzOpc = (K == 0xFFu) ? VAX::MOVZBL_rr : VAX::MOVZWL_rr;
+        Register SubReg = MRI->createVirtualRegister(SubRC);
+        BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+                TII.get(TargetOpcode::COPY), SubReg)
+            .addReg(RegA, RegState::NoFlags, SubIdx);
+        BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(MovzOpc),
+                DstReg)
+            .addReg(SubReg);
+        MI.eraseFromParent();
+        return true;
+      }
+    }
     int64_t Mask = ~Cst->Value.getSExtValue();
     BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(BicRI), DstReg)
         .addImm(Mask)
@@ -345,13 +371,120 @@ bool VAXInstructionSelector::selectAnd(MachineInstr &MI) const {
   RBI.constrainGenericRegister(Src1Reg, *RC, *MRI);
   RBI.constrainGenericRegister(Src2Reg, *RC, *MRI);
 
-  // General case: `tmp = ~Src2; Dst = BIC(tmp, Src1)`  (= Src1 & ~~Src2).
+  // General case: `tmp = ~X; Dst = BIC(tmp, Y)`  (= Y & ~~X = X & Y).
+  //
+  // For peephole friendliness we want the load-fed operand to sit on the
+  // BIC3 source side AND be immediately adjacent to BIC3, so
+  // MOVL_rm + BICL3_rr folds to BICL3_rm. The MCOM of the other side is
+  // inserted before the load so that it doesn't split the load/BIC3 pair.
+  //
+  // Detect "load side" as the operand whose def is a load-bearing machine
+  // instruction immediately preceding the G_AND MI (where the peephole
+  // would see MOVL_rm + BIC3 as a fold candidate).
+  MachineBasicBlock &MBB = *MI.getParent();
+  auto isAdjacentLoadDef = [&](Register R) -> MachineInstr * {
+    MachineInstr *Def = MRI->getVRegDef(R);
+    if (!Def || Def->getParent() != &MBB || !Def->mayLoad())
+      return nullptr;
+    auto It = MachineBasicBlock::iterator(Def);
+    auto MIIt = MachineBasicBlock::iterator(&MI);
+    // Def must be the immediately preceding non-debug instr.
+    if (std::next(It) == MIIt)
+      return Def;
+    return nullptr;
+  };
+  MachineInstr *LoadDef = isAdjacentLoadDef(Src1Reg);
+  Register BicSrc = Src1Reg;
+  Register McomSrc = Src2Reg;
+  if (!LoadDef) {
+    LoadDef = isAdjacentLoadDef(Src2Reg);
+    if (LoadDef) {
+      BicSrc = Src2Reg;
+      McomSrc = Src1Reg;
+    }
+  }
+
   Register TmpReg = MRI->createVirtualRegister(RC);
-  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(McomOpc), TmpReg)
-      .addReg(Src2Reg);
-  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(BicRR), DstReg)
+  MachineBasicBlock::iterator InsertPt =
+      LoadDef ? MachineBasicBlock::iterator(LoadDef)
+              : MachineBasicBlock::iterator(&MI);
+  BuildMI(MBB, InsertPt, MI.getDebugLoc(), TII.get(McomOpc), TmpReg)
+      .addReg(McomSrc);
+  BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(BicRR), DstReg)
       .addReg(TmpReg)
-      .addReg(Src1Reg);
+      .addReg(BicSrc);
+  MI.eraseFromParent();
+  return true;
+}
+
+// VAX has only ASHL (arithmetic shift long). Right shifts are synthesized:
+//   SRA = ASHL with negated count (sign-propagating on VAX).
+//   SRL = EXTZV (zero-extract bitfield from pos=cnt, size=32-cnt).
+// Legalizer forces both operands to s32, so no byte/word dispatch is needed.
+bool VAXInstructionSelector::selectShr(MachineInstr &MI,
+                                       bool IsArithmetic) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcReg = MI.getOperand(1).getReg();
+  Register CntReg = MI.getOperand(2).getReg();
+
+  const TargetRegisterClass *RC = &VAX::GPRIRegClass;
+  RBI.constrainGenericRegister(DstReg, *RC, *MRI);
+  RBI.constrainGenericRegister(SrcReg, *RC, *MRI);
+
+  auto CntCst = getIConstantVRegValWithLookThrough(CntReg, *MRI);
+
+  MachineBasicBlock &MBB = *MI.getParent();
+  const DebugLoc &DL = MI.getDebugLoc();
+
+  if (IsArithmetic) {
+    if (CntCst) {
+      int64_t N = CntCst->Value.getSExtValue() & 31;
+      if (N == 0) {
+        BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg)
+            .addReg(SrcReg);
+      } else {
+        // ASHL with negated imm count → arithmetic right shift.
+        BuildMI(MBB, MI, DL, TII.get(VAX::ASHL_ir_sra), DstReg)
+            .addImm(-N)
+            .addReg(SrcReg);
+      }
+      MI.eraseFromParent();
+      return true;
+    }
+    RBI.constrainGenericRegister(CntReg, *RC, *MRI);
+    Register NegCnt = MRI->createVirtualRegister(RC);
+    BuildMI(MBB, MI, DL, TII.get(VAX::MNEGL), NegCnt).addReg(CntReg);
+    BuildMI(MBB, MI, DL, TII.get(VAX::ASHL_rr_sra), DstReg)
+        .addReg(NegCnt)
+        .addReg(SrcReg);
+    MI.eraseFromParent();
+    return true;
+  }
+
+  // Logical right shift (SRL) via EXTZV.
+  if (CntCst) {
+    int64_t N = CntCst->Value.getZExtValue() & 31;
+    if (N == 0) {
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), DstReg).addReg(SrcReg);
+    } else {
+      BuildMI(MBB, MI, DL, TII.get(VAX::EXTZV_iir), DstReg)
+          .addImm(N)
+          .addImm(32 - N)
+          .addReg(SrcReg);
+    }
+    MI.eraseFromParent();
+    return true;
+  }
+  RBI.constrainGenericRegister(CntReg, *RC, *MRI);
+  // size = 32 - cnt
+  Register SizeReg = MRI->createVirtualRegister(RC);
+  BuildMI(MBB, MI, DL, TII.get(VAX::SUBL3_ir), SizeReg)
+      .addReg(CntReg)
+      .addImm(32);
+  BuildMI(MBB, MI, DL, TII.get(VAX::EXTZV_rrr), DstReg)
+      .addReg(CntReg)
+      .addReg(SizeReg)
+      .addReg(SrcReg);
   MI.eraseFromParent();
   return true;
 }
