@@ -763,6 +763,93 @@ bool VAXPeephole::tryFoldReload(MachineBasicBlock &MBB,
     return true;
   }
 
+  // --- Pattern 7: BICL3_rr → BICL3_rm ---
+  // BICL3 operand layout is opposite to the Alu3Folds family: memory is the
+  // second source, not the first.
+  //   BICL3_rr: [0]=dst, [1]=mask_reg, [2]=src_reg
+  //   BICL3_rm: [0]=dst, [1]=mask_reg, [2..5]=VAXMemOp_src
+  // Fold only when the reload feeds src (operand 2). The mask side (operand 1)
+  // must stay in a register.
+  if (UseOpc == VAX::BICL3_rr &&
+      Use.getOperand(2).getReg() == RR &&
+      Use.getOperand(2).isKill()) {
+    Register Dst = Use.getOperand(0).getReg();
+    Register Mask = Use.getOperand(1).getReg();
+    if (Mask == RR)
+      return false;
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::BICL3_rm));
+    MIB.addDef(Dst);
+    MIB.addReg(Mask);
+    addMemOps(MIB, Reload, MemStart);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+BICL3_rr→BICL3_rm "
+                      << Reload << "  + " << Use);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 8: MCOML → MCOML_m ---
+  // MCOML: [0]=dst, [1]=src_reg; MCOML_m: [0]=dst, [1..4]=VAXMemOp_src.
+  // Fold when the reload feeds the unary source.
+  if (UseOpc == VAX::MCOML &&
+      Use.getOperand(1).getReg() == RR &&
+      Use.getOperand(1).isKill()) {
+    Register Dst = Use.getOperand(0).getReg();
+    MachineInstrBuilder MIB =
+        BuildMI(MBB, II, Use.getDebugLoc(), TII->get(VAX::MCOML_m));
+    MIB.addDef(Dst);
+    addMemOps(MIB, Reload, MemStart);
+    MIB.cloneMemRefs(Reload);
+    LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+MCOML→MCOML_m "
+                      << Reload << "  + " << Use);
+    auto Erase1 = II;
+    II = std::next(Next);
+    Erase1->eraseFromParent();
+    Next->eraseFromParent();
+    return true;
+  }
+
+  // --- Pattern 9: MOVZBL_rr / MOVZWL_rr → MOVZBL_rm / MOVZWL_rm ---
+  // Fold `movl <mem>, %t; movzbl %t, %d` into `movzbl <mem>, %d` (and word).
+  // MOVZBL_rr takes the byte subreg (GPRB), so the explicit operand is
+  // %bN not %rN — compare via TRI subreg aliasing and look for the implicit
+  // killed full-reg use to confirm safety.
+  if (UseOpc == VAX::MOVZBL_rr || UseOpc == VAX::MOVZWL_rr) {
+    const TargetRegisterInfo *TRI =
+        MBB.getParent()->getSubtarget().getRegisterInfo();
+    Register SrcOp = Use.getOperand(1).getReg();
+    bool Matches = (SrcOp == RR) || TRI->isSubRegister(RR, SrcOp);
+    // Require that the full reg RR is killed by this use.
+    bool RRKilled = false;
+    for (const MachineOperand &MO : Use.operands()) {
+      if (MO.isReg() && MO.getReg() == RR && MO.isKill()) {
+        RRKilled = true;
+        break;
+      }
+    }
+    if (Matches && RRKilled) {
+      Register Dst = Use.getOperand(0).getReg();
+      unsigned NewOpc =
+          (UseOpc == VAX::MOVZBL_rr) ? VAX::MOVZBL_rm : VAX::MOVZWL_rm;
+      MachineInstrBuilder MIB =
+          BuildMI(MBB, II, Use.getDebugLoc(), TII->get(NewOpc));
+      MIB.addDef(Dst);
+      addMemOps(MIB, Reload, MemStart);
+      MIB.cloneMemRefs(Reload);
+      LLVM_DEBUG(dbgs() << "VAXPeephole: MOVL_rm+MOVZxL_rr→MOVZxL_rm "
+                        << Reload << "  + " << Use);
+      auto Erase1 = II;
+      II = std::next(Next);
+      Erase1->eraseFromParent();
+      Next->eraseFromParent();
+      return true;
+    }
+  }
+
   return false;
 }
 
