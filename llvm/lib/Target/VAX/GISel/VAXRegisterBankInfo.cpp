@@ -64,6 +64,12 @@ VAXRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       continue;
 
     unsigned Size = Ty.getSizeInBits();
+    // The GPRB bank is anchored on GPRI (32-bit). Anything larger (e.g., s64
+    // doubles, i64 long long) cannot be expressed as a single-reg mapping.
+    // Return an invalid mapping so RegBankSelect rejects this instruction
+    // and the pipeline falls back (with -global-isel-abort=2) to SDAG.
+    if (Size > 32)
+      return getInvalidInstructionMapping();
     // Map everything to GPRB with appropriate size.
     OpdsMapping[I] = &getValueMapping(0, Size, getRegBank(VAX::GPRBRegBankID));
   }
