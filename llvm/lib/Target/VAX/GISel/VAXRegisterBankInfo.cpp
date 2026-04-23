@@ -6,8 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Trivial register bank selection for VAX: everything goes to GPRB.
-// VAX has no FP register file — F_float and D_float live in GPRs.
+// Register bank selection for VAX.
+//   - GPRB (32-bit) holds i1/i8/i16/i32/p0 and F_float.
+//   - QPRB (64-bit, consecutive-pair pseudo) holds i64 and D_float.
 //
 //===----------------------------------------------------------------------===//
 
@@ -31,8 +32,12 @@ VAXRegisterBankInfo::VAXRegisterBankInfo(const TargetRegisterInfo &TRI)
 const RegisterBank &
 VAXRegisterBankInfo::getRegBankFromRegClass(const TargetRegisterClass &RC,
                                             LLT Ty) const {
-  // Everything maps to the GPR bank. VAX has no separate FP registers.
-  return getRegBank(VAX::GPRBRegBankID);
+  switch (RC.getID()) {
+  case VAX::QPRRegClassID:
+    return getRegBank(VAX::QPRBRegBankID);
+  default:
+    return getRegBank(VAX::GPRBRegBankID);
+  }
 }
 
 const RegisterBankInfo::InstructionMapping &
@@ -48,8 +53,6 @@ VAXRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       return Mapping;
   }
 
-  // Everything goes to GPRB. Build a mapping with one GPRB operand per
-  // register operand.
   unsigned NumOperands = MI.getNumOperands();
   SmallVector<const ValueMapping *, 4> OpdsMapping(NumOperands);
 
@@ -64,14 +67,14 @@ VAXRegisterBankInfo::getInstrMapping(const MachineInstr &MI) const {
       continue;
 
     unsigned Size = Ty.getSizeInBits();
-    // The GPRB bank is anchored on GPRI (32-bit). Anything larger (e.g., s64
-    // doubles, i64 long long) cannot be expressed as a single-reg mapping.
-    // Return an invalid mapping so RegBankSelect rejects this instruction
-    // and the pipeline falls back (with -global-isel-abort=2) to SDAG.
-    if (Size > 32)
+    unsigned BankID;
+    if (Size <= 32)
+      BankID = VAX::GPRBRegBankID;
+    else if (Size == 64)
+      BankID = VAX::QPRBRegBankID;
+    else
       return getInvalidInstructionMapping();
-    // Map everything to GPRB with appropriate size.
-    OpdsMapping[I] = &getValueMapping(0, Size, getRegBank(VAX::GPRBRegBankID));
+    OpdsMapping[I] = &getValueMapping(0, Size, getRegBank(BankID));
   }
 
   return getInstructionMapping(DefaultMappingID, /*Cost=*/1,

@@ -144,27 +144,23 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .widenScalarToNextPow2(0)
       .clampScalar(0, s32, s32);
 
-  // i64 status:
-  //   - G_AND / G_OR / G_XOR / G_LOAD / G_STORE on s64 are narrowed to s32
-  //     pairs by the clampScalar(0, s8, s32) rules above. These are fully
-  //     selectable and run under GISel today.
-  //   - G_ADD / G_SUB / G_MUL / G_SDIV / G_UDIV / G_SREM / G_UREM /
-  //     G_SHL / G_LSHR / G_ASHR on s64 fall back to SDAG.
-  //
-  // Why ADD/SUB fall back: VAX has native ADWC/SBWC, but the carry lives
-  // in PSW (no explicit carry register), which doesn't fit the GISel
-  // G_UADDO/G_UADDE explicit-carry-output model. The framework's generic
-  // .lower() expands them to G_ADD + G_ICMP + select sequences (~3x the
-  // code size of the SDAG ADWC chain), so we prefer SDAG fallback over
-  // worse codegen. A future change can add a custom selector that emits
-  // ADDL3_cc + ADWC bundled with PSW glue, or a 64-bit pseudo expanded
-  // post-RA, to get parity. Until then, RegBankSelect rejects the s64
-  // ADD/SUB (>32 bit operand mapping invalid) and triggers fallback.
-  //
-  // Why MUL/DIV/REM/shifts fall back: SDAG uses EMUL / EDIV / ASHQ which
-  // are 64-bit-result instructions on QPR pairs. Reaching those from GISel
-  // requires either a QPR-anchored register bank or per-op custom
-  // selection — out of scope for the current pass.
+  // i64 ADD/SUB lowers to {G_UADDO, G_UADDE} / {G_USUBO, G_USUBE} pairs
+  // via narrowScalar. Declaring those legal here (instead of lowering to
+  // generic G_ADD+G_ICMP sequences) lets the selector pick up native
+  // ADDL3_cc+ADWC / SUBL3_cc+SBWC. The s1 carry-out vreg is a bookkeeping
+  // artifact; actual carry flows through PSW between the two selected
+  // instructions.
+  getActionDefinitionsBuilder({G_UADDO, G_USUBO})
+      .legalFor({{s32, s1}});
+  getActionDefinitionsBuilder({G_UADDE, G_USUBE})
+      .legalFor({{s32, s1}});
+
+  // i64 status (updated 2026-04-22):
+  //   - ADD/SUB: native via ADDL3_cc+ADWC / SUBL3_cc+SBWC (see above and
+  //     VAXInstructionSelector::selectAddE / selectAddO).
+  //   - AND/OR/XOR/LOAD/STORE: narrowed to s32 pairs by clampScalar above.
+  //   - MUL/DIV/REM/shifts: still SDAG fallback. EMUL/EDIV/ASHQ on QPR
+  //     pairs is future work on the QPRB register bank.
 
   // Floating point: fall back to SDAG for ALL FP ops.
   // F_float (f32) and D_float (f64) are NOT IEEE 754 — calling the
