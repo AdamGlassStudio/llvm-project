@@ -242,8 +242,8 @@ bool VAXCallLowering::canLowerReturn(MachineFunction &MF,
                  MF.getFunction().getContext());
   for (unsigned I = 0, E = Outs.size(); I < E; ++I) {
     MVT VT = MVT::getVT(Outs[I].Ty);
-    // i64 returns need custom splitting we don't handle in GISel yet.
-    if (VT == MVT::i64 || VT == MVT::f64)
+    // D_float is not IEEE; do not let GISel attempt f64 (correctness).
+    if (VT == MVT::f64)
       return false;
     if (RetCC_VAX(I, VT, VT, CCValAssign::Full, Outs[I].Flags[0],
                   Outs[I].Ty, CCInfo))
@@ -271,9 +271,9 @@ bool VAXCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   SmallVector<ArgInfo, 8> SplitArgInfos;
   unsigned Index = 0;
   for (auto &Arg : F.args()) {
-    // i64/f64 args need splitting — defer for now.
-    if (Arg.getType()->isIntegerTy(64) || Arg.getType()->isDoubleTy()) {
-      LLVM_DEBUG(dbgs() << "VAXCallLowering: rejecting i64/f64 arg\n");
+    // D_float (f64) is not IEEE; do not attempt GISel lowering.
+    if (Arg.getType()->isDoubleTy()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering: rejecting f64 arg\n");
       return false;
     }
 
@@ -338,18 +338,18 @@ bool VAXCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
     return false;
   }
 
-  // Reject i64/f64 return (needs custom split handled like formal args).
+  // Reject f64 return (D_float is not IEEE; libcalls would be wrong).
   if (!Info.OrigRet.Ty->isVoidTy()) {
-    if (Info.OrigRet.Ty->isIntegerTy(64) || Info.OrigRet.Ty->isDoubleTy()) {
-      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: i64/f64 return not supported\n");
+    if (Info.OrigRet.Ty->isDoubleTy()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: f64 return not supported\n");
       return false;
     }
   }
 
-  // Reject i64/f64 arguments for now (same reason).
+  // Reject f64 arguments (same reason).
   for (const ArgInfo &A : Info.OrigArgs) {
-    if (A.Ty->isIntegerTy(64) || A.Ty->isDoubleTy()) {
-      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: i64/f64 arg not supported\n");
+    if (A.Ty->isDoubleTy()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: f64 arg not supported\n");
       return false;
     }
     if (A.Flags[0].isByVal() || A.Flags[0].isSRet()) {
