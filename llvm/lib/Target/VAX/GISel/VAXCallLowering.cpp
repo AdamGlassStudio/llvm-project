@@ -279,6 +279,15 @@ bool VAXCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
 
     ArgInfo AInfo(VRegs[Index], Arg.getType(), Index);
     setArgFlags(AInfo, Index + AttributeList::FirstArgIndex, DL, F);
+
+    // VAX passes byval/sret aggregates by *reference* (pointer in the arglist),
+    // but the GISel framework would otherwise treat the byval slot as if the
+    // payload were inlined.  Bail to SDAG, which already gets this right.
+    if (AInfo.Flags[0].isByVal() || AInfo.Flags[0].isSRet()) {
+      LLVM_DEBUG(dbgs() << "VAXCallLowering: byval/sret formal arg unsupported\n");
+      return false;
+    }
+
     splitToValueTypes(AInfo, SplitArgInfos, DL, CC);
     ++Index;
   }
