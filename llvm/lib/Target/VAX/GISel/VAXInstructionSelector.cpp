@@ -94,6 +94,8 @@ private:
   bool selectICmp(MachineInstr &MI) const;
   bool selectSelect(MachineInstr &MI) const;
   bool selectTruncOrAnyExt(MachineInstr &MI) const;
+  bool selectAddOSubO(MachineInstr &MI, bool IsSub) const;
+  bool selectAddESubE(MachineInstr &MI, bool IsSub) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
   const VAXTargetMachine &TM;
@@ -216,6 +218,14 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
   case TargetOpcode::G_TRUNC:
   case TargetOpcode::G_ANYEXT:
     return selectTruncOrAnyExt(MI);
+  case TargetOpcode::G_UADDO:
+    return selectAddOSubO(MI, /*IsSub=*/false);
+  case TargetOpcode::G_USUBO:
+    return selectAddOSubO(MI, /*IsSub=*/true);
+  case TargetOpcode::G_UADDE:
+    return selectAddESubE(MI, /*IsSub=*/false);
+  case TargetOpcode::G_USUBE:
+    return selectAddESubE(MI, /*IsSub=*/true);
   default:
     break;
   }
@@ -309,6 +319,105 @@ bool VAXInstructionSelector::selectALU(MachineInstr &MI, unsigned ByteOpc,
                             .addReg(Src1Reg)
                             .addReg(Src2Reg);
   (void)NewMI;
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_UADDO / G_USUBO → ADDL3_rr_cc / SUBL3_rr_cc.
+///
+/// G_UADDO %dst, %carry_out = G_UADDO %a, %b
+/// G_USUBO %dst, %borrow_out = G_USUBO %a, %b
+///
+/// Becomes:
+///   %dst = ADDL3_rr_cc %a, %b      (defs PSW)
+///   %carry_out = IMPLICIT_DEF      (dead — carry flows through PSW to ADWC)
+///
+/// SUBL3 is "subl3 $s, $m, $dst" → dst = m - s; we pass (src2, src1) to match
+/// the "a - b" sense of G_USUBO(a, b).
+bool VAXInstructionSelector::selectAddOSubO(MachineInstr &MI,
+                                            bool IsSub) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register CarryOutReg = MI.getOperand(1).getReg();
+  Register Src1Reg = MI.getOperand(2).getReg();
+  Register Src2Reg = MI.getOperand(3).getReg();
+
+  LLT DstTy = MRI->getType(DstReg);
+  if (DstTy.getSizeInBits() != 32)
+    return false;
+
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(Src1Reg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(Src2Reg, VAX::GPRIRegClass, *MRI);
+
+  unsigned Opc;
+  if (IsSub) {
+    // SUBL3_rr_cc: (outs $dst), (ins $s, $m); dst = m - s.
+    // For G_USUBO(%a, %b) we want dst = a - b, so s=b, m=a → operands (b, a).
+    Opc = VAX::SUBL3_rr_cc;
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(Opc), DstReg)
+        .addReg(Src2Reg)
+        .addReg(Src1Reg);
+  } else {
+    Opc = VAX::ADDL3_rr_cc;
+    BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(Opc), DstReg)
+        .addReg(Src1Reg)
+        .addReg(Src2Reg);
+  }
+
+  // Carry-out vreg is a bookkeeping artifact. Materialize it as dead.
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII.get(TargetOpcode::IMPLICIT_DEF), CarryOutReg);
+  RBI.constrainGenericRegister(CarryOutReg, VAX::GPRBRegClass, *MRI);
+
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_UADDE / G_USUBE → ADWC_rr / SBWC_rr.
+///
+/// G_UADDE %dst, %carry_out = G_UADDE %a, %b, %carry_in
+/// G_USUBE %dst, %borrow_out = G_USUBE %a, %b, %borrow_in
+///
+/// Becomes:
+///   %dst = ADWC_rr %b, %a          (uses PSW, constrained $dstin = $dst)
+///   %carry_out = IMPLICIT_DEF      (dead)
+///
+/// The s1 %carry_in operand is ignored — carry flows through PSW from the
+/// preceding ADDL3_rr_cc. Defs/Uses = [PSW] on both instructions prevent
+/// scheduling reorder.
+///
+/// ADWC_rr: "adwc $src, $dst" → dst = dst + src + C  (dstin tied to dst)
+/// For G_UADDE(%a, %b, %c): dst = a + b + C. We pick src=b, dstin=a.
+///
+/// SBWC_rr: "sbwc $src, $dst" → dst = dst - src - C
+/// For G_USUBE(%a, %b, %c): dst = a - b - C. We pick src=b, dstin=a.
+bool VAXInstructionSelector::selectAddESubE(MachineInstr &MI,
+                                            bool IsSub) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register CarryOutReg = MI.getOperand(1).getReg();
+  Register Src1Reg = MI.getOperand(2).getReg();
+  Register Src2Reg = MI.getOperand(3).getReg();
+  // Operand 4 is the s1 carry-in vreg; unused here (flows via PSW).
+
+  LLT DstTy = MRI->getType(DstReg);
+  if (DstTy.getSizeInBits() != 32)
+    return false;
+
+  RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(Src1Reg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(Src2Reg, VAX::GPRIRegClass, *MRI);
+
+  unsigned Opc = IsSub ? VAX::SBWC_rr : VAX::ADWC_rr;
+  // (outs $dst), (ins $src, $dstin); Constraints: $dstin = $dst.
+  // src = Src2Reg (the "b" in a +/- b +/- C), dstin = Src1Reg (the "a").
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(Opc), DstReg)
+      .addReg(Src2Reg)
+      .addReg(Src1Reg);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII.get(TargetOpcode::IMPLICIT_DEF), CarryOutReg);
+  RBI.constrainGenericRegister(CarryOutReg, VAX::GPRBRegClass, *MRI);
+
   MI.eraseFromParent();
   return true;
 }
