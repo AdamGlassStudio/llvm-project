@@ -92,6 +92,7 @@ private:
   bool selectBr(MachineInstr &MI) const;
   bool selectBrCond(MachineInstr &MI) const;
   bool selectICmp(MachineInstr &MI) const;
+  bool selectSelect(MachineInstr &MI) const;
   bool selectTruncOrAnyExt(MachineInstr &MI) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
@@ -210,6 +211,8 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectBrCond(MI);
   case TargetOpcode::G_ICMP:
     return selectICmp(MI);
+  case TargetOpcode::G_SELECT:
+    return selectSelect(MI);
   case TargetOpcode::G_TRUNC:
   case TargetOpcode::G_ANYEXT:
     return selectTruncOrAnyExt(MI);
@@ -272,7 +275,7 @@ VAXInstructionSelector::getRegClassForType(LLT Ty) const {
     return &VAX::GPRIRegClass;
   if (Ty.getSizeInBits() == 16)
     return &VAX::GPRWRegClass;
-  if (Ty.getSizeInBits() == 8)
+  if (Ty.getSizeInBits() == 8 || Ty.getSizeInBits() == 1)
     return &VAX::GPRBRegClass;
   if (Ty.getSizeInBits() == 64)
     return &VAX::QPRRegClass;
@@ -1035,6 +1038,84 @@ bool VAXInstructionSelector::selectICmp(MachineInstr &MI) const {
   B.buildInstr(VAX::SELECT_CC_Pseudo, {DstReg}, {TrueReg, FalseReg})
       .addImm(CC);
   RBI.constrainGenericRegister(DstReg, VAX::GPRIRegClass, *MRI);
+
+  MI.eraseFromParent();
+  return true;
+}
+
+bool VAXInstructionSelector::selectSelect(MachineInstr &MI) const {
+  // G_SELECT %dst, %cond(s1), %tval, %fval
+  // Lower via SELECT_CC_Pseudo (diamond expander). Fold an adjacent G_ICMP
+  // condition if single-use; otherwise TSTL the bool and branch on NEQ.
+  Register DstReg = MI.getOperand(0).getReg();
+  Register CondReg = MI.getOperand(1).getReg();
+  Register TVal = MI.getOperand(2).getReg();
+  Register FVal = MI.getOperand(3).getReg();
+
+  LLT DstTy = MRI->getType(DstReg);
+  const TargetRegisterClass *DstRC = nullptr;
+  if (DstTy.isPointer()) {
+    DstRC = &VAX::GPRIRegClass;
+  } else {
+    switch (DstTy.getSizeInBits()) {
+    case 8:  DstRC = &VAX::GPRBRegClass; break;
+    case 16: DstRC = &VAX::GPRWRegClass; break;
+    case 32: DstRC = &VAX::GPRIRegClass; break;
+    default: return false;
+    }
+  }
+
+  MachineIRBuilder B(MI);
+  unsigned CC = ~0U;
+
+  MachineInstr *CondDef = MRI->getVRegDef(CondReg);
+  if (CondDef && CondDef->getOpcode() == TargetOpcode::G_ICMP &&
+      MRI->hasOneNonDBGUse(CondReg)) {
+    CmpInst::Predicate Pred =
+        static_cast<CmpInst::Predicate>(CondDef->getOperand(1).getPredicate());
+    CC = getVAXCCForICmp(Pred);
+    if (CC == ~0U)
+      return false;
+    Register LHS = CondDef->getOperand(2).getReg();
+    Register RHS = CondDef->getOperand(3).getReg();
+    LLT LHSTy = MRI->getType(LHS);
+    unsigned CmpOpc;
+    const TargetRegisterClass *OpRC;
+    if (LHSTy.getSizeInBits() == 8) {
+      CmpOpc = VAX::CMPB_rr; OpRC = &VAX::GPRBRegClass;
+    } else if (LHSTy.getSizeInBits() == 16) {
+      CmpOpc = VAX::CMPW_rr; OpRC = &VAX::GPRWRegClass;
+    } else if (LHSTy.getSizeInBits() == 32) {
+      CmpOpc = VAX::CMPL_rr; OpRC = &VAX::GPRIRegClass;
+    } else {
+      return false;
+    }
+    B.buildInstr(CmpOpc).addUse(LHS).addUse(RHS);
+    RBI.constrainGenericRegister(LHS, *OpRC, *MRI);
+    RBI.constrainGenericRegister(RHS, *OpRC, *MRI);
+    CondDef->eraseFromParent();
+  } else {
+    // Bool materialized some other way: compare against zero; NEQ = true.
+    LLT CondTy = MRI->getType(CondReg);
+    unsigned TstOpc;
+    const TargetRegisterClass *CondRC;
+    unsigned CondBits = CondTy.getSizeInBits();
+    if (CondBits == 1 || CondBits == 8) {
+      TstOpc = VAX::TSTB; CondRC = &VAX::GPRBRegClass;
+    } else if (CondBits == 16) {
+      TstOpc = VAX::TSTW; CondRC = &VAX::GPRWRegClass;
+    } else {
+      TstOpc = VAX::TSTL; CondRC = &VAX::GPRIRegClass;
+    }
+    B.buildInstr(TstOpc).addUse(CondReg);
+    RBI.constrainGenericRegister(CondReg, *CondRC, *MRI);
+    CC = getVAXCCForICmp(CmpInst::ICMP_NE);
+  }
+
+  B.buildInstr(VAX::SELECT_CC_Pseudo, {DstReg}, {TVal, FVal}).addImm(CC);
+  RBI.constrainGenericRegister(DstReg, *DstRC, *MRI);
+  RBI.constrainGenericRegister(TVal, *DstRC, *MRI);
+  RBI.constrainGenericRegister(FVal, *DstRC, *MRI);
 
   MI.eraseFromParent();
   return true;

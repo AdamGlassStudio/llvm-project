@@ -25,6 +25,9 @@ class VAXSubtarget;
 class VAXLegalizerInfo : public LegalizerInfo {
 public:
   VAXLegalizerInfo(const VAXSubtarget &ST);
+
+  bool legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
+                      LostDebugLocObserver &LocObserver) const override;
 };
 
 } // end namespace llvm

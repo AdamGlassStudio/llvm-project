@@ -28,6 +28,7 @@ using namespace LegalizeMutations;
 VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   using namespace TargetOpcode;
 
+  const LLT s1 = LLT::scalar(1);
   const LLT s8 = LLT::scalar(8);
   const LLT s16 = LLT::scalar(16);
   const LLT s32 = LLT::scalar(32);
@@ -60,12 +61,19 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .clampScalar(0, s32, s32)
       .clampScalar(1, s32, s32);
 
-  // Comparisons.
+  // Comparisons. Allow pointer compares too (memmove, iterators, etc.).
   getActionDefinitionsBuilder(G_ICMP)
-      .legalFor({{s32, s8}, {s32, s16}, {s32, s32}})
+      .legalFor({{s32, s8}, {s32, s16}, {s32, s32}, {s32, p0}})
       .widenScalarToNextPow2(1)
       .clampScalar(0, s32, s32)
       .clampScalar(1, s8, s32);
+
+  // Select: dst = cond ? tval : fval.  Handled by the instruction selector
+  // via SELECT_CC_Pseudo (same mechanism SDAG uses).
+  getActionDefinitionsBuilder(G_SELECT)
+      .legalFor({{s8, s1}, {s16, s1}, {s32, s1}, {p0, s1}})
+      .widenScalarToNextPow2(0)
+      .clampScalar(0, s8, s32);
 
   // Pointer operations.
   getActionDefinitionsBuilder(G_PTR_ADD).legalFor({{p0, s32}});
@@ -103,9 +111,11 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .legalFor({{s16, s8}, {s32, s8}, {s32, s16}})
       .clampScalar(0, s16, s32);
 
-  // Truncate.
+  // Truncate. s1 is legal as a destination (materializes as a 1-bit boolean
+  // in a GPRB); downstream users (G_SELECT cond, G_BRCOND cond) take s1.
   getActionDefinitionsBuilder(G_TRUNC)
-      .legalFor({{s8, s16}, {s8, s32}, {s16, s32}});
+      .legalFor({{s8, s16}, {s8, s32}, {s16, s32},
+                 {s1, s8}, {s1, s16}, {s1, s32}});
 
   // Sign/zero extend from memory (CVTBL + load, etc.)
   getActionDefinitionsBuilder({G_SEXTLOAD, G_ZEXTLOAD})
@@ -128,6 +138,12 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
     return true;
   });
 
+  // Absolute value — lowered to sub + icmp + select via custom hook.
+  getActionDefinitionsBuilder(G_ABS)
+      .customFor({s32})
+      .widenScalarToNextPow2(0)
+      .clampScalar(0, s32, s32);
+
   // i64 — lower to pairs (no native i64 ALU, only MOVQ/ASHQ).
   // For now, just widen/clamp above rules handle i64 by forcing to s32.
   // TODO: Custom i64 lowering using register pairs.
@@ -142,4 +158,14 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   // Everything else: fall back.
   getLegacyLegalizerInfo().computeTables();
   verify(*ST.getInstrInfo());
+}
+
+bool VAXLegalizerInfo::legalizeCustom(LegalizerHelper &Helper, MachineInstr &MI,
+                                      LostDebugLocObserver &) const {
+  switch (MI.getOpcode()) {
+  case TargetOpcode::G_ABS:
+    return Helper.lowerAbsToCNeg(MI) == LegalizerHelper::Legalized;
+  default:
+    return false;
+  }
 }
