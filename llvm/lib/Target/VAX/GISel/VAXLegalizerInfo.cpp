@@ -144,13 +144,38 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .widenScalarToNextPow2(0)
       .clampScalar(0, s32, s32);
 
-  // i64 — lower to pairs (no native i64 ALU, only MOVQ/ASHQ).
-  // For now, just widen/clamp above rules handle i64 by forcing to s32.
-  // TODO: Custom i64 lowering using register pairs.
+  // i64 status:
+  //   - G_AND / G_OR / G_XOR / G_LOAD / G_STORE on s64 are narrowed to s32
+  //     pairs by the clampScalar(0, s8, s32) rules above. These are fully
+  //     selectable and run under GISel today.
+  //   - G_ADD / G_SUB / G_MUL / G_SDIV / G_UDIV / G_SREM / G_UREM /
+  //     G_SHL / G_LSHR / G_ASHR on s64 fall back to SDAG.
+  //
+  // Why ADD/SUB fall back: VAX has native ADWC/SBWC, but the carry lives
+  // in PSW (no explicit carry register), which doesn't fit the GISel
+  // G_UADDO/G_UADDE explicit-carry-output model. The framework's generic
+  // .lower() expands them to G_ADD + G_ICMP + select sequences (~3x the
+  // code size of the SDAG ADWC chain), so we prefer SDAG fallback over
+  // worse codegen. A future change can add a custom selector that emits
+  // ADDL3_cc + ADWC bundled with PSW glue, or a 64-bit pseudo expanded
+  // post-RA, to get parity. Until then, RegBankSelect rejects the s64
+  // ADD/SUB (>32 bit operand mapping invalid) and triggers fallback.
+  //
+  // Why MUL/DIV/REM/shifts fall back: SDAG uses EMUL / EDIV / ASHQ which
+  // are 64-bit-result instructions on QPR pairs. Reaching those from GISel
+  // requires either a QPR-anchored register bank or per-op custom
+  // selection — out of scope for the current pass.
 
-  // Floating point — mark as needing custom lowering eventually.
-  // VAX F_float (f32) in GPRs, D_float (f64) in register pairs.
-  // For now, fall back to SDAG for any FP.
+  // Floating point: fall back to SDAG for ALL FP ops.
+  // F_float (f32) and D_float (f64) are NOT IEEE 754 — calling the
+  // standard compiler-rt libcalls (__addsf3, __adddf3, etc.) would
+  // produce wrong results. SDAG handles VAX FP natively (F_float in
+  // GPRs via ADDF2 etc.; D_float in QPR pairs via ADDD2 etc.) and
+  // includes IEEE↔VAX conversion at constant-load sites. Replicating
+  // that in GISel would require a new register bank anchored on QPR
+  // plus custom legalization — substantial work for no correctness
+  // gain. The RegBankSelect rejection of >32-bit operands is what
+  // funnels f64 back to SDAG; f32 ops just stay unlegalized here.
   getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
       .legalFor({s32})
       .lower();
