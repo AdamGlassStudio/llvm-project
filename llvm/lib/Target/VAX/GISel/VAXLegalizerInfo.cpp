@@ -32,6 +32,7 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   const LLT s8 = LLT::scalar(8);
   const LLT s16 = LLT::scalar(16);
   const LLT s32 = LLT::scalar(32);
+  const LLT s64 = LLT::scalar(64);
   const LLT p0 = LLT::pointer(0, 32);
 
   // VAX has native i8/i16/i32 add, sub, and, or, xor.
@@ -41,25 +42,47 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
       .widenScalarToNextPow2(0)
       .clampScalar(0, s8, s32);
 
-  // Multiply: VAX has MULB2/MULW2/MULL2 (native i8/i16/i32).
+  // Multiply: VAX has MULB2/MULW2/MULL2 (native i8/i16/i32). i64 MUL
+  // goes through a libcall (__muldi3) like DIV/MOD for now — inline EMUL
+  // + cross-products is possible but deferred.
   getActionDefinitionsBuilder(G_MUL)
       .legalFor({s8, s16, s32})
+      .libcallFor({s64})
       .widenScalarToNextPow2(0)
-      .clampScalar(0, s8, s32);
+      .clampScalar(0, s8, s64);
 
-  // Division: VAX has DIVB/DIVW/DIVL.
+  // Division: VAX has DIVB/DIVW/DIVL (native i8/i16/i32). i64 DIV/REM have
+  // no hardware support (EDIV is only 64÷32→32), so route i64 through
+  // libcalls (__[u]divdi3 / __[u]moddi3) matching what SDAG does.
   getActionDefinitionsBuilder({G_SDIV, G_UDIV, G_SREM, G_UREM})
       .legalFor({s8, s16, s32})
+      .libcallFor({s64})
       .widenScalarToNextPow2(0)
-      .clampScalar(0, s8, s32);
+      .clampScalar(0, s8, s64);
 
   // Shifts: VAX ASHL/ASHR take an i8 shift count and i32 operand/result.
-  // The shift count is always i8 (cnt field), but GISel models both operands.
-  getActionDefinitionsBuilder({G_SHL, G_LSHR, G_ASHR})
-      .legalFor({{s32, s32}})
+  // ASHQ (quadword) handles i64 SHL (positive count) and ASHR (negated
+  // count), but NOT LSHR — ASHQ is arithmetic, so unsigned right shift
+  // gets a libcall (__lshrdi3) on i64 just like SDAG.
+  getActionDefinitionsBuilder({G_SHL, G_ASHR})
+      .legalFor({{s32, s32}, {s64, s32}})
       .widenScalarToNextPow2(0)
-      .clampScalar(0, s32, s32)
+      .clampScalar(0, s32, s64)
       .clampScalar(1, s32, s32);
+  // LSHR s64: LLVM GlobalISel has no shift-libcall dispatch in
+  // LegalizerHelper::getRTLibDesc (unlike SDAG), and narrowScalarShift
+  // produces ~30 inline instructions. Leave s64 unsupported here so the
+  // function falls back to SDAG, which emits the expected `__lshrdi3`
+  // libcall (~5 insns), matching GCC.
+  getActionDefinitionsBuilder(G_LSHR)
+      .legalFor({{s32, s32}})
+      .clampScalar(1, s32, s32)
+      .widenScalarIf(
+          [=](const LegalityQuery &Q) { return Q.Types[0].getSizeInBits() < 32; },
+          LegalizeMutations::widenScalarOrEltToNextPow2(0, 32))
+      .unsupportedIf([=](const LegalityQuery &Q) {
+        return Q.Types[0].getSizeInBits() > 32;
+      });
 
   // Comparisons. Allow pointer compares too (memmove, iterators, etc.).
   getActionDefinitionsBuilder(G_ICMP)
@@ -92,11 +115,20 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   // Frame index.
   getActionDefinitionsBuilder(G_FRAME_INDEX).legalFor({p0});
 
-  // Loads and stores: VAX has MOVB/MOVW/MOVL for native 8/16/32.
+  // Loads and stores: VAX has MOVB/MOVW/MOVL for native 8/16/32. i64 loads
+  // are narrowed to two i32 loads + G_MERGE_VALUES by narrowScalar.
   getActionDefinitionsBuilder({G_LOAD, G_STORE})
       .legalFor({{s8, p0}, {s16, p0}, {s32, p0}, {p0, p0}})
       .widenScalarToNextPow2(0)
       .clampScalar(0, s8, s32);
+
+  // Merge/unmerge between s64 and s32 pairs (lo, hi). QPR is backed by two
+  // consecutive GPRs; the selector emits REG_SEQUENCE / COPY with sub_lo /
+  // sub_hi subregister indices.
+  getActionDefinitionsBuilder(G_MERGE_VALUES)
+      .legalFor({{s64, s32}});
+  getActionDefinitionsBuilder(G_UNMERGE_VALUES)
+      .legalFor({{s32, s64}});
 
   // Sign/zero extend: VAX has CVTBL/CVTWL (sign-extend) and MOVZBL/MOVZWL.
   getActionDefinitionsBuilder(G_SEXT)

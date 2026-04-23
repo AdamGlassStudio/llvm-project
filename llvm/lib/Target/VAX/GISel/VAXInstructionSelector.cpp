@@ -96,6 +96,10 @@ private:
   bool selectTruncOrAnyExt(MachineInstr &MI) const;
   bool selectAddOSubO(MachineInstr &MI, bool IsSub) const;
   bool selectAddESubE(MachineInstr &MI, bool IsSub) const;
+  bool selectShl64(MachineInstr &MI) const;
+  bool selectAshr64(MachineInstr &MI) const;
+  bool selectMergeValues(MachineInstr &MI) const;
+  bool selectUnmergeValues(MachineInstr &MI) const;
   const TargetRegisterClass *getRegClassForType(LLT Ty) const;
 
   const VAXTargetMachine &TM;
@@ -191,8 +195,20 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectALU(MI, VAX::SUBB3_rr, VAX::SUBW3_rr, VAX::SUBL3_rr_cc);
   case TargetOpcode::G_AND:
     return selectAnd(MI);
-  case TargetOpcode::G_ASHR:
+  case TargetOpcode::G_ASHR: {
+    LLT DstTy = MRI->getType(MI.getOperand(0).getReg());
+    if (DstTy.getSizeInBits() == 64)
+      return selectAshr64(MI);
     return selectShr(MI, /*IsArithmetic=*/true);
+  }
+  case TargetOpcode::G_SHL: {
+    LLT DstTy = MRI->getType(MI.getOperand(0).getReg());
+    if (DstTy.getSizeInBits() == 64)
+      return selectShl64(MI);
+    // i32 G_SHL is handled by tablegen patterns via ASHL_rr — fall through to
+    // the generated matcher which ran above (didn't fire? then we can't).
+    return false;
+  }
   case TargetOpcode::G_LSHR:
     return selectShr(MI, /*IsArithmetic=*/false);
   case TargetOpcode::G_LOAD:
@@ -226,6 +242,10 @@ bool VAXInstructionSelector::select(MachineInstr &MI) {
     return selectAddESubE(MI, /*IsSub=*/false);
   case TargetOpcode::G_USUBE:
     return selectAddESubE(MI, /*IsSub=*/true);
+  case TargetOpcode::G_MERGE_VALUES:
+    return selectMergeValues(MI);
+  case TargetOpcode::G_UNMERGE_VALUES:
+    return selectUnmergeValues(MI);
   default:
     break;
   }
@@ -418,6 +438,94 @@ bool VAXInstructionSelector::selectAddESubE(MachineInstr &MI,
           TII.get(TargetOpcode::IMPLICIT_DEF), CarryOutReg);
   RBI.constrainGenericRegister(CarryOutReg, VAX::GPRBRegClass, *MRI);
 
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_MERGE_VALUES s64 from (s32 lo, s32 hi) → REG_SEQUENCE into a QPR.
+bool VAXInstructionSelector::selectMergeValues(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register LoReg = MI.getOperand(1).getReg();
+  Register HiReg = MI.getOperand(2).getReg();
+
+  LLT DstTy = MRI->getType(DstReg);
+  if (DstTy.getSizeInBits() != 64)
+    return false;
+
+  RBI.constrainGenericRegister(DstReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(LoReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(HiReg, VAX::GPRIRegClass, *MRI);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII.get(TargetOpcode::REG_SEQUENCE), DstReg)
+      .addReg(LoReg)
+      .addImm(VAX::sub_lo)
+      .addReg(HiReg)
+      .addImm(VAX::sub_hi);
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select G_UNMERGE_VALUES (s32 lo, s32 hi) from s64 → two COPYs with subregs.
+bool VAXInstructionSelector::selectUnmergeValues(MachineInstr &MI) const {
+  Register LoReg = MI.getOperand(0).getReg();
+  Register HiReg = MI.getOperand(1).getReg();
+  Register SrcReg = MI.getOperand(2).getReg();
+
+  LLT SrcTy = MRI->getType(SrcReg);
+  if (SrcTy.getSizeInBits() != 64)
+    return false;
+
+  RBI.constrainGenericRegister(SrcReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(LoReg, VAX::GPRIRegClass, *MRI);
+  RBI.constrainGenericRegister(HiReg, VAX::GPRIRegClass, *MRI);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),
+          LoReg)
+      .addReg(SrcReg, RegState{}, VAX::sub_lo);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(TargetOpcode::COPY),
+          HiReg)
+      .addReg(SrcReg, RegState{}, VAX::sub_hi);
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select i64 G_SHL → ASHQ (signed shift count, positive = left).
+///
+/// ASHQ takes a QPR source and produces a QPR dest. Since s64 is already
+/// mapped to the QPR register class by QPRB bank, we can pass it directly.
+bool VAXInstructionSelector::selectShl64(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcReg = MI.getOperand(1).getReg();
+  Register CntReg = MI.getOperand(2).getReg();
+
+  RBI.constrainGenericRegister(DstReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(SrcReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(CntReg, VAX::GPRIRegClass, *MRI);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(VAX::ASHQ), DstReg)
+      .addReg(CntReg)
+      .addReg(SrcReg);
+  MI.eraseFromParent();
+  return true;
+}
+
+/// Select i64 G_ASHR → MNEGL count; ASHQ (negative count = arithmetic right).
+bool VAXInstructionSelector::selectAshr64(MachineInstr &MI) const {
+  Register DstReg = MI.getOperand(0).getReg();
+  Register SrcReg = MI.getOperand(1).getReg();
+  Register CntReg = MI.getOperand(2).getReg();
+
+  RBI.constrainGenericRegister(DstReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(SrcReg, VAX::QPRRegClass, *MRI);
+  RBI.constrainGenericRegister(CntReg, VAX::GPRIRegClass, *MRI);
+
+  Register NegCnt = MRI->createVirtualRegister(&VAX::GPRIRegClass);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(VAX::MNEGL), NegCnt)
+      .addReg(CntReg);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII.get(VAX::ASHQ), DstReg)
+      .addReg(NegCnt)
+      .addReg(SrcReg);
   MI.eraseFromParent();
   return true;
 }
