@@ -195,15 +195,15 @@ VAXLegalizerInfo::VAXLegalizerInfo(const VAXSubtarget &ST) {
   //     pairs is future work on the QPRB register bank.
 
   // Floating point: fall back to SDAG for ALL FP ops.
-  // F_float (f32) and D_float (f64) are NOT IEEE 754 — calling the
-  // standard compiler-rt libcalls (__addsf3, __adddf3, etc.) would
-  // produce wrong results. SDAG handles VAX FP natively (F_float in
-  // GPRs via ADDF2 etc.; D_float in QPR pairs via ADDD2 etc.) and
-  // includes IEEE↔VAX conversion at constant-load sites. Replicating
-  // that in GISel would require a new register bank anchored on QPR
-  // plus custom legalization — substantial work for no correctness
-  // gain. The RegBankSelect rejection of >32-bit operands is what
-  // funnels f64 back to SDAG; f32 ops just stay unlegalized here.
+  // VAX hardware has native FP instructions (ADDF/ADDD etc.) and SDAG
+  // selects them directly — there's nothing fundamentally wrong with
+  // FP under GISel. The hazard is the *libcall* fallback: compiler-rt's
+  // __addsf3/__adddf3 are IEEE 754 and would silently corrupt F_float
+  // / D_float values. No native FP selectors exist in the GISel
+  // pipeline yet, so rather than risk that path, we keep FP on SDAG
+  // until selectors (and a QPRB-anchored bank for f64) land. The
+  // RegBankSelect rejection of >32-bit operands funnels f64 back to
+  // SDAG; f32 ops just stay unlegalized here.
   getActionDefinitionsBuilder({G_FADD, G_FSUB, G_FMUL, G_FDIV})
       .legalFor({s32})
       .lower();
