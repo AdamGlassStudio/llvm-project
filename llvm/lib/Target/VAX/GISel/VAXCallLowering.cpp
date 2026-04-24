@@ -242,7 +242,9 @@ bool VAXCallLowering::canLowerReturn(MachineFunction &MF,
                  MF.getFunction().getContext());
   for (unsigned I = 0, E = Outs.size(); I < E; ++I) {
     MVT VT = MVT::getVT(Outs[I].Ty);
-    // D_float is not IEEE; do not let GISel attempt f64 (correctness).
+    // f64 under GISel would risk a compiler-rt libcall (__adddf3 etc.)
+    // which is IEEE and would corrupt D_float. No native FP selectors
+    // yet; reject to force SDAG fallback.
     if (VT == MVT::f64)
       return false;
     if (RetCC_VAX(I, VT, VT, CCValAssign::Full, Outs[I].Flags[0],
@@ -271,7 +273,8 @@ bool VAXCallLowering::lowerFormalArguments(MachineIRBuilder &MIRBuilder,
   SmallVector<ArgInfo, 8> SplitArgInfos;
   unsigned Index = 0;
   for (auto &Arg : F.args()) {
-    // D_float (f64) is not IEEE; do not attempt GISel lowering.
+    // No native FP selectors in GISel yet; libcall fallback would hit
+    // IEEE compiler-rt and corrupt D_float. Reject so SDAG handles it.
     if (Arg.getType()->isDoubleTy()) {
       LLVM_DEBUG(dbgs() << "VAXCallLowering: rejecting f64 arg\n");
       return false;
@@ -338,7 +341,8 @@ bool VAXCallLowering::lowerCall(MachineIRBuilder &MIRBuilder,
     return false;
   }
 
-  // Reject f64 return (D_float is not IEEE; libcalls would be wrong).
+  // Reject f64 return: no native FP selectors in GISel yet, and the
+  // libcall fallback would hit IEEE compiler-rt (wrong for D_float).
   if (!Info.OrigRet.Ty->isVoidTy()) {
     if (Info.OrigRet.Ty->isDoubleTy()) {
       LLVM_DEBUG(dbgs() << "VAXCallLowering::lowerCall: f64 return not supported\n");

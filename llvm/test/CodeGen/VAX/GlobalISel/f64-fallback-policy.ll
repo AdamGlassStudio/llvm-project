@@ -1,13 +1,18 @@
 ; RUN: llc -mtriple=vax-unknown-netbsdelf -global-isel -global-isel-abort=2 < %s 2>&1 | FileCheck %s
 
-; VAX uses D_float for `double`, NOT IEEE 754. Standard compiler-rt
-; libcalls (__adddf3, __muldf3, etc.) operate on IEEE bits and would
-; produce wrong results on D_float values. VAXCallLowering therefore
-; rejects f64 returns and arguments, forcing the function to fall back
-; to SDAG, which handles D_float correctly via QPR + custom lowering.
+; VAX has native hardware FP instructions (ADDD/SUBD/MULD/DIVD) that
+; operate on D_float directly, and SDAG selects them. GISel *could*
+; reach the same quality by selecting those same instructions — there
+; is nothing fundamentally wrong with f64 under GISel. The hazard is
+; the libcall fallback: compiler-rt's __adddf3 etc. are IEEE 754 and
+; would silently corrupt D_float values. No native FP selectors are
+; wired up in the GISel pipeline yet, so any f64 op that reached it
+; would risk that libcall path.
 ;
-; This test locks in that policy decision: f64 arithmetic MUST NOT go
-; through the GISel path.
+; Until native FP selectors exist (and a policy of "never libcall to
+; compiler-rt for FP" is enforced), VAXCallLowering rejects f64 args
+; and returns so the function falls back to SDAG, which is known good.
+; This test locks that policy in.
 
 ; CHECK: warning: Instruction selection used fallback path for gisel_f64_add
 ; CHECK: warning: Instruction selection used fallback path for gisel_f64_mul
