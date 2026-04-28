@@ -124,7 +124,7 @@ static int64_t swapVAXCC(int64_t CC) {
 
 MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     MachineFunction &MF, MachineInstr &MI, ArrayRef<unsigned> Ops,
-    MachineBasicBlock::iterator InsertPt, int FrameIndex, LiveIntervals *LIS,
+    int FrameIndex, MachineInstr *&CopyMI, LiveIntervals *LIS,
     VirtRegMap *VRM) const {
   // We only fold a single operand at a time.
   if (Ops.size() != 1)
@@ -145,7 +145,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
 
   // PUSHL_r $reg → PUSHL_m (stack-slot)
   if (Opc == VAX::PUSHL_r && OpIdx == 0) {
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::PUSHL_m));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::PUSHL_m));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addReg(VAX::SP, RegState::ImplicitDefine);
     return MIB;
@@ -154,7 +154,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
   // CMPL_rr: fold operand 0 ($a) → CMPL_rm
   if (Opc == VAX::CMPL_rr && OpIdx == 0) {
     Register RhsReg = MI.getOperand(1).getReg();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMPL_rm));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::CMPL_rm));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addReg(RhsReg);
     return MIB;
@@ -165,7 +165,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     Register RhsReg = MI.getOperand(1).getReg();
     int64_t CC = MI.getOperand(2).getImm();
     MachineBasicBlock *Target = MI.getOperand(3).getMBB();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_rm));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::CMP_BRANCH_rm));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addReg(RhsReg).addImm(CC).addMBB(Target);
     return MIB;
@@ -180,7 +180,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
       return nullptr;
     MachineBasicBlock *Target = MI.getOperand(3).getMBB();
     // cmpl lhs, rhs; bCC → cmpl mem(rhs), lhs; bSwapped
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_rm));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::CMP_BRANCH_rm));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addReg(LhsReg).addImm(SwappedCC).addMBB(Target);
     return MIB;
@@ -191,7 +191,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     int64_t RhsImm = MI.getOperand(1).getImm();
     int64_t CC = MI.getOperand(2).getImm();
     MachineBasicBlock *Target = MI.getOperand(3).getMBB();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::CMP_BRANCH_mi));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::CMP_BRANCH_mi));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addImm(RhsImm).addImm(CC).addMBB(Target);
     return MIB;
@@ -201,7 +201,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
   if (Opc == VAX::TST_BRANCH && OpIdx == 0) {
     int64_t CC = MI.getOperand(1).getImm();
     MachineBasicBlock *Target = MI.getOperand(2).getMBB();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::TST_BRANCH_m));
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::TST_BRANCH_m));
     addFrameMemOps(MIB, FrameIndex);
     MIB.addImm(CC).addMBB(Target);
     return MIB;
@@ -230,7 +230,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     // Fold operand 1 (src1) directly.
     if (OpIdx == 1) {
       Register Src2 = MI.getOperand(2).getReg();
-      auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc), Dst);
+      auto MIB = BuildMI(MBB, MI, DL, get(F.ToOpc), Dst);
       addFrameMemOps(MIB, FrameIndex);
       MIB.addReg(Src2);
       return MIB;
@@ -238,7 +238,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     // Fold operand 2 (src2) for commutative ops by swapping.
     if (OpIdx == 2 && F.Commutative) {
       Register Src1 = MI.getOperand(1).getReg();
-      auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc), Dst);
+      auto MIB = BuildMI(MBB, MI, DL, get(F.ToOpc), Dst);
       addFrameMemOps(MIB, FrameIndex);
       MIB.addReg(Src1);
       return MIB;
@@ -252,7 +252,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
   if (Opc == VAX::BICL3_rr && OpIdx == 2) {
     Register Dst = MI.getOperand(0).getReg();
     Register Mask = MI.getOperand(1).getReg();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(VAX::BICL3_rm), Dst);
+    auto MIB = BuildMI(MBB, MI, DL, get(VAX::BICL3_rm), Dst);
     MIB.addReg(Mask);
     addFrameMemOps(MIB, FrameIndex);
     return MIB;
@@ -277,7 +277,7 @@ MachineInstr *VAXInstrInfo::foldMemoryOperandImpl(
     if (OpIdx != 1)
       return nullptr;
     Register DstReg = MI.getOperand(0).getReg();
-    auto MIB = BuildMI(MBB, InsertPt, DL, get(F.ToOpc));
+    auto MIB = BuildMI(MBB, MI, DL, get(F.ToOpc));
     MIB.addDef(DstReg);
     addFrameMemOps(MIB, FrameIndex);
     MIB.addReg(DstReg); // tied src2
@@ -665,8 +665,8 @@ unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
   // lines and multiplies by MaxInstLength from MCAsmInfo.
   if (Opc == TargetOpcode::INLINEASM || Opc == TargetOpcode::INLINEASM_BR) {
     const MachineFunction *MF = MI.getParent()->getParent();
-    const auto *MAI = MF->getTarget().getMCAsmInfo();
-    return getInlineAsmLength(MI.getOperand(0).getSymbolName(), *MAI);
+    const MCAsmInfo &MAI = MF->getTarget().getMCAsmInfo();
+    return getInlineAsmLength(MI.getOperand(0).getSymbolName(), MAI);
   }
 
   // Pseudos that expand later.

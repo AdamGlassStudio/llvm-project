@@ -53,7 +53,7 @@ static MCSubtargetInfo *createVAXMCSubtargetInfo(const Triple &TT,
 static MCAsmInfo *createVAXMCAsmInfo(const MCRegisterInfo &MRI,
                                       const Triple &TT,
                                       const MCTargetOptions &Options) {
-  MCAsmInfo *MAI = new VAXMCAsmInfo(TT);
+  MCAsmInfo *MAI = new VAXMCAsmInfo(TT, Options);
   // Initial frame state: CFA = SP+0.
   // Use getDwarfRegNum to convert LLVM register enum to DWARF register number.
   unsigned DwarfSP = MRI.getDwarfRegNum(VAX::SP, true);

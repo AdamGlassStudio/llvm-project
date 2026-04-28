@@ -29,7 +29,7 @@ class VAXMCAsmInfo : public MCAsmInfoELF {
   void anchor() override;
 
 public:
-  explicit VAXMCAsmInfo(const Triple &TT);
+  explicit VAXMCAsmInfo(const Triple &TT, const MCTargetOptions &Options);
 
   const MCExpr *getExprForFDESymbol(const MCSymbol *Sym, unsigned Encoding,
                                     MCStreamer &Streamer) const override;
