@@ -270,8 +270,8 @@ class VAXAsmParser : public MCTargetAsmParser {
 
 public:
   VAXAsmParser(const MCSubtargetInfo &STI, MCAsmParser &P,
-               const MCInstrInfo &MII, const MCTargetOptions &Options)
-      : MCTargetAsmParser(Options, STI, MII), Parser(P) {
+               const MCInstrInfo &MII)
+      : MCTargetAsmParser(STI, MII), Parser(P) {
     MCAsmParserExtension::Initialize(P);
     setAvailableFeatures(ComputeAvailableFeatures(STI.getFeatureBits()));
   }

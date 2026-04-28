@@ -24,7 +24,8 @@ static const MCAsmInfo::AtSpecifier atSpecifiers[] = {
 
 void VAXMCAsmInfo::anchor() {}
 
-VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT) {
+VAXMCAsmInfo::VAXMCAsmInfo(const Triple &TT, const MCTargetOptions &Options)
+    : MCAsmInfoELF(Options) {
   // GAS syntax for NetBSD/vax:
   //   Registers: %r0-%r11, %ap, %fp, %sp, %pc
   //   Immediates: $5, $0 (dollar prefix)
