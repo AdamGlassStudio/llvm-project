@@ -128,11 +128,11 @@ void VAXAsmPrinter::emitFunctionBodyStart() {
   // Emit the 2-byte entry mask immediately after the function label.
   // The CALLS/CALLG instruction reads this word on every call to decide
   // which of R0–R11 to save; only callee-saved regs (R6–R11) should appear.
-  const MCRegisterInfo *MRI = TM.getMCRegisterInfo();
+  const MCRegisterInfo &MRI = TM.getMCRegisterInfo();
   const MachineFrameInfo &MFI = MF->getFrameInfo();
   uint16_t Mask = 0;
   for (const CalleeSavedInfo &CSI : MFI.getCalleeSavedInfo()) {
-    unsigned Enc = MRI->getEncodingValue(CSI.getReg());
+    unsigned Enc = MRI.getEncodingValue(CSI.getReg());
     if (Enc <= 11) // only R0–R11 appear in the entry mask
       Mask |= 1u << Enc;
   }

@@ -267,15 +267,15 @@ VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
     setOperationAction(ISD::CTTZ,       VT, Promote);
     setOperationAction(ISD::CTPOP,      VT, Promote);
     setOperationAction(ISD::BSWAP,      VT, Promote);
-    setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Promote);
-    setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Promote);
+    setOperationAction(ISD::CTLZ_ZERO_POISON, VT, Promote);
+    setOperationAction(ISD::CTTZ_ZERO_POISON, VT, Promote);
   }
   setOperationAction(ISD::CTLZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTTZ,       MVT::i32, Expand);
   setOperationAction(ISD::CTPOP,      MVT::i32, Expand);
   setOperationAction(ISD::BSWAP,      MVT::i32, Expand);
-  setOperationAction(ISD::CTLZ_ZERO_UNDEF, MVT::i32, Expand);
-  setOperationAction(ISD::CTTZ_ZERO_UNDEF, MVT::i32, Legal);
+  setOperationAction(ISD::CTLZ_ZERO_POISON, MVT::i32, Expand);
+  setOperationAction(ISD::CTTZ_ZERO_POISON, MVT::i32, Legal);
   // VAX has ROTL but not ROTR; expand ROTR to ROTL with negated shift.
   setOperationAction(ISD::ROTR,       MVT::i32, Expand);
 
