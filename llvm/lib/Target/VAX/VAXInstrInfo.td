@@ -1298,9 +1298,9 @@ def FFS_rm : InstVAX<0xEA, (outs GPRnoPC:$dst),
     "ffs\t$pos, $size, $base, $dst", []>,
     Sched<[WriteFFS]>;
 }
-def : Pat<(cttz_zero_undef i32:$src),
+def : Pat<(cttz_zero_poison i32:$src),
           (FFS_rr (i32 0), (i32 32), GPRnoPC:$src)>;
-def : Pat<(cttz_zero_undef (i32 (load VAXMemLong:$src))),
+def : Pat<(cttz_zero_poison (i32 (load VAXMemLong:$src))),
           (FFS_rm (i32 0), (i32 32), VAXMemOp:$src)>;
 
 //===----------------------------------------------------------------------===//
