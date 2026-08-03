@@ -28,7 +28,7 @@ static constexpr uint64_t MovcMaxSize = 65535;
 
 SDValue VAXSelectionDAGInfo::EmitTargetCodeForMemcpy(
     SelectionDAG &DAG, const SDLoc &DL, SDValue Chain, SDValue Dst,
-    SDValue Src, SDValue Size, Align Alignment, bool IsVolatile,
+    SDValue Src, SDValue Size, Align DstAlign, Align SrcAlign, bool IsVolatile,
     bool AlwaysInline, MachinePointerInfo DstPtrInfo,
     MachinePointerInfo SrcPtrInfo) const {
 

@@ -284,7 +284,7 @@ void VAXAsmPrinter::emitInstruction(const MachineInstr *MI) {
       break;
     case MachineOperand::MO_JumpTableIndex: {
       SmallString<64> Name;
-      raw_svector_ostream(Name) << MAI.getPrivateLabelPrefix()
+      raw_svector_ostream(Name) << MAI.getInternalSymbolPrefix()
                                 << "JTI" << getFunctionNumber()
                                 << '_' << MO.getIndex();
       const MCSymbol *Sym = OutContext.getOrCreateSymbol(Name);

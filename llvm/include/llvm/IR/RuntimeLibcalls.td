@@ -98,6 +98,7 @@ def IsOSWindowsOrUEFI : LibcallPredicate<[{TT.isOSWindowsOrUEFI()}]>;
 def IsMIPS : LibcallPredicate<[{TT.isMIPS()}]>;
 def IsLoongArch : LibcallPredicate<[{TT.isLoongArch()}]>;
 def IsVE : LibcallPredicate<[{TT.isVE()}]>;
+def IsVAX : LibcallPredicate<[{TT.getArch() == Triple::vax}]>;
 def IsBPF : LibcallPredicate<[{TT.isBPF()}]>;
 def IsArchCSKY : LibcallPredicate<[{TT.getArch() == Triple::csky}]>;
 def IsArchArc : LibcallPredicate<[{TT.getArch() == Triple::arc}]>;
@@ -2764,7 +2765,7 @@ def HexagonSystemLibrary
 // VAX Runtime Libcalls
 //===----------------------------------------------------------------------===//
 
-def isVAX : RuntimeLibcallPredicate<"TT.getArch() == Triple::vax">;
+def isVAX : RuntimeLibcallAvailability<(all_of IsVAX)>;
 
 def VAXSystemLibrary
     : SystemRuntimeLibrary<isVAX, (add DefaultRuntimeLibcallImpls)>;

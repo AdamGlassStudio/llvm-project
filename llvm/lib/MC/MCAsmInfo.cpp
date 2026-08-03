@@ -70,6 +70,9 @@ const MCExpr *MCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym,
 
   if (!(Encoding & dwarf::DW_EH_PE_pcrel))
     return Res;
+  if (DwarfFDERelSymbolAddend)
+    Res = MCBinaryExpr::createAdd(
+        Res, MCConstantExpr::create(DwarfFDERelSymbolAddend, Context), Context);
   if (DwarfFDERelSymbolSpec) {
     assert(Encoding & dwarf::DW_EH_PE_sdata4 && "Unexpected encoding");
     return MCSpecifierExpr::create(Res, DwarfFDERelSymbolSpec, Context);

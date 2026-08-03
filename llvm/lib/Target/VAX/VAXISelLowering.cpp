@@ -75,7 +75,7 @@ static bool CC_VAX_RetI64(unsigned ValNo, MVT ValVT, MVT LocVT,
   return true;
 }
 
-#define GET_CALLINGCONV_IMPL
+#define GET_CALLING_CONV_IMPL
 #include "VAXGenCallingConv.inc"
 
 VAXTargetLowering::VAXTargetLowering(const VAXTargetMachine &TM,
