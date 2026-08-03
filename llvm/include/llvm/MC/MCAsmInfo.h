@@ -374,6 +374,9 @@ protected:
   /// The optional specifier to use for the relative FDE symbol references.
   uint16_t DwarfFDERelSymbolSpec = 0;
 
+  /// The addend applied to relative FDE symbol references.
+  int64_t DwarfFDERelSymbolAddend = 0;
+
   /// True if DWARF `.file directory' directive syntax is used by
   /// default.
   bool EnableDwarfFileDirectoryDefault = true;
