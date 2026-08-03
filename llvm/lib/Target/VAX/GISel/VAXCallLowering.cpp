@@ -49,6 +49,7 @@ static bool CC_VAX_RetI64(unsigned ValNo, MVT ValVT, MVT LocVT,
   return true;
 }
 
+#define GET_CALLING_CONV_IMPL
 #include "VAXGenCallingConv.inc"
 
 VAXCallLowering::VAXCallLowering(const VAXTargetLowering &TLI)
@@ -193,7 +194,7 @@ struct VAXCallReturnHandler : public CallLowering::IncomingValueHandler {
     // has only a RegBank — constrain it to a RegClass so post-isel verification
     // succeeds even when ValVReg's only uses are other not-yet-selected MIs.
     MachineRegisterInfo &MRI = MIRBuilder.getMF().getRegInfo();
-    if (MRI.getRegClassOrRegBank(ValVReg).is<const RegisterBank *>())
+    if (isa<const RegisterBank *>(MRI.getRegClassOrRegBank(ValVReg)))
       MRI.setRegClass(ValVReg, &VAX::GPRIRegClass);
   }
 };
