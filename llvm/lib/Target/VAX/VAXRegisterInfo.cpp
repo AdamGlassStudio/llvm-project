@@ -47,11 +47,6 @@ BitVector VAXRegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   return Reserved;
 }
 
-const TargetRegisterClass *
-VAXRegisterInfo::getPointerRegClass(unsigned Kind) const {
-  return &VAX::GPRRegClass;
-}
-
 bool VAXRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                           int SPAdj, unsigned FIOperandNum,
                                           RegScavenger *RS) const {

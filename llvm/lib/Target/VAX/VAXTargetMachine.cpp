@@ -79,20 +79,6 @@ const MCExpr *VAXELFTargetObjectFile::getTTypeGlobalReference(
                                  getContext());
 }
 
-// VAX data layout (little-endian, ELF, 32-bit pointers):
-//   e        - little-endian
-//   m:e      - ELF name mangling
-//   p:32:32  - 32-bit pointers, 32-bit aligned
-//   i1:8:32  - i1: 8-bit storage, 32-bit preferred align
-//   i8:8:32  - i8: 8-bit storage, 32-bit preferred align
-//   i16:16:32- i16: 16-bit storage, 32-bit preferred align
-//   i64:32   - i64: 32-bit aligned (VAX has no 64-bit alignment requirement)
-//   f64:32   - D_float: 32-bit aligned
-//   a:0:32   - aggregates: 32-bit preferred align
-//   n32      - native integer width: 32 bits
-static const char *VAXDataLayout =
-    "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-a:0:32-n32-nif";
-
 static Reloc::Model getEffectiveRelocModel(std::optional<Reloc::Model> RM) {
   // VAX ELF always defaults to PIC, matching GCC's forced -fPIC for this
   // target (gcc/config/vax/elf.h VAX_CC1_AND_CC1PLUS_SPEC).
@@ -123,7 +109,7 @@ VAXTargetMachine::VAXTargetMachine(const Target &T, const Triple &TT,
                                    std::optional<Reloc::Model> RM,
                                    std::optional<CodeModel::Model> CM,
                                    CodeGenOptLevel OL, bool JIT)
-    : CodeGenTargetMachineImpl(T, VAXDataLayout, TT, CPU, FS, Options,
+    : CodeGenTargetMachineImpl(T, TT, CPU, FS, Options,
                                getEffectiveRelocModel(RM),
                                getVAXEffectiveCodeModel(CM), OL),
       TLOF(std::make_unique<VAXELFTargetObjectFile>()),

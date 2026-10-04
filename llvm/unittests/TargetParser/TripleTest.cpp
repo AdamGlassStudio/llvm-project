@@ -3995,6 +3995,14 @@ TEST(DataLayoutTest, UEFI) {
   EXPECT_THAT(TT.computeDataLayout(), testing::HasSubstr("-m:w-"));
 }
 
+TEST(DataLayoutTest, VAX) {
+  Triple TT = Triple("vax-unknown-netbsdelf");
+
+  EXPECT_EQ("e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32-f64:32-"
+            "a:0:32-n32-nif",
+            TT.computeDataLayout());
+}
+
 TEST(TripleTest, WindowsOrUEFI) {
   EXPECT_TRUE(Triple("x86_64-pc-windows-msvc").isOSWindowsOrUEFI());
   EXPECT_TRUE(Triple("x86_64-w64-windows-gnu").isOSWindowsOrUEFI());

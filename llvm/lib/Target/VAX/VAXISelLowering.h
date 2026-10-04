@@ -130,8 +130,12 @@ private:
   EmitSELECT_CC_I64(MachineInstr &MI,
                      MachineBasicBlock *BB) const;
 
-  Register getExceptionPointerRegister(const Constant *PersonalityFn) const override;
-  Register getExceptionSelectorRegister(const Constant *PersonalityFn) const override;
+  Register
+  getExceptionPointerRegister(ExceptionHandling EH,
+                              const Constant *PersonalityFn) const override;
+  Register
+  getExceptionSelectorRegister(ExceptionHandling EH,
+                               const Constant *PersonalityFn) const override;
 
   unsigned getJumpTableEncoding() const override;
 

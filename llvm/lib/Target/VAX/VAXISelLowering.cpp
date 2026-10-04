@@ -1035,14 +1035,14 @@ SDValue VAXTargetLowering::LowerEH_RETURN(SDValue Op,
 
 Register
 VAXTargetLowering::getExceptionPointerRegister(
-    const Constant *PersonalityFn) const {
+    ExceptionHandling, const Constant *PersonalityFn) const {
   // GCC VAX uses R2 (EH_RETURN_DATA_REGNO(0)).
   return VAX::R2;
 }
 
 Register
 VAXTargetLowering::getExceptionSelectorRegister(
-    const Constant *PersonalityFn) const {
+    ExceptionHandling, const Constant *PersonalityFn) const {
   // GCC VAX uses R3 (EH_RETURN_DATA_REGNO(1)).
   return VAX::R3;
 }
