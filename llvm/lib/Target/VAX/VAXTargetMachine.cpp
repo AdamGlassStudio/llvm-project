@@ -212,7 +212,7 @@ std::unique_ptr<CSEConfigBase> VAXPassConfig::getCSEConfig() const {
 }
 
 bool VAXPassConfig::addIRTranslator() {
-  addPass(new IRTranslator(getOptLevel()));
+  addPass(new IRTranslatorLegacy(getOptLevel()));
   return false;
 }
 
@@ -221,17 +221,17 @@ void VAXPassConfig::addPreLegalizeMachineIR() {
 }
 
 bool VAXPassConfig::addLegalizeMachineIR() {
-  addPass(new Legalizer());
+  addPass(new LegalizerLegacy());
   return false;
 }
 
 bool VAXPassConfig::addRegBankSelect() {
-  addPass(new RegBankSelect());
+  addPass(new RegBankSelectLegacy());
   return false;
 }
 
 bool VAXPassConfig::addGlobalInstructionSelect() {
-  addPass(new InstructionSelect(getOptLevel()));
+  addPass(new InstructionSelectLegacy(getOptLevel()));
   return false;
 }
 
