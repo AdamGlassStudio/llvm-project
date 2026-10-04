@@ -691,10 +691,17 @@ unsigned VAXInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
     unsigned LimitSize = estimateMemOpSize(MI, 0);
     return 1 + LimitSize + 1 + 1;
   }
-  // CASEL pseudo expands to: casel instr (4B) + (limit+1)*2B table + brw (3B).
+  // These peephole instructions encode an implicit -(%sp) destination.
+  case VAX::ASHL_iip:
+    return 1 + estimateOperandSize(MI, 0) + estimateOperandSize(MI, 1) + 1;
+  case VAX::MNEGL_ip:
+    return 1 + estimateOperandSize(MI, 0) + 1;
+  // CASEL pseudo expands to the instruction, (limit+1)*2B table, and BRW (3B).
   case VAX::CASEL: {
     unsigned Limit = MI.getOperand(1).getImm();
-    return 4 + (Limit + 1) * 2 + 3;
+    unsigned LimitSize = Limit <= 63 ? 1 : 5;
+    unsigned InstrSize = 1 + 1 + 1 + LimitSize;
+    return InstrSize + (Limit + 1) * 2 + 3;
   }
   // Stack adjustment pseudos expand to nothing (frame setup).
   case VAX::ADJCALLSTACKDOWN:
